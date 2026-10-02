@@ -20,7 +20,7 @@ PRODUCTS = {
 
 
 def test_product_v2_workflows_are_isolated_and_task_generic() -> None:
-    for _project, config in PRODUCTS.items():
+    for project, config in PRODUCTS.items():
         text = Path(config["workflow"]).read_text(encoding="utf-8")
         assert f"name: {project} Dispatcher v2" in text
         assert f"[PRODUCT-WAKE][DISPATCHER-V2] {project} " in text
@@ -36,7 +36,7 @@ def test_product_v2_workflows_are_isolated_and_task_generic() -> None:
 
 def test_product_v2_workflows_do_not_cross_use_write_tokens() -> None:
     all_tokens = {value["secret"] for value in PRODUCTS.values()} | {"CLASSMO_WRITE_TOKEN"}
-    for project, config in PRODUCTS.items():
+    for _project, config in PRODUCTS.items():
         text = Path(config["workflow"]).read_text(encoding="utf-8")
         assert config["secret"] in text
         for token in all_tokens - {config["secret"]}:
