@@ -1,13 +1,15 @@
 import json
+import subprocess
 from pathlib import Path
 
 import pytest
 
 from wonjae_dispatcher_runner.product_patch import (
+    ProductEdit,
     ProductPilotError,
+    apply_edit_plan,
     load_work_order,
-    patch_paths,
-    validate_patch_scope,
+    parse_edit_plan,
 )
 
 SHA = "03841079f616a8312e9b6c273a788585fa1a7b01"
@@ -25,52 +27,142 @@ def work_order_payload() -> dict[str, object]:
         "integration_authorized": True,
         "validation_workflow_path": ".github/workflows/classmo-cloud-validation.yml",
         "required_reads": ["AGENTS.md"],
-        "allowed_paths": ["apps/mobile/src/components/member-shell.tsx"],
+        "allowed_paths": [
+            "apps/mobile/src/components/member-shell.tsx",
+            "apps/mobile/src/presentation/member-home.ts",
+        ],
         "scope": ["Implement the bounded source slice."],
         "exclusions": ["No runtime mutation."],
         "completion_conditions": ["Exact-head validation passes."],
     }
 
 
-def test_load_work_order(tmp_path: Path) -> None:
+def write_work_order(tmp_path: Path):
     path = tmp_path / "work-order.json"
     path.write_text(json.dumps(work_order_payload()), encoding="utf-8")
-    order = load_work_order(path)
+    return load_work_order(path)
+
+
+def init_repo(path: Path) -> None:
+    subprocess.run(["git", "init", "-q", str(path)], check=True)
+    subprocess.run(["git", "-C", str(path), "config", "user.name", "Test"], check=True)
+    subprocess.run(
+        ["git", "-C", str(path), "config", "user.email", "test@example.invalid"],
+        check=True,
+    )
+
+
+def test_load_work_order(tmp_path: Path) -> None:
+    order = write_work_order(tmp_path)
     assert order.task_id == "CLASSMO-V2-MEMBER-HOME-001"
     assert order.source_base_sha == SHA
     assert order.integration_authorized is True
 
 
-def test_patch_paths_accepts_normal_unified_diff() -> None:
-    patch = (
-        "diff --git a/apps/mobile/src/components/member-shell.tsx "
-        "b/apps/mobile/src/components/member-shell.tsx\n"
-        "--- a/apps/mobile/src/components/member-shell.tsx\n"
-        "+++ b/apps/mobile/src/components/member-shell.tsx\n"
-        "@@ -1 +1 @@\n-old\n+new\n"
+def test_parse_edit_plan_accepts_bounded_replace(tmp_path: Path) -> None:
+    order = write_work_order(tmp_path)
+    response = json.dumps(
+        {
+            "edits": [
+                {
+                    "path": "apps/mobile/src/components/member-shell.tsx",
+                    "operation": "replace",
+                    "old_text": "old",
+                    "new_text": "new",
+                }
+            ],
+            "summary": "Update Member Home.",
+        }
     )
-    assert patch_paths(patch) == ("apps/mobile/src/components/member-shell.tsx",)
+    edits = parse_edit_plan(response, order)
+    assert edits == (
+        ProductEdit(
+            path="apps/mobile/src/components/member-shell.tsx",
+            operation="replace",
+            old_text="old",
+            new_text="new",
+        ),
+    )
 
 
-def test_patch_paths_rejects_rename() -> None:
-    patch = (
-        "diff --git a/a.ts b/a.ts\n"
-        "rename from a.ts\n"
-        "rename to b.ts\n"
+def test_parse_edit_plan_rejects_empty_edits(tmp_path: Path) -> None:
+    order = write_work_order(tmp_path)
+    with pytest.raises(ProductPilotError):
+        parse_edit_plan(json.dumps({"edits": [], "summary": "Nothing"}), order)
+
+
+def test_parse_edit_plan_rejects_extra_path(tmp_path: Path) -> None:
+    order = write_work_order(tmp_path)
+    response = json.dumps(
+        {
+            "edits": [
+                {
+                    "path": "package-lock.json",
+                    "operation": "replace",
+                    "old_text": "old",
+                    "new_text": "new",
+                }
+            ],
+            "summary": "Unsafe.",
+        }
     )
     with pytest.raises(ProductPilotError):
-        patch_paths(patch)
+        parse_edit_plan(response, order)
 
 
-def test_validate_patch_scope_rejects_extra_path(tmp_path: Path) -> None:
-    path = tmp_path / "work-order.json"
-    path.write_text(json.dumps(work_order_payload()), encoding="utf-8")
-    order = load_work_order(path)
-    patch = (
-        "diff --git a/package-lock.json b/package-lock.json\n"
-        "--- a/package-lock.json\n"
-        "+++ b/package-lock.json\n"
-        "@@ -1 +1 @@\n-old\n+new\n"
+def test_apply_edit_plan_writes_replace_and_create(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    init_repo(repo)
+    existing = repo / "apps/mobile/src/components/member-shell.tsx"
+    existing.parent.mkdir(parents=True)
+    existing.write_text("before\nunique target\nafter\n", encoding="utf-8")
+    (repo / "AGENTS.md").write_text("rules\n", encoding="utf-8")
+    subprocess.run(["git", "-C", str(repo), "add", "."], check=True)
+    subprocess.run(["git", "-C", str(repo), "commit", "-qm", "base"], check=True)
+
+    order = write_work_order(tmp_path)
+    edits = (
+        ProductEdit(
+            path="apps/mobile/src/components/member-shell.tsx",
+            operation="replace",
+            old_text="unique target",
+            new_text="updated target",
+        ),
+        ProductEdit(
+            path="apps/mobile/src/presentation/member-home.ts",
+            operation="create",
+            old_text="",
+            new_text="export const memberHome = true;\n",
+        ),
+    )
+    changed = apply_edit_plan(repo, edits, order)
+    assert set(changed) == {
+        "apps/mobile/src/components/member-shell.tsx",
+        "apps/mobile/src/presentation/member-home.ts",
+    }
+    assert "updated target" in existing.read_text(encoding="utf-8")
+
+
+def test_apply_edit_plan_requires_unique_old_text(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    init_repo(repo)
+    existing = repo / "apps/mobile/src/components/member-shell.tsx"
+    existing.parent.mkdir(parents=True)
+    existing.write_text("same\nsame\n", encoding="utf-8")
+    (repo / "AGENTS.md").write_text("rules\n", encoding="utf-8")
+    subprocess.run(["git", "-C", str(repo), "add", "."], check=True)
+    subprocess.run(["git", "-C", str(repo), "commit", "-qm", "base"], check=True)
+
+    order = write_work_order(tmp_path)
+    edits = (
+        ProductEdit(
+            path="apps/mobile/src/components/member-shell.tsx",
+            operation="replace",
+            old_text="same",
+            new_text="different",
+        ),
     )
     with pytest.raises(ProductPilotError):
-        validate_patch_scope(patch, order)
+        apply_edit_plan(repo, edits, order)
