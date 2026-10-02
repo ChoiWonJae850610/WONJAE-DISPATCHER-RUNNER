@@ -89,15 +89,24 @@ def run_codex_write_pilot(repo_path: Path, expected_sha: str, codex_home: Path) 
             "CODEX_APP_SERVER_DISABLE_MANAGED_CONFIG": "1",
         },
     )
+    developer_instructions = (
+        "The repository Owner explicitly authorized this bounded DEV-CONTROL "
+        "documentation-only pilot in the current task. This satisfies AGENTS.md rule 5 "
+        "for the single allowed control-plane edit. The authorization is limited to "
+        f"creating exactly {ALLOWED_PATH.as_posix()} and does not authorize any product "
+        "TASK, product repository, deployment, release, credential, runtime, KDN, "
+        "or external-system mutation. You must perform the allowed file edit rather "
+        "than only describe it."
+    )
     prompt = (
-        "This is an Owner-authorized documentation-only write pilot. "
-        "First read AGENTS.md, PROJECT_RULES.md, and "
-        "docs/pilots/DISPATCHER_V2_CODEX_CLOUD_001.md. "
-        f"Then create exactly one new file: {ALLOWED_PATH.as_posix()}. "
+        "Read AGENTS.md, PROJECT_RULES.md, and "
+        "docs/pilots/DISPATCHER_V2_CODEX_CLOUD_001.md first. "
+        "Then perform the authorized edit now: create exactly one new file, "
+        f"{ALLOWED_PATH.as_posix()}, using the workspace write capability. "
         "Do not modify any other file. Do not create any product TASK. "
         "Do not commit, push, create a PR, deploy, release, change credentials, "
-        "or use external systems. Write the new file with exactly the following "
-        "UTF-8 Markdown content, including line breaks:\n\n"
+        "or use external systems. The new file must contain exactly the following "
+        "UTF-8 Markdown, including line breaks:\n\n"
         f"{target_content}"
     )
 
@@ -109,6 +118,7 @@ def run_codex_write_pilot(repo_path: Path, expected_sha: str, codex_home: Path) 
         thread = codex.thread_start(
             approval_mode=ApprovalMode.deny_all,
             cwd=str(repo_path),
+            developer_instructions=developer_instructions,
             ephemeral=True,
             sandbox=Sandbox.workspace_write,
             config={
