@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from scripts.provider_action import check_ota, prepare
+from scripts.provider_action import prepare
 
 
 def _record(project: str = "CLASSMO") -> dict:
