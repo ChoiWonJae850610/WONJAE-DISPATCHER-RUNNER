@@ -127,6 +127,14 @@ jobs:
         if: env.PROVIDER_ACTION == 'eas_workflow_update'
         run: npm install --global "eas-cli@$EAS_CLI_VERSION"
 
+      - name: EAS · install app dependencies for config resolution
+        if: env.PROVIDER_ACTION == 'eas_workflow_update'
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$GITHUB_WORKSPACE/.provider/product/$PROVIDER_WORKING_DIRECTORY"
+          npm ci --ignore-scripts --no-audit --no-fund
+
       - name: EAS · read workflow status
         if: env.PROVIDER_ACTION == 'eas_workflow_update'
         env:
