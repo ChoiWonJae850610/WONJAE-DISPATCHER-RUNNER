@@ -181,7 +181,7 @@ def parse_edit_plan(response: str, work_order: ProductWorkOrder) -> tuple[Produc
         elif not old_text:
             raise ProductPilotError("replace edits require a non-empty old_text")
         if operation == "replace" and old_text == new_text:
-            raise ProductPilotError("replace edit was a no-op")
+            continue
 
         parsed.append(
             ProductEdit(
@@ -192,6 +192,8 @@ def parse_edit_plan(response: str, work_order: ProductWorkOrder) -> tuple[Produc
             )
         )
 
+    if not parsed:
+        raise ProductPilotError("Codex edit plan contained no effective edits")
     return tuple(parsed)
 
 
