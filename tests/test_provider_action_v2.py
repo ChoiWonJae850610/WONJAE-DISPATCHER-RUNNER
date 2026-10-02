@@ -271,3 +271,12 @@ def test_direct_eas_update_splits_group_and_platform_readback_across_steps() -> 
     update_index = text.index("EAS · read back direct platform update")
     assert group_index < update_index
     assert 'test -n "${EAS_UPDATE_GROUP_ID:-}"' in text[update_index:]
+
+
+def test_direct_eas_update_installs_app_dependencies_before_publish() -> None:
+    text = Path(".github/workflows/provider-action-core.yml").read_text(encoding="utf-8")
+    deps_index = text.index("EAS · install app dependencies for direct update")
+    update_index = text.index("EAS · run direct compatible update")
+    assert deps_index < update_index
+    section = text[deps_index:update_index]
+    assert "npm ci --ignore-scripts --no-audit --no-fund" in section
