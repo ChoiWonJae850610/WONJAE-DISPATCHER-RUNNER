@@ -12,10 +12,11 @@ The first acceptance path is deliberately read-only:
 2. A private control repository is checked out with a separately scoped read token.
 3. A protected Codex ChatGPT session is restored into an ephemeral `CODEX_HOME`.
 4. Codex runs with `Sandbox.read_only` and `ApprovalMode.deny_all`.
-5. The runner asks Codex to inspect the checkout and report the exact HEAD SHA.
-6. The runner independently computes `git rev-parse HEAD` and requires an exact match.
-7. If Codex refreshes its session, the resulting `auth.json` is written back to the protected Actions secret.
-8. The ephemeral credential files are deleted from the runner.
+5. The runner independently proves the exact Git HEAD and a clean worktree before the Codex turn.
+6. Codex completes an authenticated read-only turn against that exact checkout.
+7. The runner independently proves the same Git HEAD and unchanged clean worktree after the turn; model prose is not repository-state evidence.
+8. If Codex refreshes its session, the resulting `auth.json` is written back to the protected Actions secret.
+9. The ephemeral credential files are deleted from the runner.
 
 No product TASK, branch, PR, deployment, release, or physical validation is part of this pilot.
 
@@ -45,7 +46,7 @@ The job prints only the OpenAI verification URL and short-lived device code. Ope
 
 ## Read-only pilot
 
-After bootstrap, run **Codex Read-only Pilot**. It checks out the configured control repository and requires Codex's reported SHA to equal the actual checked-out SHA.
+After bootstrap, run **Codex Read-only Pilot**. It checks out the configured control repository at an exact SHA, completes one authenticated Codex turn with `Sandbox.read_only` and `ApprovalMode.deny_all`, and independently verifies that Git HEAD and the clean worktree are unchanged before and after the turn.
 
 The workflow does not use `pull_request_target`, and pull-request validation receives no private secrets.
 
