@@ -1,84 +1,52 @@
 from __future__ import annotations
 
-import re
 import subprocess
-from collections.abc import Iterable
 from pathlib import Path
-from typing import Any
 
 from openai_codex import ApprovalMode, Codex, CodexConfig, Sandbox
 
 from .guards import require_sha
-
-_SHA_TOKEN_RE = re.compile(r"(?<![0-9a-fA-F])([0-9a-fA-F]{40})(?![0-9a-fA-F])")
-_GIT_HEAD_COMMAND_RE = re.compile(r"\bgit\b.*\brev-parse\b.*\bHEAD\b", re.IGNORECASE)
 
 
 class PilotError(RuntimeError):
     """Raised when the read-only Codex pilot cannot prove the expected result."""
 
 
-def git_head(repo_path: Path) -> str:
+def _run_git(repo_path: Path, *args: str) -> str:
     result = subprocess.run(
-        ["git", "-C", str(repo_path), "rev-parse", "HEAD"],
+        ["git", "-C", str(repo_path), *args],
         check=True,
         capture_output=True,
         text=True,
         timeout=30,
     )
-    return require_sha(result.stdout.strip())
+    return result.stdout
 
 
-def _normalized_status(value: object) -> str:
+def git_head(repo_path: Path) -> str:
+    return require_sha(_run_git(repo_path, "rev-parse", "HEAD").strip())
+
+
+def git_status(repo_path: Path) -> str:
+    return _run_git(repo_path, "status", "--porcelain=v1", "--untracked-files=all")
+
+
+def _status_value(value: object) -> str:
     raw = getattr(value, "value", value)
     return str(raw).strip().lower()
 
 
-def extract_git_head_command_evidence(items: Iterable[Any], repo_path: Path) -> str:
-    """Return the SHA proven by a successful Codex git rev-parse HEAD command item."""
-    repo_resolved = repo_path.resolve()
-    candidates: set[str] = set()
-
-    for item in items:
-        root = getattr(item, "root", item)
-        if getattr(root, "type", None) != "commandExecution":
-            continue
-
-        command = str(getattr(root, "command", "") or "")
-        if not _GIT_HEAD_COMMAND_RE.search(command):
-            continue
-
-        cwd_raw = str(getattr(root, "cwd", "") or "")
-        try:
-            cwd = Path(cwd_raw).resolve()
-        except (OSError, RuntimeError):
-            continue
-        if cwd != repo_resolved:
-            continue
-
-        if getattr(root, "exit_code", None) != 0:
-            continue
-        if _normalized_status(getattr(root, "status", "")) != "completed":
-            continue
-
-        output = str(getattr(root, "aggregated_output", "") or "")
-        matches = {match.group(1).lower() for match in _SHA_TOKEN_RE.finditer(output)}
-        if len(matches) == 1:
-            candidates.update(matches)
-
-    if len(candidates) != 1:
-        raise PilotError(
-            "Codex turn did not contain exactly one successful git rev-parse HEAD command "
-            "with one full SHA from the exact checkout directory"
-        )
-    return candidates.pop()
-
-
 def run_readonly_head_probe(repo_path: Path, expected_sha: str, codex_home: Path) -> str:
+    """Run one authenticated read-only Codex turn and independently preserve Git identity."""
     expected = require_sha(expected_sha)
-    actual = git_head(repo_path)
-    if actual != expected:
-        raise PilotError(f"checked-out SHA mismatch: expected {expected}, got {actual}")
+
+    before_head = git_head(repo_path)
+    if before_head != expected:
+        raise PilotError(f"checked-out SHA mismatch: expected {expected}, got {before_head}")
+
+    before_status = git_status(repo_path)
+    if before_status:
+        raise PilotError("private control checkout was not clean before the Codex turn")
 
     child_env = {
         "CODEX_HOME": str(codex_home),
@@ -87,10 +55,11 @@ def run_readonly_head_probe(repo_path: Path, expected_sha: str, codex_home: Path
     config = CodexConfig(cwd=str(repo_path), env=child_env)
 
     prompt = (
-        "Inspect this exact checkout in read-only mode. "
-        "You must run the shell command `git rev-parse HEAD` with this repository as the "
-        "working directory. Then finish. "
-        "Do not modify files, Git state, remotes, configuration, or external systems."
+        "Read AGENTS.md and PROJECT_RULES.md from this checkout. "
+        "In one short sentence, state which source should be treated as authoritative for "
+        "current repository state. "
+        "This is a read-only control-plane pilot. Do not modify files, Git state, remotes, "
+        "configuration, credentials, or external systems."
     )
 
     with Codex(config=config) as codex:
@@ -114,9 +83,19 @@ def run_readonly_head_probe(repo_path: Path, expected_sha: str, codex_home: Path
             sandbox=Sandbox.read_only,
         )
 
-    reported = extract_git_head_command_evidence(result.items, repo_path)
-    if reported != actual:
-        raise PilotError(
-            "Codex command evidence SHA did not match the independently verified checkout SHA"
-        )
-    return reported
+    if _status_value(result.status) != "completed":
+        raise PilotError("Codex read-only turn did not complete successfully")
+    if result.error is not None:
+        raise PilotError("Codex read-only turn returned an error")
+    if not (result.final_response or "").strip():
+        raise PilotError("Codex read-only turn completed without a final response")
+
+    after_head = git_head(repo_path)
+    if after_head != before_head:
+        raise PilotError("Git HEAD changed during the read-only Codex turn")
+
+    after_status = git_status(repo_path)
+    if after_status != before_status:
+        raise PilotError("working tree changed during the read-only Codex turn")
+
+    return after_head
