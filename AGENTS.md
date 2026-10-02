@@ -14,5 +14,5 @@
 12. Product code generation uses read-only Codex inspection plus a structured unified-diff handoff. The trusted runner must validate every patch path against the private work order before applying it, establish Draft-PR STARTED before validation, and bind PR-head and integrated validation to exact Git SHAs. Model prose and patch intent are not evidence by themselves.
 
 
-13. CLASSMO Dispatcher v2 wake identity is task-generic but must remain owner-authored and exact-SHA bound. The public runner may derive only the private control-record path `tasks-v2/CLASSMO/<TASK-ID>.json`; private scope and authority remain in that record, not in public workflow code.
-14. Before a CLASSMO v2 write run, reject any other open CLASSMO `job/` pull request targeting the active development branch. One source-writing task per product remains mandatory.
+13. Dispatcher v2 wake identity is product- and task-generic but must remain owner-authored and exact-SHA bound. Each product workflow may derive only its own private control-record path `tasks-v2/<PROJECT>/<TASK-ID>.json`; private scope and authority remain in that record, not in public workflow code.
+14. Before any product v2 write run, reject another open same-product `job/` pull request targeting that product's active development branch. One source-writing task per product remains mandatory; different products may run independently and concurrently.

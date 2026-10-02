@@ -1,0 +1,364 @@
+name: ESC Dispatcher v2
+
+on:
+  issues:
+    types:
+      - opened
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  esc-product:
+    if: >-
+      github.actor == github.repository_owner &&
+      github.event.issue.user.login == github.repository_owner &&
+      startsWith(
+        github.event.issue.title,
+        '[PRODUCT-WAKE][DISPATCHER-V2] ESC '
+      )
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      CONTROL_REPOSITORY: ${{ vars.CONTROL_REPOSITORY }}
+      WAKE_TITLE: ${{ github.event.issue.title }}
+      ISSUE_NUMBER: ${{ github.event.issue.number }}
+      PYTHONUNBUFFERED: "1"
+
+    steps:
+      - name: "[00] Security · protected configuration"
+        env:
+          CODEX_AUTH_JSON: ${{ secrets.CODEX_AUTH_JSON }}
+          CONTROL_READ_TOKEN: ${{ secrets.CONTROL_READ_TOKEN }}
+          ESC_WRITE_TOKEN: ${{ secrets.ESC_WRITE_TOKEN }}
+          SECRET_ROTATION_TOKEN: ${{ secrets.SECRET_ROTATION_TOKEN }}
+        run: |
+          test -n "$CONTROL_REPOSITORY" || { echo "::error::CONTROL_REPOSITORY is missing."; exit 1; }
+          test -n "$CODEX_AUTH_JSON" || { echo "::error::CODEX_AUTH_JSON is missing."; exit 1; }
+          test -n "$CONTROL_READ_TOKEN" || { echo "::error::CONTROL_READ_TOKEN is missing."; exit 1; }
+          test -n "$ESC_WRITE_TOKEN" || { echo "::error::ESC_WRITE_TOKEN is missing."; exit 1; }
+          test -n "$SECRET_ROTATION_TOKEN" || { echo "::error::SECRET_ROTATION_TOKEN is missing."; exit 1; }
+
+      - name: "[01] WAKE · parse trusted identity"
+        run: |
+          python - <<'PY'
+          import os
+          import re
+
+          title = os.environ["WAKE_TITLE"]
+          match = re.fullmatch(
+              r"\[PRODUCT-WAKE\]\[DISPATCHER-V2\] ESC "
+              r"(ESC-[A-Z0-9][A-Z0-9-]*-[0-9]{3}) "
+              r"([0-9a-f]{40}) ([0-9a-f]{40})",
+              title,
+          )
+          if match is None:
+              raise SystemExit("invalid ESC Dispatcher v2 wake title")
+          task_id, control_sha, source_sha = match.groups()
+          work_order_relative = f"tasks-v2/ESC/{task_id}.json"
+          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as handle:
+              handle.write(f"TASK_ID={task_id}\n")
+              handle.write(f"CONTROL_SHA={control_sha}\n")
+              handle.write(f"SOURCE_SHA={source_sha}\n")
+              handle.write(f"WORK_ORDER_RELATIVE={work_order_relative}\n")
+          PY
+
+      - name: "[01] Runner · trusted code"
+        uses: actions/checkout@v6
+        with:
+          ref: main
+          persist-credentials: false
+
+      - name: "[01] WAKE · progress"
+        run: python scripts/actions_progress.py WAKE PASS
+
+      - name: "[02] Runner · ephemeral paths"
+        run: |
+          echo "CODEX_HOME=$RUNNER_TEMP/codex-home" >> "$GITHUB_ENV"
+          echo "CONTROL_CHECKOUT=$GITHUB_WORKSPACE/.pilot/control" >> "$GITHUB_ENV"
+          echo "PRODUCT_CHECKOUT=$GITHUB_WORKSPACE/.pilot/product" >> "$GITHUB_ENV"
+          echo "WORK_ORDER_FILE=$GITHUB_WORKSPACE/.pilot/control/$WORK_ORDER_RELATIVE" >> "$GITHUB_ENV"
+
+      - name: "[02] CONTROL · checkout exact work order"
+        uses: actions/checkout@v6
+        with:
+          repository: ${{ vars.CONTROL_REPOSITORY }}
+          ref: ${{ env.CONTROL_SHA }}
+          path: .pilot/control
+          token: ${{ secrets.CONTROL_READ_TOKEN }}
+          persist-credentials: false
+
+      - name: "[02] CONTROL · validate private work order"
+        run: |
+          actual="$(git -C "$CONTROL_CHECKOUT" rev-parse HEAD)"
+          test "$actual" = "$CONTROL_SHA" || { echo "::error::Control SHA mismatch."; exit 1; }
+          test -f "$WORK_ORDER_FILE" || { echo "::error::Private work order is missing."; exit 1; }
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          work = json.loads(Path(os.environ["WORK_ORDER_FILE"]).read_text(encoding="utf-8"))
+          required = {
+              "task_id": os.environ["TASK_ID"],
+              "project": "ESC",
+              "repository": "ChoiWonJae850610/ESC",
+              "target_branch": "cloud-dev-v1",
+              "source_base_sha": os.environ["SOURCE_SHA"],
+          }
+          for key, expected in required.items():
+              if work.get(key) != expected:
+                  raise SystemExit(f"private work order {key} mismatch")
+          if work.get("integration_authorized") is not True:
+              raise SystemExit("integration is not authorized by the private work order")
+          attempt = work.get("attempt")
+          revision = work.get("revision")
+          profile = work.get("profile")
+          if not isinstance(attempt, int) or attempt < 1:
+              raise SystemExit("private work order attempt must be a positive integer")
+          if not isinstance(revision, int) or revision < 1:
+              raise SystemExit("private work order revision must be a positive integer")
+          if not isinstance(profile, str) or not profile.strip():
+              raise SystemExit("private work order profile is missing")
+          values = {
+              "PRODUCT_REPOSITORY": work["repository"],
+              "TARGET_BRANCH": work["target_branch"],
+              "PRODUCT_BRANCH": "job/" + work["task_id"],
+              "PRODUCT_PR_TITLE": f"[{work['task_id']}] {work['title']}",
+              "VALIDATION_WORKFLOW_FILE": Path(work["validation_workflow_path"]).name,
+              "ATTEMPT": str(attempt),
+              "REVISION": str(revision),
+              "PROFILE": profile.strip(),
+              "CONTROL_RECORD_PATH": os.environ["WORK_ORDER_RELATIVE"],
+          }
+          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as handle:
+              for key, value in values.items():
+                  if "\n" in value:
+                      raise SystemExit("unsafe work-order value")
+                  handle.write(f"{key}={value}\n")
+          PY
+          python scripts/actions_progress.py CONTROL PASS --sha "$CONTROL_SHA"
+
+      - name: "[03] PRODUCT · checkout exact source"
+        uses: actions/checkout@v6
+        with:
+          repository: ${{ env.PRODUCT_REPOSITORY }}
+          ref: ${{ env.SOURCE_SHA }}
+          path: .pilot/product
+          token: ${{ secrets.ESC_WRITE_TOKEN }}
+          persist-credentials: false
+
+      - name: "[03] PRODUCT · verify branch and source identity"
+        env:
+          GH_TOKEN: ${{ secrets.ESC_WRITE_TOKEN }}
+        run: |
+          actual="$(git -C "$PRODUCT_CHECKOUT" rev-parse HEAD)"
+          test "$actual" = "$SOURCE_SHA" || { echo "::error::Product checkout mismatch."; exit 1; }
+          test -z "$(git -C "$PRODUCT_CHECKOUT" status --porcelain=v1 --untracked-files=all)" || {
+            echo "::error::Product checkout is not clean."
+            exit 1
+          }
+          remote_sha="$(gh api "repos/$PRODUCT_REPOSITORY/branches/$TARGET_BRANCH" --jq .commit.sha)"
+          test "$remote_sha" = "$SOURCE_SHA" || {
+            echo "::error::Target branch advanced after work-order creation."
+            exit 1
+          }
+          conflict_prs="$(gh pr list --repo "$PRODUCT_REPOSITORY" --state open --base "$TARGET_BRANCH" --json number,headRefName --jq '.[] | select(.headRefName | startswith("job/")) | "\(.number) \(.headRefName)"')"
+          if [ -n "$conflict_prs" ]; then
+            echo "::error::Another ESC job pull request is already open."
+            echo "$conflict_prs"
+            exit 1
+          fi
+          git -C "$PRODUCT_CHECKOUT" checkout -b "$PRODUCT_BRANCH"
+          git -C "$PRODUCT_CHECKOUT" config user.name "WONJAE Dispatcher Runner"
+          git -C "$PRODUCT_CHECKOUT" config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          python scripts/actions_progress.py PRODUCT PASS --sha "$SOURCE_SHA"
+
+      - name: "[04] CODEX · Python runtime"
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: "[04] CODEX · install runner"
+        run: python -m pip install .
+
+      - name: "[04] CODEX · generate bounded product patch"
+        env:
+          CODEX_AUTH_JSON: ${{ secrets.CODEX_AUTH_JSON }}
+        run: |
+          python scripts/actions_progress.py CODEX RUNNING
+          python scripts/run_product_patch.py
+          python scripts/actions_progress.py CODEX PASS
+
+      - name: "[04] Auth · persist rotated Codex credential"
+        env:
+          GH_TOKEN: ${{ secrets.SECRET_ROTATION_TOKEN }}
+        run: |
+          test -s "$CODEX_HOME/auth.json"
+          gh secret set CODEX_AUTH_JSON --repo "$GITHUB_REPOSITORY" < "$CODEX_HOME/auth.json"
+          echo "CODEX_AUTH_JSON_UPDATED=true"
+
+      - name: "[05] WRITE · commit bounded product diff"
+        run: |
+          cd "$PRODUCT_CHECKOUT"
+          changed_count="$(git status --porcelain=v1 --untracked-files=all | wc -l | tr -d ' ')"
+          test "$changed_count" -gt 0 || { echo "::error::No product changes materialized."; exit 1; }
+          git add --all
+          git commit -m "[$TASK_ID] Apply bounded Dispatcher v2 task"
+          head="$(git rev-parse HEAD)"
+          echo "PILOT_HEAD_SHA=$head" >> "$GITHUB_ENV"
+          python "$GITHUB_WORKSPACE/scripts/actions_progress.py" WRITE PASS --sha "$head"
+
+      - name: "[06] STARTED · publish product branch"
+        env:
+          GH_TOKEN: ${{ secrets.ESC_WRITE_TOKEN }}
+        run: |
+          cd "$PRODUCT_CHECKOUT"
+          gh auth setup-git
+          git push --set-upstream origin "HEAD:refs/heads/$PRODUCT_BRANCH"
+
+      - name: "[06] STARTED · create Draft product PR"
+        env:
+          GH_TOKEN: ${{ secrets.ESC_WRITE_TOKEN }}
+        run: |
+          cd "$PRODUCT_CHECKOUT"
+          body_file="$RUNNER_TEMP/esc-v2-pr-body.md"
+          {
+            printf '%s\n' '## Dispatcher v2 metadata'
+            printf '\n'
+            printf -- '- dispatcher_version: `2`\n'
+            printf -- '- task_id: `%s`\n' "$TASK_ID"
+            printf -- '- project: `ESC`\n'
+            printf -- '- attempt: `%s`\n' "$ATTEMPT"
+            printf -- '- revision: `%s`\n' "$REVISION"
+            printf -- '- profile: `%s`\n' "$PROFILE"
+            printf -- '- repository: `%s`\n' "$PRODUCT_REPOSITORY"
+            printf -- '- target_branch: `%s`\n' "$TARGET_BRANCH"
+            printf -- '- source_base_sha: `%s`\n' "$SOURCE_SHA"
+            printf -- '- control_sha: `%s`\n' "$CONTROL_SHA"
+            printf -- '- control_record_path: `%s`\n' "$CONTROL_RECORD_PATH"
+            printf -- '- integration_condition: `pr_merged`\n'
+            printf -- '- required_validation: `Validate ESC at exact PR head and exact integrated SHA`\n'
+            printf '\n%s\n' 'This PR is owned by ESC Dispatcher v2. Only the validation workflow named by the private work order is proven; additional runtime, deployment, build, device, and physical stages remain separate evidence unless explicitly authorized and verified.'
+          } > "$body_file"
+          pr_url="$(gh pr create --repo "$PRODUCT_REPOSITORY" --draft --base "$TARGET_BRANCH" --head "$PRODUCT_BRANCH" --title "$PRODUCT_PR_TITLE" --body-file "$body_file")"
+          echo "PILOT_PR_URL=$pr_url" >> "$GITHUB_ENV"
+
+      - name: "[06] STARTED · read back Draft product PR"
+        env:
+          GH_TOKEN: ${{ secrets.ESC_WRITE_TOKEN }}
+        run: |
+          json="$(gh pr view "$PILOT_PR_URL" --repo "$PRODUCT_REPOSITORY"             --json number,url,isDraft,state,baseRefName,headRefName,headRefOid)"
+          echo "$json" | jq -e --arg branch "$PRODUCT_BRANCH" --arg base "$TARGET_BRANCH" --arg sha "$PILOT_HEAD_SHA" '
+            .isDraft == true and
+            .state == "OPEN" and
+            .baseRefName == $base and
+            .headRefName == $branch and
+            .headRefOid == $sha
+          ' >/dev/null
+          pr_number="$(echo "$json" | jq -r .number)"
+          echo "PILOT_PR_NUMBER=$pr_number" >> "$GITHUB_ENV"
+          python scripts/actions_progress.py STARTED PASS --sha "$PILOT_HEAD_SHA" --pr "$pr_number"
+
+      - name: "[07] VALIDATE · exact PR-head Actions"
+        env:
+          GH_TOKEN: ${{ secrets.ESC_WRITE_TOKEN }}
+        run: |
+          python scripts/actions_progress.py VALIDATE RUNNING --sha "$PILOT_HEAD_SHA" --pr "$PILOT_PR_NUMBER"
+          run_id=""
+          for attempt in $(seq 1 36); do
+            run_id="$(gh api               "repos/$PRODUCT_REPOSITORY/actions/workflows/$VALIDATION_WORKFLOW_FILE/runs?head_sha=$PILOT_HEAD_SHA&event=pull_request&per_page=20"               --jq '.workflow_runs | sort_by(.created_at) | last | .id // empty')"
+            if [ -n "$run_id" ]; then break; fi
+            sleep 10
+          done
+          test -n "$run_id" || { echo "::error::Exact PR-head validation run not found."; exit 1; }
+          echo "PR_HEAD_RUN_ID=$run_id" >> "$GITHUB_ENV"
+          gh run watch "$run_id" --repo "$PRODUCT_REPOSITORY" --exit-status
+          conclusion="$(gh run view "$run_id" --repo "$PRODUCT_REPOSITORY" --json conclusion,headSha --jq '.conclusion + " " + .headSha')"
+          test "$conclusion" = "success $PILOT_HEAD_SHA" || {
+            echo "::error::Exact PR-head validation did not succeed."
+            exit 1
+          }
+          python scripts/actions_progress.py VALIDATE PASS --sha "$PILOT_HEAD_SHA" --pr "$PILOT_PR_NUMBER"
+
+      - name: "[08] INTEGRATE · merge to active development branch"
+        env:
+          GH_TOKEN: ${{ secrets.ESC_WRITE_TOKEN }}
+        run: |
+          python scripts/actions_progress.py INTEGRATE RUNNING --sha "$PILOT_HEAD_SHA" --pr "$PILOT_PR_NUMBER"
+          gh pr ready "$PILOT_PR_URL" --repo "$PRODUCT_REPOSITORY"
+          merge_json="$(gh api --method PUT             "repos/$PRODUCT_REPOSITORY/pulls/$PILOT_PR_NUMBER/merge"             -f merge_method=merge             -f sha="$PILOT_HEAD_SHA")"
+          echo "$merge_json" | jq -e '.merged == true' >/dev/null
+          integrated_sha="$(echo "$merge_json" | jq -r .sha)"
+          test -n "$integrated_sha" && test "$integrated_sha" != "null"
+          echo "INTEGRATED_SHA=$integrated_sha" >> "$GITHUB_ENV"
+          python scripts/actions_progress.py INTEGRATE PASS --sha "$integrated_sha" --pr "$PILOT_PR_NUMBER"
+
+      - name: "[09] VALIDATE · exact integrated-SHA Actions"
+        env:
+          GH_TOKEN: ${{ secrets.ESC_WRITE_TOKEN }}
+        run: |
+          python scripts/actions_progress.py VALIDATE RUNNING --sha "$INTEGRATED_SHA"
+          run_id=""
+          for attempt in $(seq 1 36); do
+            run_id="$(gh api               "repos/$PRODUCT_REPOSITORY/actions/workflows/$VALIDATION_WORKFLOW_FILE/runs?head_sha=$INTEGRATED_SHA&event=push&per_page=20"               --jq '.workflow_runs | sort_by(.created_at) | last | .id // empty')"
+            if [ -n "$run_id" ]; then break; fi
+            sleep 10
+          done
+          test -n "$run_id" || { echo "::error::Integrated-SHA validation run not found."; exit 1; }
+          echo "INTEGRATED_RUN_ID=$run_id" >> "$GITHUB_ENV"
+          gh run watch "$run_id" --repo "$PRODUCT_REPOSITORY" --exit-status
+          conclusion="$(gh run view "$run_id" --repo "$PRODUCT_REPOSITORY" --json conclusion,headSha --jq '.conclusion + " " + .headSha')"
+          test "$conclusion" = "success $INTEGRATED_SHA" || {
+            echo "::error::Exact integrated-SHA validation did not succeed."
+            exit 1
+          }
+          python scripts/actions_progress.py VALIDATE PASS --sha "$INTEGRATED_SHA"
+
+      - name: "[10] RESULT · record PASS"
+        env:
+          GH_TOKEN: ${{ secrets.ESC_WRITE_TOKEN }}
+        run: |
+          result_file="$RUNNER_TEMP/esc-v2-result.md"
+          {
+            printf '%s\n' '## Dispatcher v2 completion evidence'
+            printf '\n'
+            printf -- '- dispatcher_version: `2`\n'
+            printf -- '- task_id: `%s`\n' "$TASK_ID"
+            printf -- '- attempt: `%s`\n' "$ATTEMPT"
+            printf -- '- revision: `%s`\n' "$REVISION"
+            printf -- '- control_sha: `%s`\n' "$CONTROL_SHA"
+            printf -- '- final_pr_head: `%s`\n' "$PILOT_HEAD_SHA"
+            printf -- '- exact_pr_head_validation_run: `%s`\n' "$PR_HEAD_RUN_ID"
+            printf -- '- integrated_sha: `%s`\n' "$INTEGRATED_SHA"
+            printf -- '- exact_integrated_sha_validation_run: `%s`\n' "$INTEGRATED_RUN_ID"
+            printf -- '- result: `PASS`\n'
+            printf -- '- runtime: `NOT_RUN`\n'
+            printf -- '- EAS: `NOT_RUN`\n'
+            printf -- '- OTA: `NOT_RUN`\n'
+            printf -- '- iPhone: `NOT_RUN`\n'
+            printf -- '- iPad: `NOT_RUN`\n'
+          } > "$result_file"
+          gh pr comment "$PILOT_PR_NUMBER" --repo "$PRODUCT_REPOSITORY" --body-file "$result_file"
+          python scripts/actions_progress.py RESULT PASS --sha "$INTEGRATED_SHA" --pr "$PILOT_PR_NUMBER"
+
+      - name: "[10] RESULT · close wake issue"
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh issue comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY"             --body "PASS: ESC Dispatcher v2 integrated with exact-head and exact-integrated-SHA validation."
+          gh issue close "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --reason completed
+
+      - name: "[10] RESULT · failure evidence"
+        if: ${{ failure() }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh issue comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY"             --body "FAIL: inspect this ESC Dispatcher v2 Actions run. No completion or unperformed runtime/device PASS is claimed."
+          python scripts/actions_progress.py RESULT FAIL || true
+
+      - name: "[11] Cleanup · ephemeral credentials"
+        if: ${{ always() }}
+        run: rm -rf "$CODEX_HOME"
