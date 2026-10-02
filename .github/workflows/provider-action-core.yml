@@ -173,16 +173,16 @@ jobs:
             {
               echo '## Dispatcher v2 provider completion evidence'
               echo
-              echo "- task_id: `$TASK_ID`"
-              echo "- attempt: `$ATTEMPT`"
-              echo "- revision: `$REVISION`"
-              echo "- control_sha: `$CONTROL_SHA`"
-              echo "- source_sha: `$SOURCE_SHA`"
-              echo "- source_validation_run: `$SOURCE_VALIDATION_RUN_ID`"
-              echo "- action: `$PROVIDER_ACTION`"
-              echo "- result: `MANUAL_REQUIRED`"
+              printf -- '- task_id: `%s`\n' "$TASK_ID"
+              printf -- '- attempt: `%s`\n' "$ATTEMPT"
+              printf -- '- revision: `%s`\n' "$REVISION"
+              printf -- '- control_sha: `%s`\n' "$CONTROL_SHA"
+              printf -- '- source_sha: `%s`\n' "$SOURCE_SHA"
+              printf -- '- source_validation_run: `%s`\n' "$SOURCE_VALIDATION_RUN_ID"
+              printf -- '- action: `%s`\n' "$PROVIDER_ACTION"
+              printf -- '- result: `MANUAL_REQUIRED`\n'
               echo "- blocking_action: add the project-scoped provider credential required by this adapter"
-              echo "- runtime/device/physical: `NOT_RUN`"
+              printf -- '- runtime/device/physical: `NOT_RUN`\n'
             } > "$RUNNER_TEMP/provider-manual.md"
             gh issue comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --body-file "$RUNNER_TEMP/provider-manual.md"
           else
@@ -198,13 +198,13 @@ jobs:
           {
             echo '## Dispatcher v2 provider STARTED evidence'
             echo
-            echo "- task_id: `$TASK_ID`"
-            echo "- attempt: `$ATTEMPT`"
-            echo "- revision: `$REVISION`"
-            echo "- control_sha: `$CONTROL_SHA`"
-            echo "- source_sha: `$SOURCE_SHA`"
-            echo "- source_validation_run: `$SOURCE_VALIDATION_RUN_ID`"
-            echo "- action: `$PROVIDER_ACTION`"
+            printf -- '- task_id: `%s`\n' "$TASK_ID"
+            printf -- '- attempt: `%s`\n' "$ATTEMPT"
+            printf -- '- revision: `%s`\n' "$REVISION"
+            printf -- '- control_sha: `%s`\n' "$CONTROL_SHA"
+            printf -- '- source_sha: `%s`\n' "$SOURCE_SHA"
+            printf -- '- source_validation_run: `%s`\n' "$SOURCE_VALIDATION_RUN_ID"
+            printf -- '- action: `%s`\n' "$PROVIDER_ACTION"
           } > "$RUNNER_TEMP/provider-started.md"
           gh issue comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --body-file "$RUNNER_TEMP/provider-started.md"
           python scripts/actions_progress.py STARTED PASS --sha "$SOURCE_SHA"
@@ -301,22 +301,22 @@ jobs:
           {
             echo '## Dispatcher v2 provider completion evidence'
             echo
-            echo "- task_id: `$TASK_ID`"
-            echo "- attempt: `$ATTEMPT`"
-            echo "- revision: `$REVISION`"
-            echo "- control_sha: `$CONTROL_SHA`"
-            echo "- source_sha: `$SOURCE_SHA`"
-            echo "- source_validation_run: `$SOURCE_VALIDATION_RUN_ID`"
-            echo "- action: `$PROVIDER_ACTION`"
-            if [ -n "${EAS_WORKFLOW_ID:-}" ]; then echo "- provider_run_id: `$EAS_WORKFLOW_ID`"; fi
-            if [ -n "${PROVIDER_GITHUB_RUN_ID:-}" ]; then echo "- provider_run_id: `$PROVIDER_GITHUB_RUN_ID`"; fi
-            if [ -n "${EAS_UPDATE_ID:-}" ]; then echo "- update_id: `$EAS_UPDATE_ID`"; fi
-            if [ -n "${EAS_UPDATE_GROUP_ID:-}" ]; then echo "- update_group_id: `$EAS_UPDATE_GROUP_ID`"; fi
-            if [ -n "${PROVIDER_RUNTIME_VERSION:-}" ]; then echo "- runtime_version: `$PROVIDER_RUNTIME_VERSION`"; fi
-            if [ -n "${PROVIDER_CHANNEL:-}" ]; then echo "- channel: `$PROVIDER_CHANNEL`"; fi
-            if [ -n "${PROVIDER_ENVIRONMENT:-}" ]; then echo "- environment: `$PROVIDER_ENVIRONMENT`"; fi
-            echo "- result: `PASS`"
-            echo "- device/physical: `NOT_RUN`"
+            printf -- '- task_id: `%s`\n' "$TASK_ID"
+            printf -- '- attempt: `%s`\n' "$ATTEMPT"
+            printf -- '- revision: `%s`\n' "$REVISION"
+            printf -- '- control_sha: `%s`\n' "$CONTROL_SHA"
+            printf -- '- source_sha: `%s`\n' "$SOURCE_SHA"
+            printf -- '- source_validation_run: `%s`\n' "$SOURCE_VALIDATION_RUN_ID"
+            printf -- '- action: `%s`\n' "$PROVIDER_ACTION"
+            if [ -n "${EAS_WORKFLOW_ID:-}" ]; then printf -- '- provider_run_id: `%s`\n' "$EAS_WORKFLOW_ID"; fi
+            if [ -n "${PROVIDER_GITHUB_RUN_ID:-}" ]; then printf -- '- provider_run_id: `%s`\n' "$PROVIDER_GITHUB_RUN_ID"; fi
+            if [ -n "${EAS_UPDATE_ID:-}" ]; then printf -- '- update_id: `%s`\n' "$EAS_UPDATE_ID"; fi
+            if [ -n "${EAS_UPDATE_GROUP_ID:-}" ]; then printf -- '- update_group_id: `%s`\n' "$EAS_UPDATE_GROUP_ID"; fi
+            if [ -n "${PROVIDER_RUNTIME_VERSION:-}" ]; then printf -- '- runtime_version: `%s`\n' "$PROVIDER_RUNTIME_VERSION"; fi
+            if [ -n "${PROVIDER_CHANNEL:-}" ]; then printf -- '- channel: `%s`\n' "$PROVIDER_CHANNEL"; fi
+            if [ -n "${PROVIDER_ENVIRONMENT:-}" ]; then printf -- '- environment: `%s`\n' "$PROVIDER_ENVIRONMENT"; fi
+            printf -- '- result: `PASS`\n'
+            printf -- '- device/physical: `NOT_RUN`\n'
           } > "$RUNNER_TEMP/provider-result.md"
           gh issue comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --body-file "$RUNNER_TEMP/provider-result.md"
           gh issue close "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --reason completed
@@ -337,11 +337,11 @@ jobs:
           {
             echo '## Dispatcher v2 provider completion evidence'
             echo
-            echo "- task_id: `${TASK_ID:-unknown}`"
-            echo "- control_sha: `${CONTROL_SHA:-unknown}`"
-            echo "- source_sha: `${SOURCE_SHA:-unknown}`"
-            echo "- action: `${PROVIDER_ACTION:-unknown}`"
-            echo "- result: `FAILED`"
-            echo "- runtime/device/physical: `NOT_RUN`"
+            printf -- '- task_id: `%s`\n' "${TASK_ID:-unknown}"
+            printf -- '- control_sha: `%s`\n' "${CONTROL_SHA:-unknown}"
+            printf -- '- source_sha: `%s`\n' "${SOURCE_SHA:-unknown}"
+            printf -- '- action: `%s`\n' "${PROVIDER_ACTION:-unknown}"
+            printf -- '- result: `FAILED`\n'
+            printf -- '- runtime/device/physical: `NOT_RUN`\n'
           } > "$RUNNER_TEMP/provider-failed.md"
           gh issue comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --body-file "$RUNNER_TEMP/provider-failed.md" || true
