@@ -136,7 +136,10 @@ def prepare(args: argparse.Namespace) -> None:
         fail("provider_action.parameters must be an object")
 
     if kind in {"eas_workflow_update", "eas_update"}:
-        working_directory = safe_rel(require_string(action, "working_directory"), "working_directory")
+        working_directory = safe_rel(
+            require_string(action, "working_directory"),
+            "working_directory",
+        )
         compatibility_base = require_string(action, "compatibility_base_sha")
         if not SHA_RE.fullmatch(compatibility_base):
             fail("compatibility_base_sha must be a commit SHA")
@@ -225,7 +228,10 @@ def check_ota(args: argparse.Namespace) -> None:
         if relative.startswith("app.config."):
             blocked.append(path)
     if blocked:
-        fail("OTA compatibility gate blocked native/config/dependency changes: " + ", ".join(blocked))
+        fail(
+            "OTA compatibility gate blocked native/config/dependency changes: "
+            + ", ".join(blocked)
+        )
 
 
 def dispatch_payload(args: argparse.Namespace) -> None:
