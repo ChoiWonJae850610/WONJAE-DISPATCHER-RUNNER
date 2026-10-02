@@ -1,0 +1,56 @@
+name: Bootstrap Codex ChatGPT Auth
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  bootstrap:
+    if: github.ref == 'refs/heads/main' && github.actor == github.repository_owner
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CODEX_HOME: ${{ runner.temp }}/codex-home
+      PYTHONUNBUFFERED: "1"
+
+    steps:
+      - name: Require rotation credential
+        env:
+          SECRET_ROTATION_TOKEN: ${{ secrets.SECRET_ROTATION_TOKEN }}
+        run: |
+          test -n "$SECRET_ROTATION_TOKEN" || {
+            echo "::error::SECRET_ROTATION_TOKEN is not configured."
+            exit 1
+          }
+
+      - name: Checkout trusted default-branch code
+        uses: actions/checkout@v6
+        with:
+          ref: main
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install runner
+        run: python -m pip install .
+
+      - name: Start ChatGPT device authorization
+        run: python scripts/bootstrap_codex_auth.py
+
+      - name: Persist protected Codex credential
+        env:
+          GH_TOKEN: ${{ secrets.SECRET_ROTATION_TOKEN }}
+        run: |
+          test -s "$CODEX_HOME/auth.json"
+          gh secret set CODEX_AUTH_JSON --repo "$GITHUB_REPOSITORY" < "$CODEX_HOME/auth.json"
+          echo "CODEX_AUTH_JSON_UPDATED=true"
+
+      - name: Delete ephemeral credential files
+        if: always()
+        run: rm -rf "$CODEX_HOME"
