@@ -1,6 +1,9 @@
 import pytest
 
-from wonjae_dispatcher_runner.codex_runner import PilotError, extract_unique_reported_sha
+from wonjae_dispatcher_runner.codex_runner import (
+    PilotError,
+    extract_unique_reported_sha,
+)
 
 
 SHA = "7a2688f14963de371c43bc67f729617b2d23de3c"
