@@ -155,8 +155,10 @@ jobs:
         run: |
           set -euo pipefail
           cd "$GITHUB_WORKSPACE/.provider/product/$PROVIDER_WORKING_DIRECTORY"
-          eas update:list             --all             --platform "$PROVIDER_PLATFORM"             --runtime-version "$PROVIDER_RUNTIME_VERSION"             --limit 25             --json             --non-interactive > "$RUNNER_TEMP/eas-update-list.json"
-          python "$GITHUB_WORKSPACE/scripts/provider_action.py" parse-update             --input "$RUNNER_TEMP/eas-update-list.json"             --message "$PROVIDER_MESSAGE"             --runtime-version "$PROVIDER_RUNTIME_VERSION"             --github-env "$GITHUB_ENV"
+          eas update:list             --branch "$PROVIDER_CHANNEL"             --platform "$PROVIDER_PLATFORM"             --runtime-version "$PROVIDER_RUNTIME_VERSION"             --limit 25             --json             --non-interactive > "$RUNNER_TEMP/eas-update-list.json"
+          python "$GITHUB_WORKSPACE/scripts/provider_action.py" parse-update             --input "$RUNNER_TEMP/eas-update-list.json"             --message "$PROVIDER_MESSAGE"             --runtime-version "$PROVIDER_RUNTIME_VERSION"             --platform "$PROVIDER_PLATFORM"             --github-env "$GITHUB_ENV"
+          eas update:view "$EAS_UPDATE_GROUP_ID"             --json > "$RUNNER_TEMP/eas-update-view.json"
+          python "$GITHUB_WORKSPACE/scripts/provider_action.py" parse-update-view             --input "$RUNNER_TEMP/eas-update-view.json"             --group-id "$EAS_UPDATE_GROUP_ID"             --runtime-version "$PROVIDER_RUNTIME_VERSION"             --platform "$PROVIDER_PLATFORM"             --github-env "$GITHUB_ENV"
 
       - name: GitHub provider · read workflow status
         if: env.PROVIDER_ACTION == 'github_workflow_dispatch'
