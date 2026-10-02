@@ -253,7 +253,7 @@ jobs:
           cd "$GITHUB_WORKSPACE/.provider/product/$PROVIDER_WORKING_DIRECTORY"
           eas update             --channel "$PROVIDER_CHANNEL"             --environment "$PROVIDER_ENVIRONMENT"             --platform "$PROVIDER_PLATFORM"             --message "$PROVIDER_MESSAGE"             --json             --non-interactive > "$RUNNER_TEMP/eas-update-run.json"
 
-      - name: EAS · read back exact update identity
+      - name: EAS · resolve direct update group
         if: env.PROVIDER_GATE == 'ready' && env.PROVIDER_ACTION == 'eas_update'
         env:
           EXPO_TOKEN: ${{ secrets.expo_token }}
@@ -263,6 +263,16 @@ jobs:
           cd "$GITHUB_WORKSPACE/.provider/product/$PROVIDER_WORKING_DIRECTORY"
           eas update:list             --all             --platform "$PROVIDER_PLATFORM"             --runtime-version "$PROVIDER_RUNTIME_VERSION"             --limit 25             --json             --non-interactive > "$RUNNER_TEMP/eas-update-list.json"
           python "$GITHUB_WORKSPACE/scripts/provider_action.py" parse-update-group             --input "$RUNNER_TEMP/eas-update-list.json"             --message "$PROVIDER_MESSAGE"             --runtime-version "$PROVIDER_RUNTIME_VERSION"             --platform "$PROVIDER_PLATFORM"             --github-env "$GITHUB_ENV"
+
+      - name: EAS · read back direct platform update
+        if: env.PROVIDER_GATE == 'ready' && env.PROVIDER_ACTION == 'eas_update'
+        env:
+          EXPO_TOKEN: ${{ secrets.expo_token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${EAS_UPDATE_GROUP_ID:-}" || { echo "::error::EAS update group identity is missing."; exit 1; }
+          cd "$GITHUB_WORKSPACE/.provider/product/$PROVIDER_WORKING_DIRECTORY"
           eas update:view "$EAS_UPDATE_GROUP_ID"             --json > "$RUNNER_TEMP/eas-update-view.json"
           python "$GITHUB_WORKSPACE/scripts/provider_action.py" parse-update-view             --input "$RUNNER_TEMP/eas-update-view.json"             --group-id "$EAS_UPDATE_GROUP_ID"             --message "$PROVIDER_MESSAGE"             --runtime-version "$PROVIDER_RUNTIME_VERSION"             --platform "$PROVIDER_PLATFORM"             --github-env "$GITHUB_ENV"
 
