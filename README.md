@@ -63,3 +63,10 @@ pytest
 ```
 
 Python 3.11+ is required.
+
+
+## Bounded write pilot
+
+After the read-only pilot passes, **Codex Write Pilot** tests one controlled private-repository documentation write. The Codex turn may create only `docs/pilots/DISPATCHER_V2_SIWC_WRITE_001.md`. The workflow independently rejects any other changed path, then creates one commit, publishes the fixed pilot branch, opens a Draft PR to `main`, and reads the PR back before reporting success.
+
+The workflow requires the additional `CONTROL_WRITE_TOKEN` repository secret, scoped only to the private control repository with the minimum Contents and Pull requests write authority required for the pilot. It does not merge the resulting PR.
