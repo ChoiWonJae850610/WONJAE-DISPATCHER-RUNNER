@@ -1,0 +1,251 @@
+name: Provider Status Core
+
+on:
+  workflow_call:
+    inputs:
+      project:
+        required: true
+        type: string
+      product_repository:
+        required: true
+        type: string
+      target_branch:
+        required: true
+        type: string
+      wake_title:
+        required: true
+        type: string
+      issue_number:
+        required: true
+        type: string
+      control_repository:
+        required: true
+        type: string
+    secrets:
+      control_read_token:
+        required: true
+      product_token:
+        required: true
+      expo_token:
+        required: false
+      github_provider_token:
+        required: false
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  status:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    concurrency:
+      group: provider-v2-${{ inputs.project }}
+      cancel-in-progress: false
+    env:
+      PROJECT: ${{ inputs.project }}
+      PRODUCT_REPOSITORY: ${{ inputs.product_repository }}
+      TARGET_BRANCH: ${{ inputs.target_branch }}
+      WAKE_TITLE: ${{ inputs.wake_title }}
+      ISSUE_NUMBER: ${{ inputs.issue_number }}
+      EAS_CLI_VERSION: "24.8.0"
+
+    steps:
+      - name: Runner · trusted code
+        uses: actions/checkout@v6
+        with:
+          ref: main
+          persist-credentials: false
+
+      - name: WAKE · parse exact identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import os
+          import re
+
+          project = os.environ["PROJECT"]
+          title = os.environ["WAKE_TITLE"]
+          match = re.fullmatch(
+              rf"\[PROVIDER-WAKE\]\[DISPATCHER-V2\] {re.escape(project)} "
+              rf"({re.escape(project)}-[A-Z0-9][A-Z0-9-]*-[0-9]{{3}}) "
+              r"([0-9a-f]{40}) ([0-9a-f]{40})",
+              title,
+          )
+          if match is None:
+              raise SystemExit("invalid provider wake title")
+          task_id, control_sha, source_sha = match.groups()
+          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as handle:
+              handle.write(f"TASK_ID={task_id}\n")
+              handle.write(f"CONTROL_SHA={control_sha}\n")
+              handle.write(f"SOURCE_SHA={source_sha}\n")
+              handle.write(f"CONTROL_RECORD_PATH=tasks-v2/{project}/{task_id}.json\n")
+          PY
+
+      - name: CONTROL · checkout exact private record
+        uses: actions/checkout@v6
+        with:
+          repository: ${{ inputs.control_repository }}
+          ref: ${{ env.CONTROL_SHA }}
+          path: .provider/control
+          token: ${{ secrets.control_read_token }}
+          persist-credentials: false
+
+      - name: CONTROL · validate provider record
+        shell: bash
+        run: |
+          set -euo pipefail
+          record="$GITHUB_WORKSPACE/.provider/control/$CONTROL_RECORD_PATH"
+          test -f "$record"
+          python scripts/provider_action.py prepare             --record "$record"             --project "$PROJECT"             --repository "$PRODUCT_REPOSITORY"             --target-branch "$TARGET_BRANCH"             --wake-title "$WAKE_TITLE"             --control-sha "$CONTROL_SHA"             --source-sha "$SOURCE_SHA"             --github-env "$GITHUB_ENV"
+
+      - name: PRODUCT · checkout exact source
+        uses: actions/checkout@v6
+        with:
+          repository: ${{ inputs.product_repository }}
+          ref: ${{ env.SOURCE_SHA }}
+          path: .provider/product
+          token: ${{ secrets.product_token }}
+          persist-credentials: false
+
+      - name: STATUS · recover queued provider run
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          gh api "repos/$GITHUB_REPOSITORY/issues/$ISSUE_NUMBER/comments?per_page=100" > "$RUNNER_TEMP/provider-comments.json"
+          python scripts/provider_action.py extract-provider-run             --input "$RUNNER_TEMP/provider-comments.json"             --github-env "$GITHUB_ENV"
+
+      - name: EAS · set up Node
+        if: env.PROVIDER_ACTION == 'eas_workflow_update'
+        uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+
+      - name: EAS · install pinned CLI
+        if: env.PROVIDER_ACTION == 'eas_workflow_update'
+        run: npm install --global "eas-cli@$EAS_CLI_VERSION"
+
+      - name: EAS · read workflow status
+        if: env.PROVIDER_ACTION == 'eas_workflow_update'
+        env:
+          EXPO_TOKEN: ${{ secrets.expo_token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${EXPO_TOKEN:-}" || { echo "::error::Missing project-scoped Expo token."; exit 1; }
+          cd "$GITHUB_WORKSPACE/.provider/product/$PROVIDER_WORKING_DIRECTORY"
+          eas workflow:status "$PROVIDER_RUN_ID"             --non-interactive             --json > "$RUNNER_TEMP/eas-status.json"
+          python "$GITHUB_WORKSPACE/scripts/provider_action.py" parse-eas-status             --input "$RUNNER_TEMP/eas-status.json"             --github-env "$GITHUB_ENV"
+
+      - name: EAS · read update identity after success
+        if: env.PROVIDER_ACTION == 'eas_workflow_update' && env.PROVIDER_STATUS == 'SUCCESS'
+        env:
+          EXPO_TOKEN: ${{ secrets.expo_token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$GITHUB_WORKSPACE/.provider/product/$PROVIDER_WORKING_DIRECTORY"
+          eas update:list             --all             --platform "$PROVIDER_PLATFORM"             --runtime-version "$PROVIDER_RUNTIME_VERSION"             --limit 25             --json             --non-interactive > "$RUNNER_TEMP/eas-update-list.json"
+          python "$GITHUB_WORKSPACE/scripts/provider_action.py" parse-update             --input "$RUNNER_TEMP/eas-update-list.json"             --message "$PROVIDER_MESSAGE"             --runtime-version "$PROVIDER_RUNTIME_VERSION"             --github-env "$GITHUB_ENV"
+
+      - name: GitHub provider · read workflow status
+        if: env.PROVIDER_ACTION == 'github_workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ secrets.github_provider_token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${GH_TOKEN:-}" || { echo "::error::Missing project-scoped provider GitHub token."; exit 1; }
+          json="$(gh run view "$PROVIDER_RUN_ID" --repo "$PRODUCT_REPOSITORY" --json status,conclusion,headSha)"
+          provider_status="$(echo "$json" | jq -r 'if .status != "completed" then (.status | ascii_upcase) elif .conclusion == "success" then "SUCCESS" elif .conclusion == "cancelled" then "CANCELED" else "FAILURE" end')"
+          provider_head="$(echo "$json" | jq -r .headSha)"
+          test "$provider_head" = "$SOURCE_SHA"
+          echo "PROVIDER_STATUS=$provider_status" >> "$GITHUB_ENV"
+
+      - name: STATUS · record non-terminal state
+        if: >-
+          env.PROVIDER_STATUS == 'NEW' ||
+          env.PROVIDER_STATUS == 'WAITING' ||
+          env.PROVIDER_STATUS == 'IN_PROGRESS' ||
+          env.PROVIDER_STATUS == 'QUEUED'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          {
+            echo '## Dispatcher v2 provider status evidence'
+            echo
+            printf -- '- task_id: `%s`\n' "$TASK_ID"
+            printf -- '- provider_run_id: `%s`\n' "$PROVIDER_RUN_ID"
+            printf -- '- provider_status: `%s`\n' "$PROVIDER_STATUS"
+            printf -- '- result: `VALIDATING`\n'
+            printf -- '- device/physical: `NOT_RUN`\n'
+          } > "$RUNNER_TEMP/provider-status.md"
+          gh issue comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --body-file "$RUNNER_TEMP/provider-status.md"
+
+      - name: RESULT · record provider PASS
+        if: env.PROVIDER_STATUS == 'SUCCESS'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          {
+            echo '## Dispatcher v2 provider completion evidence'
+            echo
+            printf -- '- task_id: `%s`\n' "$TASK_ID"
+            printf -- '- attempt: `%s`\n' "$ATTEMPT"
+            printf -- '- revision: `%s`\n' "$REVISION"
+            printf -- '- control_sha: `%s`\n' "$CONTROL_SHA"
+            printf -- '- source_sha: `%s`\n' "$SOURCE_SHA"
+            printf -- '- action: `%s`\n' "$PROVIDER_ACTION"
+            printf -- '- provider_run_id: `%s`\n' "$PROVIDER_RUN_ID"
+            if [ -n "${EAS_UPDATE_ID:-}" ]; then printf -- '- update_id: `%s`\n' "$EAS_UPDATE_ID"; fi
+            if [ -n "${EAS_UPDATE_GROUP_ID:-}" ]; then printf -- '- update_group_id: `%s`\n' "$EAS_UPDATE_GROUP_ID"; fi
+            if [ -n "${PROVIDER_RUNTIME_VERSION:-}" ]; then printf -- '- runtime_version: `%s`\n' "$PROVIDER_RUNTIME_VERSION"; fi
+            if [ -n "${PROVIDER_CHANNEL:-}" ]; then printf -- '- channel: `%s`\n' "$PROVIDER_CHANNEL"; fi
+            if [ -n "${PROVIDER_ENVIRONMENT:-}" ]; then printf -- '- environment: `%s`\n' "$PROVIDER_ENVIRONMENT"; fi
+            printf -- '- result: `PASS`\n'
+            printf -- '- device/physical: `NOT_RUN`\n'
+          } > "$RUNNER_TEMP/provider-pass.md"
+          gh issue comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --body-file "$RUNNER_TEMP/provider-pass.md"
+          gh issue close "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --reason completed
+
+      - name: RESULT · record provider failure
+        if: env.PROVIDER_STATUS == 'FAILURE' || env.PROVIDER_STATUS == 'CANCELED'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          {
+            echo '## Dispatcher v2 provider completion evidence'
+            echo
+            printf -- '- task_id: `%s`\n' "$TASK_ID"
+            printf -- '- provider_run_id: `%s`\n' "$PROVIDER_RUN_ID"
+            printf -- '- provider_status: `%s`\n' "$PROVIDER_STATUS"
+            printf -- '- result: `FAILED`\n'
+            printf -- '- device/physical: `NOT_RUN`\n'
+          } > "$RUNNER_TEMP/provider-failure.md"
+          gh issue comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --body-file "$RUNNER_TEMP/provider-failure.md"
+          gh issue close "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --reason completed
+          exit 1
+
+      - name: RESULT · record provider action-required
+        if: env.PROVIDER_STATUS == 'ACTION_REQUIRED'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          {
+            echo '## Dispatcher v2 provider completion evidence'
+            echo
+            printf -- '- task_id: `%s`\n' "$TASK_ID"
+            printf -- '- provider_run_id: `%s`\n' "$PROVIDER_RUN_ID"
+            printf -- '- provider_status: `ACTION_REQUIRED`\n'
+            printf -- '- result: `MANUAL_REQUIRED`\n'
+            echo '- blocking_action: resolve the provider action required state, then request provider status again'
+            printf -- '- device/physical: `NOT_RUN`\n'
+          } > "$RUNNER_TEMP/provider-manual.md"
+          gh issue comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --body-file "$RUNNER_TEMP/provider-manual.md"
+          gh issue close "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --reason completed
