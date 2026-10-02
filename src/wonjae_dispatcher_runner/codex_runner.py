@@ -1,14 +1,12 @@
 from __future__ import annotations
 
-import re
+import json
 import subprocess
 from pathlib import Path
 
 from openai_codex import ApprovalMode, Codex, CodexConfig, Sandbox
 
 from .guards import require_sha
-
-_SHA_TOKEN_RE = re.compile(r"(?<![0-9a-fA-F])([0-9a-fA-F]{40})(?![0-9a-fA-F])")
 
 
 class PilotError(RuntimeError):
@@ -26,12 +24,24 @@ def git_head(repo_path: Path) -> str:
     return require_sha(result.stdout.strip())
 
 
-def extract_unique_reported_sha(response: str) -> str:
-    """Extract one unambiguous full Git SHA from a Codex response."""
-    matches = {match.group(1).lower() for match in _SHA_TOKEN_RE.finditer(response)}
-    if len(matches) != 1:
-        raise PilotError("Codex response must contain exactly one unambiguous 40-character SHA")
-    return matches.pop()
+def parse_structured_sha(response: str) -> str:
+    """Parse one full Git SHA from the SDK's structured final response."""
+    try:
+        payload = json.loads(response)
+    except json.JSONDecodeError as exc:
+        raise PilotError("Codex structured response was not valid JSON") from exc
+
+    if not isinstance(payload, dict) or set(payload) != {"sha"}:
+        raise PilotError("Codex structured response must contain only the sha field")
+
+    raw_sha = payload["sha"]
+    if not isinstance(raw_sha, str):
+        raise PilotError("Codex structured sha field must be a string")
+
+    try:
+        return require_sha(raw_sha)
+    except ValueError as exc:
+        raise PilotError("Codex structured sha field was not a full 40-character SHA") from exc
 
 
 def run_readonly_head_probe(repo_path: Path, expected_sha: str, codex_home: Path) -> str:
@@ -47,11 +57,19 @@ def run_readonly_head_probe(repo_path: Path, expected_sha: str, codex_home: Path
     config = CodexConfig(cwd=str(repo_path), env=child_env)
 
     prompt = (
-        "Read this repository in read-only mode and report its current Git HEAD commit SHA. "
-        "Inspect the checkout using the available read-only tools. "
-        "Return the full 40-character Git SHA. "
+        "Inspect this checkout in read-only mode. "
+        "Run git rev-parse HEAD in this repository and return that exact full 40-character "
+        "lowercase commit SHA in the requested structured output. "
         "Do not modify files, Git state, remotes, configuration, or external systems."
     )
+    output_schema = {
+        "type": "object",
+        "properties": {
+            "sha": {"type": "string"},
+        },
+        "required": ["sha"],
+        "additionalProperties": False,
+    }
 
     with Codex(config=config) as codex:
         account = codex.account(refresh_token=False)
@@ -71,12 +89,13 @@ def run_readonly_head_probe(repo_path: Path, expected_sha: str, codex_home: Path
         result = thread.run(
             prompt,
             approval_mode=ApprovalMode.deny_all,
+            output_schema=output_schema,
             sandbox=Sandbox.read_only,
         )
 
-    reported = extract_unique_reported_sha(result.final_response or "")
+    reported = parse_structured_sha(result.final_response or "")
     if reported != actual:
         raise PilotError(
-            "Codex response SHA did not match the independently verified checkout SHA"
+            "Codex structured response SHA did not match the independently verified checkout SHA"
         )
     return reported
