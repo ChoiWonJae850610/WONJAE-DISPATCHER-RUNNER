@@ -1,9 +1,7 @@
 from __future__ import annotations
 
 import json
-import re
 import subprocess
-import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -11,8 +9,8 @@ from openai_codex import ApprovalMode, Codex, CodexConfig, Sandbox
 
 from .guards import require_sha
 
-DIFF_HEADER_RE = re.compile(r"^diff --git a/([^\s]+) b/([^\s]+)$", re.MULTILINE)
-MAX_PATCH_CHARS = 240_000
+MAX_EDIT_COUNT = 48
+MAX_TEXT_CHARS = 80_000
 
 
 class ProductPilotError(RuntimeError):
@@ -34,6 +32,14 @@ class ProductWorkOrder:
     scope: tuple[str, ...]
     exclusions: tuple[str, ...]
     completion_conditions: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class ProductEdit:
+    path: str
+    operation: str
+    old_text: str
+    new_text: str
 
 
 def _git(repo_path: Path, *args: str) -> str:
@@ -89,6 +95,12 @@ def load_work_order(path: Path) -> ProductWorkOrder:
     if not isinstance(integration, bool):
         raise ProductPilotError("integration_authorized must be boolean")
 
+    allowed_paths = _string_list(payload, "allowed_paths")
+    for relative in allowed_paths:
+        path_value = Path(relative)
+        if path_value.is_absolute() or ".." in path_value.parts:
+            raise ProductPilotError("work order contains an unsafe allowed path")
+
     return ProductWorkOrder(
         task_id=required_string("task_id"),
         project=required_string("project"),
@@ -99,96 +111,139 @@ def load_work_order(path: Path) -> ProductWorkOrder:
         integration_authorized=integration,
         validation_workflow_path=required_string("validation_workflow_path"),
         required_reads=_string_list(payload, "required_reads"),
-        allowed_paths=_string_list(payload, "allowed_paths"),
+        allowed_paths=allowed_paths,
         scope=_string_list(payload, "scope"),
         exclusions=_string_list(payload, "exclusions"),
         completion_conditions=_string_list(payload, "completion_conditions"),
     )
 
 
-def patch_paths(patch: str) -> tuple[str, ...]:
-    if not patch.strip():
-        raise ProductPilotError("Codex returned an empty patch")
-    if len(patch) > MAX_PATCH_CHARS:
-        raise ProductPilotError("Codex patch exceeded the bounded size limit")
-    prohibited = (
-        "GIT binary patch",
-        "Binary files ",
-        "rename from ",
-        "rename to ",
-        "copy from ",
-        "copy to ",
-        "Subproject commit ",
-    )
-    if any(marker in patch for marker in prohibited):
-        raise ProductPilotError("binary, rename, copy, or submodule patches are prohibited")
-
-    pairs = DIFF_HEADER_RE.findall(patch)
-    if not pairs:
-        raise ProductPilotError("Codex response did not contain a unified Git diff")
-
-    paths: list[str] = []
-    for old_path, new_path in pairs:
-        if old_path != new_path:
-            raise ProductPilotError("path-changing diffs are prohibited")
-        path = Path(new_path)
-        if path.is_absolute() or ".." in path.parts:
-            raise ProductPilotError("unsafe patch path")
-        normalized = path.as_posix()
-        if normalized not in paths:
-            paths.append(normalized)
-    return tuple(paths)
-
-
-def validate_patch_scope(patch: str, work_order: ProductWorkOrder) -> tuple[str, ...]:
-    paths = patch_paths(patch)
-    allowed = set(work_order.allowed_paths)
-    disallowed = [path for path in paths if path not in allowed]
-    if disallowed:
-        raise ProductPilotError("Codex patch included a path outside the work order")
-    return paths
-
-
-def apply_patch(repo_path: Path, patch: str, work_order: ProductWorkOrder) -> tuple[str, ...]:
-    expected_paths = validate_patch_scope(patch, work_order)
-    with tempfile.NamedTemporaryFile(
-        mode="w",
-        encoding="utf-8",
-        suffix=".patch",
-        delete=False,
-    ) as handle:
-        handle.write(patch)
-        patch_path = Path(handle.name)
-
+def parse_edit_plan(response: str, work_order: ProductWorkOrder) -> tuple[ProductEdit, ...]:
     try:
-        subprocess.run(
-            [
-                "git",
-                "-C",
-                str(repo_path),
-                "apply",
-                "--check",
-                "--whitespace=error-all",
-                str(patch_path),
-            ],
-            check=True,
-            capture_output=True,
-            text=True,
-            timeout=45,
+        payload = json.loads(response)
+    except json.JSONDecodeError as exc:
+        raise ProductPilotError("Codex product response was not valid JSON") from exc
+
+    if not isinstance(payload, dict) or set(payload) != {"edits", "summary"}:
+        raise ProductPilotError("Codex product response shape was invalid")
+    summary = payload.get("summary")
+    edits = payload.get("edits")
+    if not isinstance(summary, str) or not summary.strip():
+        raise ProductPilotError("Codex product summary was missing")
+    if not isinstance(edits, list) or not edits:
+        raise ProductPilotError("Codex returned an empty edit plan")
+    if len(edits) > MAX_EDIT_COUNT:
+        raise ProductPilotError("Codex edit plan exceeded the bounded edit count")
+
+    allowed = set(work_order.allowed_paths)
+    parsed: list[ProductEdit] = []
+    created_paths: set[str] = set()
+    for raw in edits:
+        if not isinstance(raw, dict) or set(raw) != {
+            "path",
+            "operation",
+            "old_text",
+            "new_text",
+        }:
+            raise ProductPilotError("Codex edit entry shape was invalid")
+        path = raw.get("path")
+        operation = raw.get("operation")
+        old_text = raw.get("old_text")
+        new_text = raw.get("new_text")
+        if not all(isinstance(value, str) for value in (path, operation, old_text, new_text)):
+            raise ProductPilotError("Codex edit entry values must be strings")
+        assert isinstance(path, str)
+        assert isinstance(operation, str)
+        assert isinstance(old_text, str)
+        assert isinstance(new_text, str)
+
+        if path not in allowed:
+            raise ProductPilotError("Codex edit included a path outside the work order")
+        path_value = Path(path)
+        if path_value.is_absolute() or ".." in path_value.parts:
+            raise ProductPilotError("Codex edit included an unsafe path")
+        if operation not in {"replace", "create"}:
+            raise ProductPilotError("Codex edit operation was invalid")
+        if "\x00" in old_text or "\x00" in new_text:
+            raise ProductPilotError("Codex edit contained a NUL byte")
+        if len(old_text) > MAX_TEXT_CHARS or len(new_text) > MAX_TEXT_CHARS:
+            raise ProductPilotError("Codex edit text exceeded the bounded size limit")
+        if not new_text:
+            raise ProductPilotError("Codex edit may not delete a file or replace with empty content")
+        if operation == "create":
+            if old_text:
+                raise ProductPilotError("create edits must use an empty old_text")
+            if path in created_paths:
+                raise ProductPilotError("duplicate create edit for one path")
+            created_paths.add(path)
+        elif not old_text:
+            raise ProductPilotError("replace edits require a non-empty old_text")
+        if operation == "replace" and old_text == new_text:
+            raise ProductPilotError("replace edit was a no-op")
+
+        parsed.append(
+            ProductEdit(
+                path=path,
+                operation=operation,
+                old_text=old_text,
+                new_text=new_text,
+            )
         )
-        subprocess.run(
-            ["git", "-C", str(repo_path), "apply", "--whitespace=error-all", str(patch_path)],
-            check=True,
-            capture_output=True,
-            text=True,
-            timeout=45,
-        )
-    finally:
-        patch_path.unlink(missing_ok=True)
+
+    return tuple(parsed)
+
+
+def apply_edit_plan(
+    repo_path: Path,
+    edits: tuple[ProductEdit, ...],
+    work_order: ProductWorkOrder,
+) -> tuple[str, ...]:
+    allowed = set(work_order.allowed_paths)
+    contents: dict[str, str | None] = {}
+    original: dict[str, str | None] = {}
+
+    for edit in edits:
+        if edit.path not in allowed:
+            raise ProductPilotError("edit plan path escaped the work order")
+        if edit.path not in contents:
+            target = repo_path / edit.path
+            value = target.read_text(encoding="utf-8") if target.is_file() else None
+            contents[edit.path] = value
+            original[edit.path] = value
+
+        current = contents[edit.path]
+        if edit.operation == "create":
+            if current is not None:
+                raise ProductPilotError("create edit targeted an existing file")
+            contents[edit.path] = edit.new_text
+            continue
+
+        if current is None:
+            raise ProductPilotError("replace edit targeted a missing file")
+        occurrences = current.count(edit.old_text)
+        if occurrences != 1:
+            raise ProductPilotError(
+                "replace edit old_text did not match exactly once in the current file"
+            )
+        contents[edit.path] = current.replace(edit.old_text, edit.new_text, 1)
+
+    changed: list[str] = []
+    for path, value in contents.items():
+        if value is None or value == original[path]:
+            continue
+        target = repo_path / path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(value, encoding="utf-8")
+        changed.append(path)
+
+    if not changed:
+        raise ProductPilotError("Codex edit plan produced no repository changes")
 
     actual = tuple(changed_paths(repo_path))
-    if not actual or set(actual) != set(expected_paths):
-        raise ProductPilotError("applied worktree paths did not match the validated patch")
+    if set(actual) != set(changed):
+        raise ProductPilotError("worktree paths did not match the validated edit plan")
+    if any(path not in allowed for path in actual):
+        raise ProductPilotError("worktree contains a path outside the work order")
     return actual
 
 
@@ -203,7 +258,7 @@ def _bounded_prompt(work_order: ProductWorkOrder, control_sha: str) -> str:
             f"Target branch: {work_order.target_branch}",
             f"Exact source base: {work_order.source_base_sha}",
             "",
-            "Read every required file from the checkout before deciding the patch:",
+            "Read every required file from the checkout before deciding edits:",
             *[f"- {item}" for item in work_order.required_reads],
             "",
             "Scope:",
@@ -219,10 +274,13 @@ def _bounded_prompt(work_order: ProductWorkOrder, control_sha: str) -> str:
             *[f"- {item}" for item in work_order.allowed_paths],
             "",
             "Do not modify files directly. Do not commit, push, create PRs, use network services, "
-            "or access credentials. Inspect the read-only checkout, then return one unified Git "
-            "diff against the exact source base. The patch must implement the task completely "
-            "within the allowed paths, include focused tests, preserve truthful evidence "
-            "boundaries, and avoid unsupported product capabilities.",
+            "or access credentials. Inspect the read-only checkout, then return a structured edit "
+            "plan. For an existing file use operation=replace with an exact old_text snippet copied "
+            "verbatim from that file and the intended new_text; choose the smallest snippet that "
+            "matches exactly once. For a new file use operation=create, old_text='', and the complete "
+            "new file content. Return at least one edit. Implement the task completely within the "
+            "allowed paths, include focused tests, preserve truthful evidence boundaries, and do not "
+            "invent capabilities that the current repository cannot support safely.",
         ]
     )
 
@@ -253,10 +311,31 @@ def generate_and_apply_product_patch(
     output_schema = {
         "type": "object",
         "properties": {
-            "patch": {"type": "string"},
-            "summary": {"type": "string"},
+            "edits": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": MAX_EDIT_COUNT,
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "path": {
+                            "type": "string",
+                            "enum": list(work_order.allowed_paths),
+                        },
+                        "operation": {
+                            "type": "string",
+                            "enum": ["replace", "create"],
+                        },
+                        "old_text": {"type": "string"},
+                        "new_text": {"type": "string", "minLength": 1},
+                    },
+                    "required": ["path", "operation", "old_text", "new_text"],
+                    "additionalProperties": False,
+                },
+            },
+            "summary": {"type": "string", "minLength": 1},
         },
-        "required": ["patch", "summary"],
+        "required": ["edits", "summary"],
         "additionalProperties": False,
     }
 
@@ -285,18 +364,10 @@ def generate_and_apply_product_patch(
     if status != "completed" or result.error is not None:
         raise ProductPilotError("Codex product turn did not complete successfully")
 
-    try:
-        payload = json.loads(result.final_response or "")
-    except json.JSONDecodeError as exc:
-        raise ProductPilotError("Codex product response was not valid JSON") from exc
-    if not isinstance(payload, dict) or set(payload) != {"patch", "summary"}:
-        raise ProductPilotError("Codex product response shape was invalid")
-    patch = payload.get("patch")
-    if not isinstance(patch, str):
-        raise ProductPilotError("Codex product patch was missing")
+    edits = parse_edit_plan(result.final_response or "", work_order)
 
     if git_head(repo_path) != work_order.source_base_sha or changed_paths(repo_path):
         raise ProductPilotError("product repository changed during the read-only Codex turn")
 
-    applied = apply_patch(repo_path, patch, work_order)
+    applied = apply_edit_plan(repo_path, edits, work_order)
     return work_order, applied
