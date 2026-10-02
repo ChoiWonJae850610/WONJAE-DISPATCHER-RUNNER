@@ -272,6 +272,37 @@ def parse_eas_run(args: argparse.Namespace) -> None:
     write_env(args.github_env, values)
 
 
+def extract_provider_run(args: argparse.Namespace) -> None:
+    data = read_json(args.input)
+    comments = data if isinstance(data, list) else data.get("comments", [])
+    if not isinstance(comments, list):
+        fail("issue comments payload must be a list")
+    for item in reversed(comments):
+        if not isinstance(item, dict):
+            continue
+        body = item.get("body")
+        if not isinstance(body, str) or "## Dispatcher v2 provider QUEUED evidence" not in body:
+            continue
+        match = re.search(r"- provider_run_id: \`([^\`]+)\`", body)
+        if match:
+            write_env(args.github_env, {"PROVIDER_RUN_ID": match.group(1)})
+            return
+    fail("provider queued run identity was not found on the issue")
+
+
+def parse_eas_status(args: argparse.Namespace) -> None:
+    data = read_json(args.input)
+    known = {"NEW", "WAITING", "IN_PROGRESS", "SUCCESS", "FAILURE", "CANCELED", "ACTION_REQUIRED"}
+    for item in _walk(data):
+        status = item.get("status") or item.get("state")
+        if isinstance(status, str):
+            normalized = status.upper()
+            if normalized in known:
+                write_env(args.github_env, {"PROVIDER_STATUS": normalized})
+                return
+    fail("EAS workflow status was not found")
+
+
 def parse_update(args: argparse.Namespace) -> None:
     data = read_json(args.input)
     message = args.message
@@ -330,6 +361,16 @@ def main() -> None:
     p.add_argument("--input", required=True)
     p.add_argument("--github-env", required=True)
     p.set_defaults(func=parse_eas_run)
+
+    p = sub.add_parser("extract-provider-run")
+    p.add_argument("--input", required=True)
+    p.add_argument("--github-env", required=True)
+    p.set_defaults(func=extract_provider_run)
+
+    p = sub.add_parser("parse-eas-status")
+    p.add_argument("--input", required=True)
+    p.add_argument("--github-env", required=True)
+    p.set_defaults(func=parse_eas_status)
 
     p = sub.add_parser("parse-update")
     p.add_argument("--input", required=True)
