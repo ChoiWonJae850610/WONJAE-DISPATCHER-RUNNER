@@ -20,3 +20,9 @@
 15. Provider-action Dispatcher v2 runs are a separate execution class from source-writing runs. They must not fabricate a product diff or Draft PR. They require an exact private control record with `operation_type: provider_action`, exact current product SHA, successful exact-SHA source validation, an allowlisted provider action, and explicit false authority for Production, new build, credential mutation, device mutation, and destructive work unless a future separately validated contract replaces those defaults.
 16. Common provider orchestration may be shared, but provider credentials remain project-scoped and are passed only by that product's thin workflow adapter. Missing provider credentials terminate as `MANUAL_REQUIRED`; never reuse another project's credential or broaden a product source token into provider authority.
 17. Provider completion evidence proves only the named provider stage. EAS update publication never proves device receipt; GitHub-hosted cloud build/export never proves Windows physical QA; Cloudflare deployment never proves iOS behavior. Physical and device stages remain separate.
+
+18. Long external provider queues must not keep the launch runner blocked. Capture
+the exact external run ID, record QUEUED evidence on the wake issue, and exit
+without terminal PASS. A later exact Owner `[PROVIDER-STATUS]` issue comment may
+query that same run ID; status reconciliation must never create or resubmit the
+provider action.

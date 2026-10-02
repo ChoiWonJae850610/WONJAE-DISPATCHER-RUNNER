@@ -143,3 +143,32 @@ def test_eas_workflow_uses_exact_local_checkout_without_ref_lookup() -> None:
     assert 'test "$(git rev-parse HEAD)" = "$SOURCE_SHA"' in section
     assert '--ref "$SOURCE_SHA"' not in section
     assert 'eas workflow:run "$PROVIDER_WORKFLOW_FILE"' in section
+
+
+def test_async_provider_launch_does_not_wait_for_external_queue() -> None:
+    text = Path(".github/workflows/provider-action-core.yml").read_text(encoding="utf-8")
+    eas_section = text.split("EAS · run repository workflow update", 1)[1].split(
+        "EAS · run direct compatible update", 1
+    )[0]
+    github_section = text.split("GitHub provider · dispatch", 1)[1].split(
+        "RESULT · record queued external provider", 1
+    )[0]
+    assert "--wait" not in eas_section
+    assert "gh run watch" not in github_section
+    assert "## Dispatcher v2 provider QUEUED evidence" in text
+
+
+def test_provider_status_workflow_reads_existing_run_without_relaunch() -> None:
+    text = Path(".github/workflows/provider-status-core.yml").read_text(encoding="utf-8")
+    assert "eas workflow:status" in text
+    assert "eas workflow:run" not in text
+    assert "extract-provider-run" in text
+    assert "## Dispatcher v2 provider completion evidence" in text
+
+
+def test_product_provider_adapters_support_owner_status_comment() -> None:
+    for project in ("classmo", "wafl", "esc", "muvel"):
+        text = Path(f".github/workflows/{project}-provider-v2.yml").read_text(encoding="utf-8")
+        assert "issue_comment:" in text
+        assert "github.event.comment.body == '[PROVIDER-STATUS]'" in text
+        assert "provider-status-core.yml" in text
