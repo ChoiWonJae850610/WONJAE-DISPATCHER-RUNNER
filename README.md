@@ -74,3 +74,12 @@ The workflow requires the additional `CONTROL_WRITE_TOKEN` repository secret, sc
 ## Actions progress view
 
 Dispatcher v2 workflows use the canonical phases in `docs/ACTIONS_PROGRESS.md`. The reusable `scripts/actions_progress.py` helper writes compact phase/state notices and a run summary so an Owner can open the GitHub Actions run and see `WAKE -> CONTROL -> PRODUCT -> CODEX -> WRITE -> STARTED -> VALIDATE -> INTEGRATE -> RESULT` without reading raw logs. Exact GitHub evidence remains authoritative; the progress timeline is observability only.
+
+
+## First private product pilot
+
+The first product pilot uses the same ChatGPT-plan Codex session but keeps product-specific scope and repository topology in a private DEV-CONTROL work order. The public runner receives only an owner-created wake identity and exact SHAs, checks out the private control record and product source with separate credentials, and asks Codex for a structured unified diff while Codex remains read-only.
+
+Before applying the diff, the runner rejects binary/rename/copy/submodule changes and any path outside the private work-order allowlist. It then commits the bounded source change, creates and reads back a Draft product PR to establish STARTED, waits for the exact PR-head product validation, performs only the explicitly authorized active-development integration, and waits for exact integrated-SHA validation.
+
+The CLASSMO pilot requires a separate `CLASSMO_WRITE_TOKEN` Actions secret scoped only to the CLASSMO repository. The pilot credential needs repository Contents read/write, Pull requests read/write, and Actions read access. It must not have Secrets, Administration, Workflows write, deployments, or unrelated repository access.
