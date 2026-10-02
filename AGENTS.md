@@ -10,3 +10,4 @@
 8. Persist a rotated Codex file credential only by replacing the protected GitHub Actions secret after a successful run. Never preserve the credential in artifacts, caches, logs, source, commit history, or PR comments.
 9. Keep authentication, private-repository access, and future source-write authority as separate credentials with the narrowest practical permissions.
 10. A failed or missing external gate is reported as a gate. Do not fake PASS evidence or broaden authority to work around it.
+11. Every source-writing Dispatcher v2 workflow must expose the canonical progress phases in `docs/ACTIONS_PROGRESS.md`. Progress output is observability only: never print secrets or arbitrary private task prose, and never treat a progress marker as authority or as evidence for a stage that was not independently verified.
