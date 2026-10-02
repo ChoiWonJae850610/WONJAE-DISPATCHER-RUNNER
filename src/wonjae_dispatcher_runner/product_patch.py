@@ -169,7 +169,9 @@ def parse_edit_plan(response: str, work_order: ProductWorkOrder) -> tuple[Produc
         if len(old_text) > MAX_TEXT_CHARS or len(new_text) > MAX_TEXT_CHARS:
             raise ProductPilotError("Codex edit text exceeded the bounded size limit")
         if not new_text:
-            raise ProductPilotError("Codex edit may not delete a file or replace with empty content")
+            raise ProductPilotError(
+                "Codex edit may not delete a file or replace with empty content"
+            )
         if operation == "create":
             if old_text:
                 raise ProductPilotError("create edits must use an empty old_text")
@@ -275,12 +277,13 @@ def _bounded_prompt(work_order: ProductWorkOrder, control_sha: str) -> str:
             "",
             "Do not modify files directly. Do not commit, push, create PRs, use network services, "
             "or access credentials. Inspect the read-only checkout, then return a structured edit "
-            "plan. For an existing file use operation=replace with an exact old_text snippet copied "
-            "verbatim from that file and the intended new_text; choose the smallest snippet that "
-            "matches exactly once. For a new file use operation=create, old_text='', and the complete "
-            "new file content. Return at least one edit. Implement the task completely within the "
-            "allowed paths, include focused tests, preserve truthful evidence boundaries, and do not "
-            "invent capabilities that the current repository cannot support safely.",
+            "plan. For an existing file use operation=replace with an exact old_text snippet "
+            "copied verbatim from that file and the intended new_text; choose the smallest "
+            "snippet that matches exactly once. For a new file use operation=create, old_text='', "
+            "and the complete new file content. Return at least one edit. Implement the task "
+            "completely within the allowed paths, include focused tests, preserve truthful "
+            "evidence boundaries, and do not invent capabilities that the current repository "
+            "cannot support safely.",
         ]
     )
 
