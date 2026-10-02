@@ -26,9 +26,9 @@ def main() -> int:
         completed = login.wait()
         if not completed.success:
             raise RuntimeError("ChatGPT device authorization did not complete successfully")
-        account = codex.account(refresh_token=True)
-        if account.requires_openai_auth:
-            raise RuntimeError("Codex still requires authentication after device authorization")
+        account = codex.account(refresh_token=False)
+        if account.account is None:
+            raise RuntimeError("Codex account is missing after device authorization")
 
     # Validate presence and structure, but never print the credential payload.
     load_auth_json_for_rotation(codex_home)

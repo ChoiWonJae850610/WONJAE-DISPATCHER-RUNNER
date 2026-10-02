@@ -44,8 +44,8 @@ def run_readonly_head_probe(repo_path: Path, expected_sha: str, codex_home: Path
 
     with Codex(config=config) as codex:
         account = codex.account(refresh_token=True)
-        if account.requires_openai_auth:
-            raise PilotError("Codex account session requires authentication")
+        if account.account is None:
+            raise PilotError("Codex account session is missing")
 
         thread = codex.thread_start(
             approval_mode=ApprovalMode.deny_all,
