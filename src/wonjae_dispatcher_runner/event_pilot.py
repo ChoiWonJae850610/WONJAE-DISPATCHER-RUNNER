@@ -58,7 +58,11 @@ def validate_diff(repo_path: Path, expected_sha: str) -> Path:
 
 def _context(repo_path: Path) -> str:
     chunks: list[str] = []
-    for relative in ("AGENTS.md", "PROJECT_RULES.md", "docs/pilots/DISPATCHER_V2_SIWC_WRITE_001.md"):
+    for relative in (
+        "AGENTS.md",
+        "PROJECT_RULES.md",
+        "docs/pilots/DISPATCHER_V2_SIWC_WRITE_001.md",
+    ):
         path = repo_path / relative
         if not path.is_file():
             raise WritePilotError(f"required event context is missing: {relative}")
