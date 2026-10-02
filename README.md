@@ -99,3 +99,19 @@ The first product pilot uses the same ChatGPT-plan Codex session but keeps produ
 Before applying the diff, the runner rejects binary/rename/copy/submodule changes and any path outside the private work-order allowlist. It then commits the bounded source change, creates and reads back a Draft product PR to establish STARTED, waits for the exact PR-head product validation, performs only the explicitly authorized active-development integration, and waits for exact integrated-SHA validation.
 
 CLASSMO requires a separate `CLASSMO_WRITE_TOKEN` Actions secret scoped only to the CLASSMO repository. The credential needs repository Contents read/write, Pull requests read/write, and Actions read access. It must not have Secrets, Administration, Workflows write, deployments, or unrelated repository access. Other products use the same per-product isolation pattern only after their own Dispatcher v2 onboarding is separately validated.
+
+
+## Multi-product Dispatcher v2
+
+The validated CLASSMO execution pattern is now available through separate
+product-isolated workflows for WAFL, ESC, and MUVEL. Each workflow accepts only
+its own owner-authored wake prefix, derives only its own
+`tasks-v2/<PROJECT>/<TASK-ID>.json` path, checks out only its own private
+product repository with that product's dedicated write token, rejects concurrent
+same-product `job/` PRs, and binds integration to the validation workflow named
+by the private control record.
+
+Separate product workflows intentionally permit WAFL, ESC, MUVEL, and CLASSMO
+runs to execute independently. No product token is shared across workflows.
+A product is not considered migrated merely because its runner workflow exists;
+DEV-CONTROL routing changes only after that product's exact v2 E2E pilot passes.
