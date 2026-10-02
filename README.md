@@ -130,3 +130,9 @@ Thin product adapters keep credentials isolated:
 The common core supports compatible EAS Workflow updates, direct compatible EAS updates, and dispatch of an already repository-owned GitHub Actions workflow. EAS actions fail closed on app/native/dependency configuration changes since the declared compatible signed baseline. A missing project-scoped provider credential is terminal `MANUAL_REQUIRED`, not a reason to reuse a credential from another product.
 
 Provider STARTED/RESULT evidence is written to the exact owner-authored runner wake issue. A provider PASS is limited to the provider stage actually executed; device receipt, iOS/iPad physical QA, Windows physical QA, Production, release, and other unperformed stages remain separate.
+
+For `eas_workflow_update`, the runner executes from the exact product checkout
+and uploads that local Expo project to EAS. It intentionally does not pass
+`eas workflow:run --ref`: the exact Git SHA is independently proved immediately
+before upload, while local-project mode resolves `.eas/workflows` beside the
+app directory's `eas.json`.
