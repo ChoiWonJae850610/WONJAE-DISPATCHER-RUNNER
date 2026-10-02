@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       expected_control_sha:
-        description: Exact 40-character DEV-CONTROL commit SHA to verify
+        description: Exact 40-character control commit SHA to verify
         required: true
         type: string
 
@@ -13,12 +13,10 @@ permissions:
 
 jobs:
   readonly:
-    if: github.ref == 'refs/heads/main' && github.actor == github.repository_owner
+    if: ${{ github.ref == 'refs/heads/main' && github.actor == github.repository_owner }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
-      CODEX_HOME: ${{ runner.temp }}/codex-home
-      CONTROL_CHECKOUT: ${{ runner.temp }}/control
       CONTROL_REPOSITORY: ${{ vars.CONTROL_REPOSITORY }}
       EXPECTED_CONTROL_SHA: ${{ inputs.expected_control_sha }}
       PYTHONUNBUFFERED: "1"
@@ -53,12 +51,17 @@ jobs:
           ref: main
           persist-credentials: false
 
+      - name: Initialize ephemeral paths
+        run: |
+          echo "CODEX_HOME=$RUNNER_TEMP/codex-home" >> "$GITHUB_ENV"
+          echo "CONTROL_CHECKOUT=$GITHUB_WORKSPACE/.pilot/control" >> "$GITHUB_ENV"
+
       - name: Checkout exact private control commit
         uses: actions/checkout@v6
         with:
           repository: ${{ vars.CONTROL_REPOSITORY }}
           ref: ${{ inputs.expected_control_sha }}
-          path: ${{ runner.temp }}/control
+          path: .pilot/control
           token: ${{ secrets.CONTROL_READ_TOKEN }}
           persist-credentials: false
 
@@ -86,7 +89,7 @@ jobs:
         run: python scripts/run_readonly_pilot.py
 
       - name: Persist any rotated Codex credential
-        if: success()
+        if: ${{ success() }}
         env:
           GH_TOKEN: ${{ secrets.SECRET_ROTATION_TOKEN }}
         run: |
@@ -95,5 +98,5 @@ jobs:
           echo "CODEX_AUTH_JSON_UPDATED=true"
 
       - name: Delete ephemeral credential files
-        if: always()
+        if: ${{ always() }}
         run: rm -rf "$CODEX_HOME"

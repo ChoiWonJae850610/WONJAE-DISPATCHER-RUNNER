@@ -8,11 +8,10 @@ permissions:
 
 jobs:
   bootstrap:
-    if: github.ref == 'refs/heads/main' && github.actor == github.repository_owner
+    if: ${{ github.ref == 'refs/heads/main' && github.actor == github.repository_owner }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
-      CODEX_HOME: ${{ runner.temp }}/codex-home
       PYTHONUNBUFFERED: "1"
 
     steps:
@@ -30,6 +29,9 @@ jobs:
         with:
           ref: main
           persist-credentials: false
+
+      - name: Initialize ephemeral credential path
+        run: echo "CODEX_HOME=$RUNNER_TEMP/codex-home" >> "$GITHUB_ENV"
 
       - name: Set up Python
         uses: actions/setup-python@v6
@@ -52,5 +54,5 @@ jobs:
           echo "CODEX_AUTH_JSON_UPDATED=true"
 
       - name: Delete ephemeral credential files
-        if: always()
+        if: ${{ always() }}
         run: rm -rf "$CODEX_HOME"
