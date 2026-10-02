@@ -29,7 +29,7 @@ jobs:
       PYTHONUNBUFFERED: "1"
 
     steps:
-      - name: Require protected configuration
+      - name: "[00] Security · protected configuration"
         env:
           CODEX_AUTH_JSON: ${{ secrets.CODEX_AUTH_JSON }}
           CONTROL_WRITE_TOKEN: ${{ secrets.CONTROL_WRITE_TOKEN }}
@@ -40,7 +40,7 @@ jobs:
           test -n "$CONTROL_WRITE_TOKEN" || { echo "::error::CONTROL_WRITE_TOKEN is missing."; exit 1; }
           test -n "$SECRET_ROTATION_TOKEN" || { echo "::error::SECRET_ROTATION_TOKEN is missing."; exit 1; }
 
-      - name: Parse exact control SHA from trusted wake title
+      - name: "[01] WAKE · trusted event"
         run: |
           python - <<'PY'
           import os
@@ -57,18 +57,21 @@ jobs:
               handle.write(f"EXPECTED_CONTROL_SHA={match.group(1)}\n")
           PY
 
-      - name: Checkout trusted runner code
+      - name: "[02] Runner · trusted code"
         uses: actions/checkout@v6
         with:
           ref: main
           persist-credentials: false
 
-      - name: Initialize ephemeral paths
+      - name: "[01] WAKE · progress"
+        run: python scripts/actions_progress.py WAKE PASS
+
+      - name: "[02] Runner · ephemeral paths"
         run: |
           echo "CODEX_HOME=$RUNNER_TEMP/codex-home" >> "$GITHUB_ENV"
           echo "CONTROL_CHECKOUT=$GITHUB_WORKSPACE/.pilot/control" >> "$GITHUB_ENV"
 
-      - name: Checkout current private control main
+      - name: "[03] CONTROL · checkout current main"
         uses: actions/checkout@v6
         with:
           repository: ${{ vars.CONTROL_REPOSITORY }}
@@ -77,7 +80,7 @@ jobs:
           token: ${{ secrets.CONTROL_WRITE_TOKEN }}
           persist-credentials: false
 
-      - name: Verify exact clean control baseline
+      - name: "[03] CONTROL · verify exact baseline"
         run: |
           actual="$(git -C "$CONTROL_CHECKOUT" rev-parse HEAD)"
           test "$actual" = "$EXPECTED_CONTROL_SHA" || {
@@ -89,28 +92,32 @@ jobs:
             exit 1
           }
           echo "CONTROL_EXACT_SHA=$actual"
+          python "$GITHUB_WORKSPACE/scripts/actions_progress.py" CONTROL PASS --sha "$actual"
 
-      - name: Create bounded local event branch
+      - name: "[04] WRITE · prepare bounded branch"
         run: |
           git -C "$CONTROL_CHECKOUT" checkout -b "$PILOT_BRANCH"
           git -C "$CONTROL_CHECKOUT" config user.name "WONJAE Dispatcher Runner"
           git -C "$CONTROL_CHECKOUT" config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-      - name: Set up Python
+      - name: "[04] CODEX · Python runtime"
         uses: actions/setup-python@v6
         with:
           python-version: "3.12"
           cache: pip
 
-      - name: Install runner
+      - name: "[04] CODEX · install runner"
         run: python -m pip install .
 
-      - name: Run authenticated bounded event handoff
+      - name: "[04] CODEX · authenticated handoff"
         env:
           CODEX_AUTH_JSON: ${{ secrets.CODEX_AUTH_JSON }}
-        run: python scripts/run_event_pilot.py
+        run: |
+          python scripts/actions_progress.py CODEX RUNNING
+          python scripts/run_event_pilot.py
+          python scripts/actions_progress.py CODEX PASS
 
-      - name: Independently validate and commit exact one-file diff
+      - name: "[05] WRITE · validate exact diff and commit"
         run: |
           cd "$CONTROL_CHECKOUT"
           mapfile -t changed < <(git status --porcelain=v1 --untracked-files=all | sed -E 's/^...//')
@@ -121,9 +128,11 @@ jobs:
           test "${#staged[@]}" -eq 1
           test "${staged[0]}" = "$PILOT_PATH"
           git commit -m "pilot: validate event wake write path"
-          echo "PILOT_HEAD_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+          head="$(git rev-parse HEAD)"
+          echo "PILOT_HEAD_SHA=$head" >> "$GITHUB_ENV"
+          python "$GITHUB_WORKSPACE/scripts/actions_progress.py" WRITE PASS --sha "$head"
 
-      - name: Publish event pilot branch
+      - name: "[06] STARTED · publish branch"
         env:
           GH_TOKEN: ${{ secrets.CONTROL_WRITE_TOKEN }}
         run: |
@@ -131,7 +140,7 @@ jobs:
           gh auth setup-git
           git push --set-upstream origin "HEAD:refs/heads/$PILOT_BRANCH"
 
-      - name: Create Draft control PR
+      - name: "[06] STARTED · create Draft PR"
         env:
           GH_TOKEN: ${{ secrets.CONTROL_WRITE_TOKEN }}
         run: |
@@ -139,7 +148,7 @@ jobs:
           pr_url="$(gh pr create             --repo "$CONTROL_REPOSITORY"             --draft             --base main             --head "$PILOT_BRANCH"             --title "[PILOT][DISPATCHER-V2] CONTROL-DISPATCHER-V2-WAKE-WRITE-001"             --body "Event-wake documentation pilot. No product TASK or product repository mutation. Source baseline: $EXPECTED_CONTROL_SHA. Head: $PILOT_HEAD_SHA.")"
           echo "PILOT_PR_URL=$pr_url" >> "$GITHUB_ENV"
 
-      - name: Read back exact Draft PR
+      - name: "[06] STARTED · read back Draft PR"
         env:
           GH_TOKEN: ${{ secrets.CONTROL_WRITE_TOKEN }}
         run: |
@@ -151,11 +160,14 @@ jobs:
             .headRefName == $branch and
             .headRefOid == $sha
           ' >/dev/null
-          echo "PILOT_PR_NUMBER=$(echo "$json" | jq -r .number)"
-          echo "PILOT_HEAD_SHA=$(echo "$json" | jq -r .headRefOid)"
-          echo "PILOT_PR_URL=$(echo "$json" | jq -r .url)"
+          pr_number="$(echo "$json" | jq -r .number)"
+          head_sha="$(echo "$json" | jq -r .headRefOid)"
+          echo "PILOT_PR_NUMBER=$pr_number" >> "$GITHUB_ENV"
+          echo "PILOT_HEAD_SHA=$head_sha" >> "$GITHUB_ENV"
+          echo "PILOT_PR_URL=$(echo "$json" | jq -r .url)" >> "$GITHUB_ENV"
+          python "$GITHUB_WORKSPACE/scripts/actions_progress.py" STARTED PASS --sha "$head_sha" --pr "$pr_number"
 
-      - name: Persist any rotated Codex credential
+      - name: "[07] Auth · persist rotated Codex credential"
         if: ${{ success() }}
         env:
           GH_TOKEN: ${{ secrets.SECRET_ROTATION_TOKEN }}
@@ -164,21 +176,23 @@ jobs:
           gh secret set CODEX_AUTH_JSON --repo "$GITHUB_REPOSITORY" < "$CODEX_HOME/auth.json"
           echo "CODEX_AUTH_JSON_UPDATED=true"
 
-      - name: Report event pilot PASS
+      - name: "[08] RESULT · PASS"
         if: ${{ success() }}
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh issue comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY"             --body "PASS: the trusted wake event started the runner automatically and one private Draft PR was created and read back."
           gh issue close "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --reason completed
+          python scripts/actions_progress.py RESULT PASS --sha "$PILOT_HEAD_SHA" --pr "$PILOT_PR_NUMBER"
 
-      - name: Report event pilot failure
+      - name: "[08] RESULT · failure evidence"
         if: ${{ failure() }}
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh issue comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY"             --body "FAIL: inspect this public Actions run for the bounded wake pilot. No broader authority was granted."
+          python scripts/actions_progress.py RESULT FAIL || true
 
-      - name: Delete ephemeral credential files
+      - name: "[09] Cleanup · ephemeral credentials"
         if: ${{ always() }}
         run: rm -rf "$CODEX_HOME"
