@@ -127,3 +127,9 @@ def test_provider_core_supports_common_action_families() -> None:
     assert "github_workflow_dispatch" in text
     assert "provider_action.py check-ota" in text
     assert "source_validation_run" in text
+
+
+def test_provider_evidence_uses_printf_not_shell_backtick_substitution() -> None:
+    text = Path(".github/workflows/provider-action-core.yml").read_text(encoding="utf-8")
+    assert 'echo "- task_id: `$TASK_ID`"' not in text
+    assert "printf -- '- task_id: `%s`\\n' \"$TASK_ID\"" in text
