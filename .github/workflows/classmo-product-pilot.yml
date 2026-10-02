@@ -1,4 +1,4 @@
-name: CLASSMO Product Pilot
+name: CLASSMO Dispatcher v2
 
 on:
   issues:
@@ -16,7 +16,7 @@ jobs:
       github.event.issue.user.login == github.repository_owner &&
       startsWith(
         github.event.issue.title,
-        '[PRODUCT-WAKE][DISPATCHER-V2] CLASSMO-V2-CORE-UX-INTEGRATION-POLISH-001 '
+        '[PRODUCT-WAKE][DISPATCHER-V2] CLASSMO '
       )
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -24,7 +24,6 @@ jobs:
       CONTROL_REPOSITORY: ${{ vars.CONTROL_REPOSITORY }}
       WAKE_TITLE: ${{ github.event.issue.title }}
       ISSUE_NUMBER: ${{ github.event.issue.number }}
-      WORK_ORDER_RELATIVE: docs/pilots/DISPATCHER_V2_CLASSMO_PRODUCT_002.json
       PYTHONUNBUFFERED: "1"
 
     steps:
@@ -49,15 +48,20 @@ jobs:
 
           title = os.environ["WAKE_TITLE"]
           match = re.fullmatch(
-              r"\[PRODUCT-WAKE\]\[DISPATCHER-V2\] "
-              r"CLASSMO-V2-CORE-UX-INTEGRATION-POLISH-001 ([0-9a-f]{40}) ([0-9a-f]{40})",
+              r"\[PRODUCT-WAKE\]\[DISPATCHER-V2\] CLASSMO "
+              r"(CLASSMO-[A-Z0-9][A-Z0-9-]*-[0-9]{3}) "
+              r"([0-9a-f]{40}) ([0-9a-f]{40})",
               title,
           )
           if match is None:
-              raise SystemExit("invalid CLASSMO product wake title")
+              raise SystemExit("invalid CLASSMO Dispatcher v2 wake title")
+          task_id, control_sha, source_sha = match.groups()
+          work_order_relative = f"tasks-v2/CLASSMO/{task_id}.json"
           with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as handle:
-              handle.write(f"CONTROL_SHA={match.group(1)}\n")
-              handle.write(f"SOURCE_SHA={match.group(2)}\n")
+              handle.write(f"TASK_ID={task_id}\n")
+              handle.write(f"CONTROL_SHA={control_sha}\n")
+              handle.write(f"SOURCE_SHA={source_sha}\n")
+              handle.write(f"WORK_ORDER_RELATIVE={work_order_relative}\n")
           PY
 
       - name: "[01] Runner · trusted code"
@@ -97,8 +101,10 @@ jobs:
 
           work = json.loads(Path(os.environ["WORK_ORDER_FILE"]).read_text(encoding="utf-8"))
           required = {
-              "task_id": "CLASSMO-V2-CORE-UX-INTEGRATION-POLISH-001",
+              "task_id": os.environ["TASK_ID"],
               "project": "CLASSMO",
+              "repository": "ChoiWonJae850610/CLASSMO",
+              "target_branch": "cloud-dev-v1",
               "source_base_sha": os.environ["SOURCE_SHA"],
           }
           for key, expected in required.items():
@@ -106,13 +112,25 @@ jobs:
                   raise SystemExit(f"private work order {key} mismatch")
           if work.get("integration_authorized") is not True:
               raise SystemExit("integration is not authorized by the private work order")
+          attempt = work.get("attempt")
+          revision = work.get("revision")
+          profile = work.get("profile")
+          if not isinstance(attempt, int) or attempt < 1:
+              raise SystemExit("private work order attempt must be a positive integer")
+          if not isinstance(revision, int) or revision < 1:
+              raise SystemExit("private work order revision must be a positive integer")
+          if not isinstance(profile, str) or not profile.strip():
+              raise SystemExit("private work order profile is missing")
           values = {
-              "TASK_ID": work["task_id"],
               "PRODUCT_REPOSITORY": work["repository"],
               "TARGET_BRANCH": work["target_branch"],
               "PRODUCT_BRANCH": "job/" + work["task_id"],
               "PRODUCT_PR_TITLE": f"[{work['task_id']}] {work['title']}",
               "VALIDATION_WORKFLOW_FILE": Path(work["validation_workflow_path"]).name,
+              "ATTEMPT": str(attempt),
+              "REVISION": str(revision),
+              "PROFILE": profile.strip(),
+              "CONTROL_RECORD_PATH": os.environ["WORK_ORDER_RELATIVE"],
           }
           with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as handle:
               for key, value in values.items():
@@ -146,6 +164,12 @@ jobs:
             echo "::error::Target branch advanced after work-order creation."
             exit 1
           }
+          conflict_prs="$(gh pr list --repo "$PRODUCT_REPOSITORY" --state open --base "$TARGET_BRANCH" --json number,headRefName --jq '.[] | select(.headRefName | startswith("job/")) | "\(.number) \(.headRefName)"')"
+          if [ -n "$conflict_prs" ]; then
+            echo "::error::Another CLASSMO job pull request is already open."
+            echo "$conflict_prs"
+            exit 1
+          fi
           git -C "$PRODUCT_CHECKOUT" checkout -b "$PRODUCT_BRANCH"
           git -C "$PRODUCT_CHECKOUT" config user.name "WONJAE Dispatcher Runner"
           git -C "$PRODUCT_CHECKOUT" config user.email "41898282+github-actions[bot]@users.noreply.github.com"
@@ -182,7 +206,7 @@ jobs:
           changed_count="$(git status --porcelain=v1 --untracked-files=all | wc -l | tr -d ' ')"
           test "$changed_count" -gt 0 || { echo "::error::No product changes materialized."; exit 1; }
           git add --all
-          git commit -m "[$TASK_ID] Productize Member Home"
+          git commit -m "[$TASK_ID] Apply bounded Dispatcher v2 task"
           head="$(git rev-parse HEAD)"
           echo "PILOT_HEAD_SHA=$head" >> "$GITHUB_ENV"
           python "$GITHUB_WORKSPACE/scripts/actions_progress.py" WRITE PASS --sha "$head"
@@ -200,7 +224,26 @@ jobs:
           GH_TOKEN: ${{ secrets.CLASSMO_WRITE_TOKEN }}
         run: |
           cd "$PRODUCT_CHECKOUT"
-          pr_url="$(gh pr create             --repo "$PRODUCT_REPOSITORY"             --draft             --base "$TARGET_BRANCH"             --head "$PRODUCT_BRANCH"             --title "$PRODUCT_PR_TITLE"             --body "Dispatcher v2 product pilot. Task-ID: $TASK_ID. Control SHA: $CONTROL_SHA. Source base: $SOURCE_SHA. Source-only scope; runtime, EAS, OTA, iPhone and iPad remain NOT_RUN.")"
+          body_file="$RUNNER_TEMP/classmo-v2-pr-body.md"
+          {
+            printf '%s\n' '## Dispatcher v2 metadata'
+            printf '\n'
+            printf -- '- dispatcher_version: `2`\n'
+            printf -- '- task_id: `%s`\n' "$TASK_ID"
+            printf -- '- project: `CLASSMO`\n'
+            printf -- '- attempt: `%s`\n' "$ATTEMPT"
+            printf -- '- revision: `%s`\n' "$REVISION"
+            printf -- '- profile: `%s`\n' "$PROFILE"
+            printf -- '- repository: `%s`\n' "$PRODUCT_REPOSITORY"
+            printf -- '- target_branch: `%s`\n' "$TARGET_BRANCH"
+            printf -- '- source_base_sha: `%s`\n' "$SOURCE_SHA"
+            printf -- '- control_sha: `%s`\n' "$CONTROL_SHA"
+            printf -- '- control_record_path: `%s`\n' "$CONTROL_RECORD_PATH"
+            printf -- '- integration_condition: `pr_merged`\n'
+            printf -- '- required_validation: `CLASSMO Cloud Validation at exact PR head and exact integrated SHA`\n'
+            printf '\n%s\n' 'This PR is owned by CLASSMO Dispatcher v2. Runtime, EAS, OTA, iPhone and iPad remain separate evidence unless the private work order explicitly authorizes and verifies those stages.'
+          } > "$body_file"
+          pr_url="$(gh pr create --repo "$PRODUCT_REPOSITORY" --draft --base "$TARGET_BRANCH" --head "$PRODUCT_BRANCH" --title "$PRODUCT_PR_TITLE" --body-file "$body_file")"
           echo "PILOT_PR_URL=$pr_url" >> "$GITHUB_ENV"
 
       - name: "[06] STARTED · read back Draft product PR"
@@ -278,14 +321,34 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.CLASSMO_WRITE_TOKEN }}
         run: |
-          gh pr comment "$PILOT_PR_NUMBER" --repo "$PRODUCT_REPOSITORY"             --body "Dispatcher v2 RESULT: PASS. Task $TASK_ID integrated at $INTEGRATED_SHA. Exact PR-head validation run: $PR_HEAD_RUN_ID. Exact integrated-SHA validation run: $INTEGRATED_RUN_ID. Runtime, EAS, OTA, iPhone and iPad: NOT_RUN."
+          result_file="$RUNNER_TEMP/classmo-v2-result.md"
+          {
+            printf '%s\n' '## Dispatcher v2 completion evidence'
+            printf '\n'
+            printf -- '- dispatcher_version: `2`\n'
+            printf -- '- task_id: `%s`\n' "$TASK_ID"
+            printf -- '- attempt: `%s`\n' "$ATTEMPT"
+            printf -- '- revision: `%s`\n' "$REVISION"
+            printf -- '- control_sha: `%s`\n' "$CONTROL_SHA"
+            printf -- '- final_pr_head: `%s`\n' "$PILOT_HEAD_SHA"
+            printf -- '- exact_pr_head_validation_run: `%s`\n' "$PR_HEAD_RUN_ID"
+            printf -- '- integrated_sha: `%s`\n' "$INTEGRATED_SHA"
+            printf -- '- exact_integrated_sha_validation_run: `%s`\n' "$INTEGRATED_RUN_ID"
+            printf -- '- result: `PASS`\n'
+            printf -- '- runtime: `NOT_RUN`\n'
+            printf -- '- EAS: `NOT_RUN`\n'
+            printf -- '- OTA: `NOT_RUN`\n'
+            printf -- '- iPhone: `NOT_RUN`\n'
+            printf -- '- iPad: `NOT_RUN`\n'
+          } > "$result_file"
+          gh pr comment "$PILOT_PR_NUMBER" --repo "$PRODUCT_REPOSITORY" --body-file "$result_file"
           python scripts/actions_progress.py RESULT PASS --sha "$INTEGRATED_SHA" --pr "$PILOT_PR_NUMBER"
 
       - name: "[10] RESULT · close wake issue"
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh issue comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY"             --body "PASS: CLASSMO product pilot integrated with exact-head and exact-integrated-SHA validation."
+          gh issue comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY"             --body "PASS: CLASSMO Dispatcher v2 integrated with exact-head and exact-integrated-SHA validation."
           gh issue close "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --reason completed
 
       - name: "[10] RESULT · failure evidence"
@@ -293,7 +356,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh issue comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY"             --body "FAIL: inspect this Actions run. The product pilot did not claim completion or any unperformed runtime/device stage."
+          gh issue comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY"             --body "FAIL: inspect this CLASSMO Dispatcher v2 Actions run. No completion or unperformed runtime/device PASS is claimed."
           python scripts/actions_progress.py RESULT FAIL || true
 
       - name: "[11] Cleanup · ephemeral credentials"

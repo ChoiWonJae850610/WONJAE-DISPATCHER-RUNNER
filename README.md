@@ -76,6 +76,26 @@ The workflow requires the additional `CONTROL_WRITE_TOKEN` repository secret, sc
 Dispatcher v2 workflows use the canonical phases in `docs/ACTIONS_PROGRESS.md`. The reusable `scripts/actions_progress.py` helper writes compact phase/state notices and a run summary so an Owner can open the GitHub Actions run and see `WAKE -> CONTROL -> PRODUCT -> CODEX -> WRITE -> STARTED -> VALIDATE -> INTEGRATE -> RESULT` without reading raw logs. Exact GitHub evidence remains authoritative; the progress timeline is observability only.
 
 
+## CLASSMO Dispatcher v2
+
+CLASSMO has passed an exact-SHA end-to-end product run and now uses a task-generic
+v2 workflow rather than a hard-coded pilot Task-ID. The Owner creates an exact
+private work order at `tasks-v2/CLASSMO/<TASK-ID>.json` in DEV-CONTROL, then
+opens an owner-authored wake issue whose title contains the Task-ID, exact
+Control SHA, and exact CLASSMO source SHA. The workflow re-reads that record at
+the supplied Control SHA, rejects stale source or concurrent open `job/` PRs,
+runs Codex read-only against bounded supplied context, applies only validated
+allowed-path edits, creates and reads back a Draft product PR, validates the
+exact PR head, integrates only to `cloud-dev-v1` when authorized, and validates
+the exact integrated SHA.
+
+The product PR contains structured Dispatcher v2 metadata and the terminal
+comment contains `## Dispatcher v2 completion evidence` so the read-only
+notification observer can reconcile STARTED and terminal RESULT without becoming
+an execution authority. Runtime, EAS, OTA, device, Production, release, and
+other separately gated stages remain outside a source-only work order unless a
+future exact work order and product rules explicitly authorize them.
+
 ## First private product pilot
 
 The first product pilot uses the same ChatGPT-plan Codex session but keeps product-specific scope and repository topology in a private DEV-CONTROL work order. The public runner receives only an owner-created wake identity and exact SHAs, checks out the private control record and product source with separate credentials, and asks Codex for a structured unified diff while Codex remains read-only.
