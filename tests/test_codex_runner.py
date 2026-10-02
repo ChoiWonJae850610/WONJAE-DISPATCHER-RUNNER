@@ -1,8 +1,8 @@
 import pytest
 
 from wonjae_dispatcher_runner.codex_runner import (
-    PilotError,
     extract_unique_reported_sha,
+    PilotError,
 )
 
 
