@@ -243,7 +243,7 @@ jobs:
 - required_validation: `CLASSMO Cloud Validation at exact PR head and exact integrated SHA`
 
 This PR is owned by CLASSMO Dispatcher v2. Runtime, EAS, OTA, iPhone and iPad remain separate evidence unless the private work order explicitly authorizes and verifies those stages.
-EOF
+          EOF
           pr_url="$(gh pr create --repo "$PRODUCT_REPOSITORY" --draft --base "$TARGET_BRANCH" --head "$PRODUCT_BRANCH" --title "$PRODUCT_PR_TITLE" --body-file "$body_file")"
           echo "PILOT_PR_URL=$pr_url" >> "$GITHUB_ENV"
 
@@ -341,7 +341,7 @@ EOF
 - OTA: `NOT_RUN`
 - iPhone: `NOT_RUN`
 - iPad: `NOT_RUN`
-EOF
+          EOF
           gh pr comment "$PILOT_PR_NUMBER" --repo "$PRODUCT_REPOSITORY" --body-file "$result_file"
           python scripts/actions_progress.py RESULT PASS --sha "$INTEGRATED_SHA" --pr "$PILOT_PR_NUMBER"
 
