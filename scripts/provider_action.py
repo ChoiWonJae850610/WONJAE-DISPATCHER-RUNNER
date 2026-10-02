@@ -307,26 +307,53 @@ def parse_update(args: argparse.Namespace) -> None:
     data = read_json(args.input)
     message = args.message
     runtime = args.runtime_version
+    platform = getattr(args, "platform", None)
     matches: list[dict[str, Any]] = []
     for item in _walk(data):
         item_message = item.get("message")
         item_runtime = item.get("runtimeVersion") or item.get("runtime_version")
-        if item_message == message and (item_runtime in (None, runtime)):
+        item_platforms = item.get("platforms") or item.get("platform")
+        platform_ok = True
+        if platform and isinstance(item_platforms, str):
+            platform_ok = platform.lower() in item_platforms.lower()
+        if item_message == message and item_runtime == runtime and platform_ok:
             matches.append(item)
     if not matches:
-        fail("matching EAS update was not found after provider execution")
+        fail("matching EAS update group was not found after provider execution")
     chosen = matches[0]
-    update_id = chosen.get("id") or chosen.get("updateId") or chosen.get("update_id")
     group_id = chosen.get("group") or chosen.get("groupId") or chosen.get("group_id")
-    if not isinstance(update_id, str) or not update_id:
-        if isinstance(group_id, str) and group_id:
-            update_id = group_id
-        else:
-            fail("matching EAS update has no readable ID")
-    values = {"EAS_UPDATE_ID": update_id}
-    if isinstance(group_id, str) and group_id:
-        values["EAS_UPDATE_GROUP_ID"] = group_id
+    if not isinstance(group_id, str) or not group_id:
+        fail("matching EAS update group has no readable group ID")
+    values = {"EAS_UPDATE_GROUP_ID": group_id}
+    update_id = chosen.get("id") or chosen.get("updateId") or chosen.get("update_id")
+    if isinstance(update_id, str) and update_id:
+        values["EAS_UPDATE_ID"] = update_id
     write_env(args.github_env, values)
+
+
+def parse_update_view(args: argparse.Namespace) -> None:
+    data = read_json(args.input)
+    runtime = args.runtime_version
+    platform = args.platform.lower()
+    group_id = args.group_id
+    matches: list[dict[str, Any]] = []
+    for item in _walk(data):
+        item_id = item.get("id") or item.get("updateId") or item.get("update_id")
+        item_group = item.get("group") or item.get("groupId") or item.get("group_id")
+        item_runtime = item.get("runtimeVersion") or item.get("runtime_version")
+        item_platform = item.get("platform")
+        if (
+            isinstance(item_id, str)
+            and item_id
+            and item_group == group_id
+            and item_runtime == runtime
+            and isinstance(item_platform, str)
+            and item_platform.lower() == platform
+        ):
+            matches.append(item)
+    if not matches:
+        fail("matching platform-specific EAS update was not found in update group")
+    write_env(args.github_env, {"EAS_UPDATE_ID": matches[0]["id"]})
 
 
 def main() -> None:
@@ -376,8 +403,17 @@ def main() -> None:
     p.add_argument("--input", required=True)
     p.add_argument("--message", required=True)
     p.add_argument("--runtime-version", required=True)
+    p.add_argument("--platform")
     p.add_argument("--github-env", required=True)
     p.set_defaults(func=parse_update)
+
+    p = sub.add_parser("parse-update-view")
+    p.add_argument("--input", required=True)
+    p.add_argument("--group-id", required=True)
+    p.add_argument("--runtime-version", required=True)
+    p.add_argument("--platform", required=True)
+    p.add_argument("--github-env", required=True)
+    p.set_defaults(func=parse_update_view)
 
     args = parser.parse_args()
     args.func(args)
