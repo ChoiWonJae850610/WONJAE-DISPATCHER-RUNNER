@@ -179,3 +179,73 @@ def test_provider_status_installs_app_deps_only_for_eas_config_resolution() -> N
     assert "EAS · install app dependencies for config resolution" in text
     assert "npm ci --ignore-scripts --no-audit --no-fund" in text
     assert "eas workflow:status" in text
+
+
+def test_parse_update_group_accepts_eas_list_formatted_message(tmp_path: Path) -> None:
+    payload = {
+        "currentPage": [
+            {
+                "branch": "preview",
+                "message": '"CLASSMO 0.0.11 Core UX preview" (5 hours ago by robot)',
+                "runtimeVersion": "0.0.11",
+                "group": "c470fd4f-cb97-4fba-9a41-e55f7a00115b",
+                "platforms": "ios",
+            }
+        ]
+    }
+    input_path = tmp_path / "update-list.json"
+    env_path = tmp_path / "env"
+    input_path.write_text(json.dumps(payload), encoding="utf-8")
+    MODULE.parse_update_group(
+        Namespace(
+            input=str(input_path),
+            message="CLASSMO 0.0.11 Core UX preview",
+            runtime_version="0.0.11",
+            platform="ios",
+            github_env=str(env_path),
+        )
+    )
+    assert (
+        "EAS_UPDATE_GROUP_ID=c470fd4f-cb97-4fba-9a41-e55f7a00115b"
+        in env_path.read_text(encoding="utf-8")
+    )
+
+
+def test_parse_update_view_binds_platform_update_to_exact_group(tmp_path: Path) -> None:
+    payload = [
+        {
+            "id": "01a0fd70-1111-2222-3333-444444444444",
+            "group": "c470fd4f-cb97-4fba-9a41-e55f7a00115b",
+            "branch": "preview",
+            "message": "CLASSMO 0.0.11 Core UX preview",
+            "runtimeVersion": "0.0.11",
+            "platform": "ios",
+        }
+    ]
+    input_path = tmp_path / "update-view.json"
+    env_path = tmp_path / "env"
+    input_path.write_text(json.dumps(payload), encoding="utf-8")
+    MODULE.parse_update_view(
+        Namespace(
+            input=str(input_path),
+            group_id="c470fd4f-cb97-4fba-9a41-e55f7a00115b",
+            message="CLASSMO 0.0.11 Core UX preview",
+            runtime_version="0.0.11",
+            platform="ios",
+            github_env=str(env_path),
+        )
+    )
+    env = env_path.read_text(encoding="utf-8")
+    assert "EAS_UPDATE_ID=01a0fd70-1111-2222-3333-444444444444" in env
+    assert "EAS_UPDATE_GROUP_ID=c470fd4f-cb97-4fba-9a41-e55f7a00115b" in env
+
+
+def test_provider_readback_uses_update_group_then_update_view() -> None:
+    for workflow in (
+        ".github/workflows/provider-action-core.yml",
+        ".github/workflows/provider-status-core.yml",
+    ):
+        text = Path(workflow).read_text(encoding="utf-8")
+        assert "parse-update-group" in text
+        assert 'eas update:view "$EAS_UPDATE_GROUP_ID"' in text
+        assert "parse-update-view" in text
