@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import subprocess
 from pathlib import Path
 
@@ -9,6 +10,8 @@ from .guards import require_sha
 
 ALLOWED_PATH = Path("docs/pilots/DISPATCHER_V2_SIWC_WRITE_001.md")
 PILOT_ID = "CONTROL-DISPATCHER-V2-WRITE-001"
+MODEL_ACK = "AUTHORIZED_CONTROL_WRITE_PILOT"
+MODEL_OBSERVATION = "GitHub exact-SHA evidence remains authoritative for current source state."
 
 
 class WritePilotError(RuntimeError):
@@ -43,14 +46,32 @@ def changed_paths(repo_path: Path) -> list[str]:
     return paths
 
 
-def expected_document(expected_sha: str) -> str:
+def parse_model_handoff(response: str) -> str:
+    try:
+        payload = json.loads(response)
+    except json.JSONDecodeError as exc:
+        raise WritePilotError("Codex handoff response was not valid JSON") from exc
+
+    if not isinstance(payload, dict) or set(payload) != {"ack", "observation"}:
+        raise WritePilotError("Codex handoff response shape was invalid")
+    if payload["ack"] != MODEL_ACK:
+        raise WritePilotError("Codex did not return the required pilot acknowledgement")
+    if payload["observation"] != MODEL_OBSERVATION:
+        raise WritePilotError("Codex returned an unexpected pilot observation")
+    return payload["observation"]
+
+
+def expected_document(expected_sha: str, observation: str = MODEL_OBSERVATION) -> str:
     sha = require_sha(expected_sha)
+    if observation != MODEL_OBSERVATION:
+        raise WritePilotError("unexpected observation value")
     return (
         "# Dispatcher v2 SIWC Write Pilot 001\n\n"
         f"Pilot-ID: {PILOT_ID}\n"
         f"Source-Baseline-SHA: `{sha}`\n\n"
-        "This documentation-only file was created by the authenticated "
-        "WONJAE-DISPATCHER-RUNNER Codex write pilot.\n\n"
+        "This documentation-only file was materialized by the trusted runner after an "
+        "authenticated Codex handoff.\n\n"
+        f"Codex observation: {observation}\n\n"
         "Evidence boundary: GitHub branch, commit, Draft PR, and exact-SHA Actions "
         "readback are authoritative. Model prose is not source-state evidence.\n\n"
         "No product TASK, product repository, deployment, release, KDN route, "
@@ -74,14 +95,25 @@ def validate_write_diff(repo_path: Path, expected_sha: str) -> Path:
     return target
 
 
+def _bounded_context(repo_path: Path) -> str:
+    sections: list[str] = []
+    for relative in ("AGENTS.md", "PROJECT_RULES.md"):
+        path = repo_path / relative
+        if not path.is_file():
+            raise WritePilotError(f"required control context is missing: {relative}")
+        text = path.read_text(encoding="utf-8")
+        sections.append(f"--- {relative} ---\n{text[:12000]}")
+    return "\n\n".join(sections)
+
+
 def run_codex_write_pilot(repo_path: Path, expected_sha: str, codex_home: Path) -> Path:
     expected = require_sha(expected_sha)
     if git_head(repo_path) != expected:
-        raise WritePilotError("checkout SHA changed before the Codex write turn")
+        raise WritePilotError("checkout SHA changed before the Codex handoff turn")
     if changed_paths(repo_path):
-        raise WritePilotError("checkout must be clean before the Codex write turn")
+        raise WritePilotError("checkout must be clean before the Codex handoff turn")
 
-    target_content = expected_document(expected)
+    context = _bounded_context(repo_path)
     config = CodexConfig(
         cwd=str(repo_path),
         env={
@@ -89,25 +121,20 @@ def run_codex_write_pilot(repo_path: Path, expected_sha: str, codex_home: Path) 
             "CODEX_APP_SERVER_DISABLE_MANAGED_CONFIG": "1",
         },
     )
-    developer_instructions = (
-        "The repository Owner explicitly authorized this bounded DEV-CONTROL "
-        "documentation-only pilot in the current task. This satisfies AGENTS.md rule 5 "
-        "for the single allowed control-plane edit. The authorization is limited to "
-        f"creating exactly {ALLOWED_PATH.as_posix()} and does not authorize any product "
-        "TASK, product repository, deployment, release, credential, runtime, KDN, "
-        "or external-system mutation. You must perform the allowed file edit rather "
-        "than only describe it."
-    )
+    output_schema = {
+        "type": "object",
+        "properties": {
+            "ack": {"type": "string", "enum": [MODEL_ACK]},
+            "observation": {"type": "string", "enum": [MODEL_OBSERVATION]},
+        },
+        "required": ["ack", "observation"],
+        "additionalProperties": False,
+    }
     prompt = (
-        "Read AGENTS.md, PROJECT_RULES.md, and "
-        "docs/pilots/DISPATCHER_V2_CODEX_CLOUD_001.md first. "
-        "Then perform the authorized edit now: create exactly one new file, "
-        f"{ALLOWED_PATH.as_posix()}, using the workspace write capability. "
-        "Do not modify any other file. Do not create any product TASK. "
-        "Do not commit, push, create a PR, deploy, release, change credentials, "
-        "or use external systems. The new file must contain exactly the following "
-        "UTF-8 Markdown, including line breaks:\n\n"
-        f"{target_content}"
+        "This is an Owner-authorized DEV-CONTROL documentation-only orchestration pilot. "
+        "Review the supplied control-plane context. Do not edit files or call external systems. "
+        "Return only the requested structured acknowledgement.\n\n"
+        f"{context}"
     )
 
     with Codex(config=config) as codex:
@@ -118,9 +145,8 @@ def run_codex_write_pilot(repo_path: Path, expected_sha: str, codex_home: Path) 
         thread = codex.thread_start(
             approval_mode=ApprovalMode.deny_all,
             cwd=str(repo_path),
-            developer_instructions=developer_instructions,
             ephemeral=True,
-            sandbox=Sandbox.workspace_write,
+            sandbox=Sandbox.read_only,
             config={
                 "history": {"persistence": "none"},
                 "allow_login_shell": False,
@@ -129,16 +155,19 @@ def run_codex_write_pilot(repo_path: Path, expected_sha: str, codex_home: Path) 
         result = thread.run(
             prompt,
             approval_mode=ApprovalMode.deny_all,
-            sandbox=Sandbox.workspace_write,
+            output_schema=output_schema,
+            sandbox=Sandbox.read_only,
         )
 
     status = str(getattr(result.status, "value", result.status)).lower()
     if status != "completed" or result.error is not None:
-        raise WritePilotError("Codex write turn did not complete successfully")
-    if not (result.final_response or "").strip():
-        raise WritePilotError("Codex write turn completed without a final response")
+        raise WritePilotError("Codex handoff turn did not complete successfully")
+    observation = parse_model_handoff(result.final_response or "")
 
-    if git_head(repo_path) != expected:
-        raise WritePilotError("Codex changed Git HEAD, which is outside pilot authority")
+    if git_head(repo_path) != expected or changed_paths(repo_path):
+        raise WritePilotError("repository changed during the read-only Codex handoff")
 
+    target = repo_path / ALLOWED_PATH
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(expected_document(expected, observation), encoding="utf-8")
     return validate_write_diff(repo_path, expected)
