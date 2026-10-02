@@ -31,6 +31,9 @@ def work_order_payload() -> dict[str, object]:
             "apps/mobile/src/components/member-shell.tsx",
             "apps/mobile/src/presentation/member-home.ts",
         ],
+        "required_changed_paths": [
+            "apps/mobile/src/components/member-shell.tsx",
+        ],
         "scope": ["Implement the bounded source slice."],
         "exclusions": ["No runtime mutation."],
         "completion_conditions": ["Exact-head validation passes."],
@@ -57,6 +60,9 @@ def test_load_work_order(tmp_path: Path) -> None:
     assert order.task_id == "CLASSMO-V2-MEMBER-HOME-001"
     assert order.source_base_sha == SHA
     assert order.integration_authorized is True
+    assert order.required_changed_paths == (
+        "apps/mobile/src/components/member-shell.tsx",
+    )
 
 
 def test_parse_edit_plan_accepts_bounded_replace(tmp_path: Path) -> None:
@@ -116,6 +122,25 @@ def test_parse_edit_plan_rejects_empty_edits(tmp_path: Path) -> None:
     order = write_work_order(tmp_path)
     with pytest.raises(ProductPilotError):
         parse_edit_plan(json.dumps({"edits": [], "summary": "Nothing"}), order)
+
+
+def test_parse_edit_plan_rejects_failure_marker(tmp_path: Path) -> None:
+    order = write_work_order(tmp_path)
+    response = json.dumps(
+        {
+            "edits": [
+                {
+                    "path": "apps/mobile/src/presentation/member-home.ts",
+                    "operation": "create",
+                    "old_text": "",
+                    "new_text": "// bwrap: sandbox failed\n",
+                }
+            ],
+            "summary": "Blocked.",
+        }
+    )
+    with pytest.raises(ProductPilotError):
+        parse_edit_plan(response, order)
 
 
 def test_parse_edit_plan_rejects_extra_path(tmp_path: Path) -> None:

@@ -11,6 +11,14 @@ from .guards import require_sha
 
 MAX_EDIT_COUNT = 48
 MAX_TEXT_CHARS = 80_000
+MAX_CONTEXT_CHARS = 600_000
+PROHIBITED_FAILURE_MARKERS = (
+    "blocked pending checkout inspection",
+    "do not integrate this marker",
+    "execution sandbox failed",
+    "bwrap:",
+    "failed rtm_newaddr",
+)
 
 
 class ProductPilotError(RuntimeError):
@@ -29,6 +37,7 @@ class ProductWorkOrder:
     validation_workflow_path: str
     required_reads: tuple[str, ...]
     allowed_paths: tuple[str, ...]
+    required_changed_paths: tuple[str, ...]
     scope: tuple[str, ...]
     exclusions: tuple[str, ...]
     completion_conditions: tuple[str, ...]
@@ -70,13 +79,27 @@ def changed_paths(repo_path: Path) -> list[str]:
     return paths
 
 
-def _string_list(payload: dict[str, object], key: str) -> tuple[str, ...]:
+def _string_list(
+    payload: dict[str, object],
+    key: str,
+    *,
+    required: bool = True,
+) -> tuple[str, ...]:
     value = payload.get(key)
-    if not isinstance(value, list) or not value or not all(
+    if value is None and not required:
+        return ()
+    if not isinstance(value, list) or (required and not value) or not all(
         isinstance(item, str) and item.strip() for item in value
     ):
-        raise ProductPilotError(f"{key} must be a non-empty string list")
+        raise ProductPilotError(f"{key} must be a string list")
     return tuple(item.strip() for item in value)
+
+
+def _validate_relative_paths(paths: tuple[str, ...], label: str) -> None:
+    for relative in paths:
+        path_value = Path(relative)
+        if path_value.is_absolute() or ".." in path_value.parts:
+            raise ProductPilotError(f"{label} contains an unsafe path")
 
 
 def load_work_order(path: Path) -> ProductWorkOrder:
@@ -96,10 +119,15 @@ def load_work_order(path: Path) -> ProductWorkOrder:
         raise ProductPilotError("integration_authorized must be boolean")
 
     allowed_paths = _string_list(payload, "allowed_paths")
-    for relative in allowed_paths:
-        path_value = Path(relative)
-        if path_value.is_absolute() or ".." in path_value.parts:
-            raise ProductPilotError("work order contains an unsafe allowed path")
+    required_changed_paths = _string_list(
+        payload,
+        "required_changed_paths",
+        required=False,
+    )
+    _validate_relative_paths(allowed_paths, "allowed_paths")
+    _validate_relative_paths(required_changed_paths, "required_changed_paths")
+    if any(path not in set(allowed_paths) for path in required_changed_paths):
+        raise ProductPilotError("required_changed_paths must be a subset of allowed_paths")
 
     return ProductWorkOrder(
         task_id=required_string("task_id"),
@@ -112,10 +140,17 @@ def load_work_order(path: Path) -> ProductWorkOrder:
         validation_workflow_path=required_string("validation_workflow_path"),
         required_reads=_string_list(payload, "required_reads"),
         allowed_paths=allowed_paths,
+        required_changed_paths=required_changed_paths,
         scope=_string_list(payload, "scope"),
         exclusions=_string_list(payload, "exclusions"),
         completion_conditions=_string_list(payload, "completion_conditions"),
     )
+
+
+def _reject_failure_marker(text: str) -> None:
+    normalized = text.casefold()
+    if any(marker in normalized for marker in PROHIBITED_FAILURE_MARKERS):
+        raise ProductPilotError("Codex edit contained a prohibited failure marker")
 
 
 def parse_edit_plan(response: str, work_order: ProductWorkOrder) -> tuple[ProductEdit, ...]:
@@ -172,6 +207,7 @@ def parse_edit_plan(response: str, work_order: ProductWorkOrder) -> tuple[Produc
             raise ProductPilotError(
                 "Codex edit may not delete a file or replace with empty content"
             )
+        _reject_failure_marker(new_text)
         if operation == "create":
             if old_text:
                 raise ProductPilotError("create edits must use an empty old_text")
@@ -248,10 +284,37 @@ def apply_edit_plan(
         raise ProductPilotError("worktree paths did not match the validated edit plan")
     if any(path not in allowed for path in actual):
         raise ProductPilotError("worktree contains a path outside the work order")
+    missing_required = [
+        path for path in work_order.required_changed_paths if path not in set(actual)
+    ]
+    if missing_required:
+        raise ProductPilotError("worktree omitted required changed paths")
     return actual
 
 
-def _bounded_prompt(work_order: ProductWorkOrder, control_sha: str) -> str:
+def _required_context(repo_path: Path, work_order: ProductWorkOrder) -> str:
+    chunks: list[str] = []
+    total = 0
+    for relative in work_order.required_reads:
+        path = repo_path / relative
+        if not path.is_file():
+            raise ProductPilotError(f"required product read is missing: {relative}")
+        content = path.read_text(encoding="utf-8")
+        if "\x00" in content:
+            raise ProductPilotError("required product context contained a NUL byte")
+        chunk = f"\n--- BEGIN {relative} ---\n{content}\n--- END {relative} ---\n"
+        total += len(chunk)
+        if total > MAX_CONTEXT_CHARS:
+            raise ProductPilotError("required product context exceeded the bounded size limit")
+        chunks.append(chunk)
+    return "".join(chunks)
+
+
+def _bounded_prompt(
+    work_order: ProductWorkOrder,
+    control_sha: str,
+    context: str,
+) -> str:
     return "\n".join(
         [
             "You are implementing one Owner-authorized bounded product task.",
@@ -262,8 +325,9 @@ def _bounded_prompt(work_order: ProductWorkOrder, control_sha: str) -> str:
             f"Target branch: {work_order.target_branch}",
             f"Exact source base: {work_order.source_base_sha}",
             "",
-            "Read every required file from the checkout before deciding edits:",
-            *[f"- {item}" for item in work_order.required_reads],
+            "All required repository files are supplied verbatim below.",
+            "Do not call shell, filesystem, network, or external tools.",
+            "Use only the supplied context to decide the edits.",
             "",
             "Scope:",
             *[f"- {item}" for item in work_order.scope],
@@ -277,15 +341,20 @@ def _bounded_prompt(work_order: ProductWorkOrder, control_sha: str) -> str:
             "Allowed changed paths:",
             *[f"- {item}" for item in work_order.allowed_paths],
             "",
-            "Do not modify files directly. Do not commit, push, create PRs, use network services, "
-            "or access credentials. Inspect the read-only checkout, then return a structured edit "
-            "plan. For an existing file use operation=replace with an exact old_text snippet "
-            "copied verbatim from that file and the intended new_text; choose the smallest "
-            "snippet that matches exactly once. For a new file use operation=create, old_text='', "
-            "and the complete new file content. Return at least one edit. Implement the task "
-            "completely within the allowed paths, include focused tests, preserve truthful "
-            "evidence boundaries, and do not invent capabilities that the current repository "
-            "cannot support safely.",
+            "Required changed paths:",
+            *[f"- {item}" for item in work_order.required_changed_paths],
+            "",
+            "Return a structured edit plan only. For an existing file use operation=replace with "
+            "an exact old_text snippet copied verbatim from the supplied context and the intended "
+            "new_text; choose the smallest snippet that matches exactly once. For a new file use "
+            "operation=create, old_text='', and the complete new file content. Return at least one "
+            "effective edit. Do not return placeholders, blocked markers, sandbox-error markers, "
+            "or commentary instead of implementation. Implement the task completely within the "
+            "allowed paths, include focused tests, preserve truthful evidence boundaries, and do "
+            "not invent capabilities that the current repository cannot safely support.",
+            "",
+            "REQUIRED REPOSITORY CONTEXT:",
+            context,
         ]
     )
 
@@ -302,9 +371,7 @@ def generate_and_apply_product_patch(
     if changed_paths(repo_path):
         raise ProductPilotError("product checkout must be clean before Codex")
 
-    for relative in work_order.required_reads:
-        if not (repo_path / relative).is_file():
-            raise ProductPilotError(f"required product read is missing: {relative}")
+    context = _required_context(repo_path, work_order)
 
     config = CodexConfig(
         cwd=str(repo_path),
@@ -359,7 +426,7 @@ def generate_and_apply_product_patch(
             },
         )
         result = thread.run(
-            _bounded_prompt(work_order, control_sha),
+            _bounded_prompt(work_order, control_sha, context),
             approval_mode=ApprovalMode.deny_all,
             output_schema=output_schema,
             sandbox=Sandbox.read_only,
