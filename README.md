@@ -2,9 +2,9 @@
 
 A small open-source runner for PC-free Codex automation using the published OpenAI Codex Python SDK and ChatGPT account authentication.
 
-## Pilot status
+## Current status
 
-This repository is in a control-plane pilot. It does **not** contain product source, product credentials, customer data, or deployment configuration.
+This repository is the public execution engine for validated Dispatcher v2 product automation. The original read-only and control-write pilots are complete. It does **not** contain product source, product credentials, customer data, or deployment configuration.
 
 The first acceptance path is deliberately read-only:
 
@@ -25,8 +25,6 @@ No product TASK, branch, PR, deployment, release, or physical validation is part
 Standard GitHub-hosted runners for public repositories are currently free and unlimited. The runner itself stays generic and public; private repositories are accessed only with narrowly scoped credentials stored as GitHub Actions secrets.
 
 ## Required repository configuration
-
-The secret-using workflows are intentionally `workflow_dispatch` only during the pilot.
 
 Repository variable:
 
@@ -65,11 +63,9 @@ pytest
 Python 3.11+ is required.
 
 
-## Bounded write pilot
+## Historical control-write pilot
 
-After the read-only pilot passes, **Codex Write Pilot** tests a deterministic private-repository publication path. Codex reviews bounded control context in read-only mode and returns a strict structured handoff. The trusted runner validates that handoff, materializes only `docs/pilots/DISPATCHER_V2_SIWC_WRITE_001.md`, independently rejects any other changed path, then creates one commit, publishes the fixed pilot branch, opens a Draft PR to `main`, and reads the PR back before reporting success. This avoids making orchestration correctness depend on whether a model elects to call a particular filesystem tool.
-
-The workflow requires the additional `CONTROL_WRITE_TOKEN` repository secret, scoped only to the private control repository with the minimum Contents and Pull requests write authority required for the pilot. It does not merge the resulting PR.
+The deterministic private-control write and event-wake pilots are complete and their dedicated workflows have been retired. Active Dispatcher v2 product execution reads DEV-CONTROL with `CONTROL_READ_TOKEN` and writes only the separately authorized product repository with that product's dedicated write credential. `CONTROL_WRITE_TOKEN` is not used by active runner code and may be removed from repository secrets after this cleanup is integrated.
 
 ## Actions progress view
 
@@ -102,4 +98,4 @@ The first product pilot uses the same ChatGPT-plan Codex session but keeps produ
 
 Before applying the diff, the runner rejects binary/rename/copy/submodule changes and any path outside the private work-order allowlist. It then commits the bounded source change, creates and reads back a Draft product PR to establish STARTED, waits for the exact PR-head product validation, performs only the explicitly authorized active-development integration, and waits for exact integrated-SHA validation.
 
-The CLASSMO pilot requires a separate `CLASSMO_WRITE_TOKEN` Actions secret scoped only to the CLASSMO repository. The pilot credential needs repository Contents read/write, Pull requests read/write, and Actions read access. It must not have Secrets, Administration, Workflows write, deployments, or unrelated repository access.
+CLASSMO requires a separate `CLASSMO_WRITE_TOKEN` Actions secret scoped only to the CLASSMO repository. The credential needs repository Contents read/write, Pull requests read/write, and Actions read access. It must not have Secrets, Administration, Workflows write, deployments, or unrelated repository access. Other products use the same per-product isolation pattern only after their own Dispatcher v2 onboarding is separately validated.
