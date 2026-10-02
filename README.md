@@ -115,3 +115,18 @@ Separate product workflows intentionally permit WAFL, ESC, MUVEL, and CLASSMO
 runs to execute independently. No product token is shared across workflows.
 A product is not considered migrated merely because its runner workflow exists;
 DEV-CONTROL routing changes only after that product's exact v2 E2E pilot passes.
+
+## Provider Action Dispatcher v2
+
+Provider actions are a separate no-source-diff execution class. The shared `.github/workflows/provider-action-core.yml` validates an exact private `tasks-v2/<PROJECT>/<TASK-ID>.json` record with `operation_type: provider_action`, requires the registered active branch to remain at the exact source SHA, rejects concurrent same-product `job/` PRs, and requires a successful exact-SHA product validation before an external provider action starts.
+
+Thin product adapters keep credentials isolated:
+
+- CLASSMO: `.github/workflows/classmo-provider-v2.yml`
+- WAFL: `.github/workflows/wafl-provider-v2.yml`
+- ESC: `.github/workflows/esc-provider-v2.yml`
+- MUVEL: `.github/workflows/muvel-provider-v2.yml`
+
+The common core supports compatible EAS Workflow updates, direct compatible EAS updates, and dispatch of an already repository-owned GitHub Actions workflow. EAS actions fail closed on app/native/dependency configuration changes since the declared compatible signed baseline. A missing project-scoped provider credential is terminal `MANUAL_REQUIRED`, not a reason to reuse a credential from another product.
+
+Provider STARTED/RESULT evidence is written to the exact owner-authored runner wake issue. A provider PASS is limited to the provider stage actually executed; device receipt, iOS/iPad physical QA, Windows physical QA, Production, release, and other unperformed stages remain separate.

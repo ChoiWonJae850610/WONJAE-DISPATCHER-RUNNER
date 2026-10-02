@@ -1,0 +1,30 @@
+name: ESC Provider v2
+
+on:
+  issues:
+    types:
+      - opened
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  provider:
+    if: >-
+      github.actor == github.repository_owner &&
+      github.event.issue.user.login == github.repository_owner &&
+      startsWith(github.event.issue.title, '[PROVIDER-WAKE][DISPATCHER-V2] ESC ')
+    uses: ./.github/workflows/provider-action-core.yml
+    with:
+      project: ESC
+      product_repository: ChoiWonJae850610/ESC
+      target_branch: cloud-dev-v1
+      wake_title: ${{ github.event.issue.title }}
+      issue_number: ${{ github.event.issue.number }}
+      control_repository: ${{ vars.CONTROL_REPOSITORY }}
+    secrets:
+      control_read_token: ${{ secrets.CONTROL_READ_TOKEN }}
+      product_token: ${{ secrets.ESC_WRITE_TOKEN }}
+      expo_token: ${{ secrets.ESC_EXPO_TOKEN }}
+      github_provider_token: ${{ secrets.ESC_PROVIDER_GITHUB_TOKEN }}
