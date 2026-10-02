@@ -1,10 +1,16 @@
+import importlib.util
 import json
 from argparse import Namespace
 from pathlib import Path
 
 import pytest
 
-from scripts.provider_action import prepare
+MODULE_PATH = Path(__file__).resolve().parents[1] / "scripts" / "provider_action.py"
+SPEC = importlib.util.spec_from_file_location("provider_action_under_test", MODULE_PATH)
+assert SPEC is not None and SPEC.loader is not None
+MODULE = importlib.util.module_from_spec(SPEC)
+SPEC.loader.exec_module(MODULE)
+prepare = MODULE.prepare
 
 
 def _record(project: str = "CLASSMO") -> dict:
