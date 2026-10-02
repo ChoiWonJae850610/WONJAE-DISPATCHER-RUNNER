@@ -16,7 +16,7 @@ jobs:
       github.event.issue.user.login == github.repository_owner &&
       startsWith(
         github.event.issue.title,
-        '[PRODUCT-WAKE][DISPATCHER-V2] CLASSMO-V2-MEMBER-HOME-002 '
+        '[PRODUCT-WAKE][DISPATCHER-V2] CLASSMO-V2-CORE-UX-INTEGRATION-POLISH-001 '
       )
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -24,7 +24,7 @@ jobs:
       CONTROL_REPOSITORY: ${{ vars.CONTROL_REPOSITORY }}
       WAKE_TITLE: ${{ github.event.issue.title }}
       ISSUE_NUMBER: ${{ github.event.issue.number }}
-      WORK_ORDER_RELATIVE: docs/pilots/DISPATCHER_V2_CLASSMO_PRODUCT_001.json
+      WORK_ORDER_RELATIVE: docs/pilots/DISPATCHER_V2_CLASSMO_PRODUCT_002.json
       PYTHONUNBUFFERED: "1"
 
     steps:
@@ -50,7 +50,7 @@ jobs:
           title = os.environ["WAKE_TITLE"]
           match = re.fullmatch(
               r"\[PRODUCT-WAKE\]\[DISPATCHER-V2\] "
-              r"CLASSMO-V2-MEMBER-HOME-002 ([0-9a-f]{40}) ([0-9a-f]{40})",
+              r"CLASSMO-V2-CORE-UX-INTEGRATION-POLISH-001 ([0-9a-f]{40}) ([0-9a-f]{40})",
               title,
           )
           if match is None:
@@ -97,7 +97,7 @@ jobs:
 
           work = json.loads(Path(os.environ["WORK_ORDER_FILE"]).read_text(encoding="utf-8"))
           required = {
-              "task_id": "CLASSMO-V2-MEMBER-HOME-002",
+              "task_id": "CLASSMO-V2-CORE-UX-INTEGRATION-POLISH-001",
               "project": "CLASSMO",
               "source_base_sha": os.environ["SOURCE_SHA"],
           }
