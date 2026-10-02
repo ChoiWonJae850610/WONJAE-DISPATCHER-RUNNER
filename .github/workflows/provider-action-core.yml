@@ -38,7 +38,7 @@ permissions:
 jobs:
   provider:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 15
     concurrency:
       group: provider-v2-${{ inputs.project }}
       cancel-in-progress: false
@@ -240,7 +240,7 @@ jobs:
             echo "::error::Exact local source changed before EAS workflow upload."
             exit 1
           }
-          eas workflow:run "$PROVIDER_WORKFLOW_FILE"             --non-interactive             --wait             --json             "${args[@]}" > "$RUNNER_TEMP/eas-workflow-run.json"
+          eas workflow:run "$PROVIDER_WORKFLOW_FILE"             --non-interactive             --json             "${args[@]}" > "$RUNNER_TEMP/eas-workflow-run.json"
           python "$GITHUB_WORKSPACE/scripts/provider_action.py" parse-eas-run             --input "$RUNNER_TEMP/eas-workflow-run.json"             --github-env "$GITHUB_ENV"
 
       - name: EAS · run direct compatible update
@@ -254,7 +254,7 @@ jobs:
           eas update             --channel "$PROVIDER_CHANNEL"             --environment "$PROVIDER_ENVIRONMENT"             --platform "$PROVIDER_PLATFORM"             --message "$PROVIDER_MESSAGE"             --json             --non-interactive > "$RUNNER_TEMP/eas-update-run.json"
 
       - name: EAS · read back exact update identity
-        if: env.PROVIDER_GATE == 'ready' && (env.PROVIDER_ACTION == 'eas_workflow_update' || env.PROVIDER_ACTION == 'eas_update')
+        if: env.PROVIDER_GATE == 'ready' && env.PROVIDER_ACTION == 'eas_update'
         env:
           EXPO_TOKEN: ${{ secrets.expo_token }}
         shell: bash
@@ -270,7 +270,7 @@ jobs:
         run: |
           python scripts/provider_action.py dispatch-payload             --ref "$TARGET_BRANCH"             --inputs-json "$PROVIDER_INPUTS_JSON"             --output "$RUNNER_TEMP/provider-dispatch.json"
 
-      - name: GitHub provider · dispatch and wait
+      - name: GitHub provider · dispatch
         if: env.PROVIDER_GATE == 'ready' && env.PROVIDER_ACTION == 'github_workflow_dispatch'
         env:
           GH_TOKEN: ${{ secrets.github_provider_token }}
@@ -292,12 +292,35 @@ jobs:
           done
           test -n "$run_id" || { echo "::error::Provider workflow run not found."; exit 1; }
           echo "PROVIDER_GITHUB_RUN_ID=$run_id" >> "$GITHUB_ENV"
-          gh run watch "$run_id" --repo "$PRODUCT_REPOSITORY" --exit-status
-          exact="$(gh run view "$run_id" --repo "$PRODUCT_REPOSITORY" --json conclusion,headSha --jq '.conclusion + " " + .headSha')"
-          test "$exact" = "success $SOURCE_SHA"
+
+      - name: RESULT · record queued external provider
+        if: >-
+          env.PROVIDER_GATE == 'ready' &&
+          (env.PROVIDER_ACTION == 'eas_workflow_update' || env.PROVIDER_ACTION == 'github_workflow_dispatch')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          run_id="${EAS_WORKFLOW_ID:-${PROVIDER_GITHUB_RUN_ID:-}}"
+          test -n "$run_id"
+          {
+            echo '## Dispatcher v2 provider QUEUED evidence'
+            echo
+            printf -- '- task_id: `%s`\n' "$TASK_ID"
+            printf -- '- attempt: `%s`\n' "$ATTEMPT"
+            printf -- '- revision: `%s`\n' "$REVISION"
+            printf -- '- control_sha: `%s`\n' "$CONTROL_SHA"
+            printf -- '- source_sha: `%s`\n' "$SOURCE_SHA"
+            printf -- '- source_validation_run: `%s`\n' "$SOURCE_VALIDATION_RUN_ID"
+            printf -- '- action: `%s`\n' "$PROVIDER_ACTION"
+            printf -- '- provider_run_id: `%s`\n' "$run_id"
+            printf -- '- result: `QUEUED`\n'
+            printf -- '- device/physical: `NOT_RUN`\n'
+          } > "$RUNNER_TEMP/provider-queued.md"
+          gh issue comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --body-file "$RUNNER_TEMP/provider-queued.md"
 
       - name: RESULT · record provider PASS
-        if: env.PROVIDER_GATE == 'ready'
+        if: env.PROVIDER_GATE == 'ready' && env.PROVIDER_ACTION == 'eas_update'
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
