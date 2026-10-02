@@ -4,7 +4,6 @@ import pytest
 
 import wonjae_dispatcher_runner.write_pilot as pilot
 
-
 SHA = "7a2688f14963de371c43bc67f729617b2d23de3c"
 
 
