@@ -85,6 +85,33 @@ def test_parse_edit_plan_accepts_bounded_replace(tmp_path: Path) -> None:
     )
 
 
+def test_parse_edit_plan_ignores_noop_when_effective_edit_remains(tmp_path: Path) -> None:
+    order = write_work_order(tmp_path)
+    response = json.dumps(
+        {
+            "edits": [
+                {
+                    "path": "apps/mobile/src/components/member-shell.tsx",
+                    "operation": "replace",
+                    "old_text": "same",
+                    "new_text": "same",
+                },
+                {
+                    "path": "apps/mobile/src/components/member-shell.tsx",
+                    "operation": "replace",
+                    "old_text": "old",
+                    "new_text": "new",
+                },
+            ],
+            "summary": "Update Member Home.",
+        }
+    )
+    edits = parse_edit_plan(response, order)
+    assert len(edits) == 1
+    assert edits[0].old_text == "old"
+    assert edits[0].new_text == "new"
+
+
 def test_parse_edit_plan_rejects_empty_edits(tmp_path: Path) -> None:
     order = write_work_order(tmp_path)
     with pytest.raises(ProductPilotError):
