@@ -172,3 +172,10 @@ def test_product_provider_adapters_support_owner_status_comment() -> None:
         assert "issue_comment:" in text
         assert "github.event.comment.body == '[PROVIDER-STATUS]'" in text
         assert "provider-status-core.yml" in text
+
+
+def test_provider_status_installs_app_deps_only_for_eas_config_resolution() -> None:
+    text = Path(".github/workflows/provider-status-core.yml").read_text(encoding="utf-8")
+    assert "EAS · install app dependencies for config resolution" in text
+    assert "npm ci --ignore-scripts --no-audit --no-fund" in text
+    assert "eas workflow:status" in text
