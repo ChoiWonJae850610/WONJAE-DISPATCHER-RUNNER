@@ -162,7 +162,15 @@ def apply_patch(repo_path: Path, patch: str, work_order: ProductWorkOrder) -> tu
 
     try:
         subprocess.run(
-            ["git", "-C", str(repo_path), "apply", "--check", "--whitespace=error-all", str(patch_path)],
+            [
+                "git",
+                "-C",
+                str(repo_path),
+                "apply",
+                "--check",
+                "--whitespace=error-all",
+                str(patch_path),
+            ],
             check=True,
             capture_output=True,
             text=True,
