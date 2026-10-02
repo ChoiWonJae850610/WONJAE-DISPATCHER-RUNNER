@@ -1,12 +1,17 @@
 from __future__ import annotations
 
-import json
+import re
 import subprocess
+from collections.abc import Iterable
 from pathlib import Path
+from typing import Any
 
 from openai_codex import ApprovalMode, Codex, CodexConfig, Sandbox
 
 from .guards import require_sha
+
+_SHA_TOKEN_RE = re.compile(r"(?<![0-9a-fA-F])([0-9a-fA-F]{40})(?![0-9a-fA-F])")
+_GIT_HEAD_COMMAND_RE = re.compile(r"\bgit\b.*\brev-parse\b.*\bHEAD\b", re.IGNORECASE)
 
 
 class PilotError(RuntimeError):
@@ -24,24 +29,49 @@ def git_head(repo_path: Path) -> str:
     return require_sha(result.stdout.strip())
 
 
-def parse_structured_sha(response: str) -> str:
-    """Parse one full Git SHA from the SDK's structured final response."""
-    try:
-        payload = json.loads(response)
-    except json.JSONDecodeError as exc:
-        raise PilotError("Codex structured response was not valid JSON") from exc
+def _normalized_status(value: object) -> str:
+    raw = getattr(value, "value", value)
+    return str(raw).strip().lower()
 
-    if not isinstance(payload, dict) or set(payload) != {"sha"}:
-        raise PilotError("Codex structured response must contain only the sha field")
 
-    raw_sha = payload["sha"]
-    if not isinstance(raw_sha, str):
-        raise PilotError("Codex structured sha field must be a string")
+def extract_git_head_command_evidence(items: Iterable[Any], repo_path: Path) -> str:
+    """Return the SHA proven by a successful Codex git rev-parse HEAD command item."""
+    repo_resolved = repo_path.resolve()
+    candidates: set[str] = set()
 
-    try:
-        return require_sha(raw_sha)
-    except ValueError as exc:
-        raise PilotError("Codex structured sha field was not a full 40-character SHA") from exc
+    for item in items:
+        root = getattr(item, "root", item)
+        if getattr(root, "type", None) != "commandExecution":
+            continue
+
+        command = str(getattr(root, "command", "") or "")
+        if not _GIT_HEAD_COMMAND_RE.search(command):
+            continue
+
+        cwd_raw = str(getattr(root, "cwd", "") or "")
+        try:
+            cwd = Path(cwd_raw).resolve()
+        except (OSError, RuntimeError):
+            continue
+        if cwd != repo_resolved:
+            continue
+
+        if getattr(root, "exit_code", None) != 0:
+            continue
+        if _normalized_status(getattr(root, "status", "")) != "completed":
+            continue
+
+        output = str(getattr(root, "aggregated_output", "") or "")
+        matches = {match.group(1).lower() for match in _SHA_TOKEN_RE.finditer(output)}
+        if len(matches) == 1:
+            candidates.update(matches)
+
+    if len(candidates) != 1:
+        raise PilotError(
+            "Codex turn did not contain exactly one successful git rev-parse HEAD command "
+            "with one full SHA from the exact checkout directory"
+        )
+    return candidates.pop()
 
 
 def run_readonly_head_probe(repo_path: Path, expected_sha: str, codex_home: Path) -> str:
@@ -57,19 +87,11 @@ def run_readonly_head_probe(repo_path: Path, expected_sha: str, codex_home: Path
     config = CodexConfig(cwd=str(repo_path), env=child_env)
 
     prompt = (
-        "Inspect this checkout in read-only mode. "
-        "Run git rev-parse HEAD in this repository and return that exact full 40-character "
-        "lowercase commit SHA in the requested structured output. "
+        "Inspect this exact checkout in read-only mode. "
+        "You must run the shell command `git rev-parse HEAD` with this repository as the "
+        "working directory. Then finish. "
         "Do not modify files, Git state, remotes, configuration, or external systems."
     )
-    output_schema = {
-        "type": "object",
-        "properties": {
-            "sha": {"type": "string"},
-        },
-        "required": ["sha"],
-        "additionalProperties": False,
-    }
 
     with Codex(config=config) as codex:
         account = codex.account(refresh_token=False)
@@ -89,13 +111,12 @@ def run_readonly_head_probe(repo_path: Path, expected_sha: str, codex_home: Path
         result = thread.run(
             prompt,
             approval_mode=ApprovalMode.deny_all,
-            output_schema=output_schema,
             sandbox=Sandbox.read_only,
         )
 
-    reported = parse_structured_sha(result.final_response or "")
+    reported = extract_git_head_command_evidence(result.items, repo_path)
     if reported != actual:
         raise PilotError(
-            "Codex structured response SHA did not match the independently verified checkout SHA"
+            "Codex command evidence SHA did not match the independently verified checkout SHA"
         )
     return reported
