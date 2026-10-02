@@ -236,7 +236,11 @@ jobs:
               print(f"{key}={value}")
           PY
           )
-          eas workflow:run "$PROVIDER_WORKFLOW_FILE"             --ref "$SOURCE_SHA"             --non-interactive             --wait             --json             "${args[@]}" > "$RUNNER_TEMP/eas-workflow-run.json"
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA" || {
+            echo "::error::Exact local source changed before EAS workflow upload."
+            exit 1
+          }
+          eas workflow:run "$PROVIDER_WORKFLOW_FILE"             --non-interactive             --wait             --json             "${args[@]}" > "$RUNNER_TEMP/eas-workflow-run.json"
           python "$GITHUB_WORKSPACE/scripts/provider_action.py" parse-eas-run             --input "$RUNNER_TEMP/eas-workflow-run.json"             --github-env "$GITHUB_ENV"
 
       - name: EAS · run direct compatible update

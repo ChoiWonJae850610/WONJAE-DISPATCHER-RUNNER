@@ -133,3 +133,13 @@ def test_provider_evidence_uses_printf_not_shell_backtick_substitution() -> None
     text = Path(".github/workflows/provider-action-core.yml").read_text(encoding="utf-8")
     assert 'echo "- task_id: `$TASK_ID`"' not in text
     assert "printf -- '- task_id: `%s`\\n' \"$TASK_ID\"" in text
+
+
+def test_eas_workflow_uses_exact_local_checkout_without_ref_lookup() -> None:
+    text = Path(".github/workflows/provider-action-core.yml").read_text(encoding="utf-8")
+    section = text.split("EAS · run repository workflow update", 1)[1].split(
+        "EAS · run direct compatible update", 1
+    )[0]
+    assert 'test "$(git rev-parse HEAD)" = "$SOURCE_SHA"' in section
+    assert '--ref "$SOURCE_SHA"' not in section
+    assert 'eas workflow:run "$PROVIDER_WORKFLOW_FILE"' in section
