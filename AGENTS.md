@@ -4,8 +4,8 @@
 2. Keep private repository topology and authorization in runtime configuration. Do not make a public runner file the source of truth for private project state.
 3. Never print or upload `auth.json`, refresh/access tokens, GitHub tokens, or other secret values. Secret material may exist only in protected secret storage and ephemeral runner files with restrictive permissions.
 4. Secret-using workflows must run only from trusted code on the default branch and must not use `pull_request_target` with untrusted pull-request content. Pull-request validation must run without private secrets.
-5. The first pilot is read-only. Do not create or modify a private product TASK, branch, commit, PR, deployment, release, credential, runtime, database, signed build, device state, or physical evidence.
-6. Use the published `openai-codex` Python SDK. Run the pilot with `Sandbox.read_only` and `ApprovalMode.deny_all`.
+5. The read-only pilot is complete. The bounded write pilot may modify only the explicitly allowed DEV-CONTROL documentation path and may publish its single branch, commit, and Draft PR. It must not create or modify a product TASK, product repository, deployment, release, credential, runtime, database, signed build, device state, physical evidence, or KDN route.
+6. Use the published `openai-codex` Python SDK. Use `Sandbox.read_only` for read-only work and `Sandbox.workspace_write` only for the exact bounded write path; keep `ApprovalMode.deny_all` for both pilots.
 7. Independently verify repository identity before and after every Codex turn. For the pilot, exact SHA and clean-worktree evidence come from Git itself; model prose, formatting, or tool choice is never repository-state evidence.
 8. Persist a rotated Codex file credential only by replacing the protected GitHub Actions secret after a successful run. Never preserve the credential in artifacts, caches, logs, source, commit history, or PR comments.
 9. Keep authentication, private-repository access, and future source-write authority as separate credentials with the narrowest practical permissions.
