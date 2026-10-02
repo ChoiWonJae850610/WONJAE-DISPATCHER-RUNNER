@@ -179,3 +179,63 @@ def test_provider_status_installs_app_deps_only_for_eas_config_resolution() -> N
     assert "EAS · install app dependencies for config resolution" in text
     assert "npm ci --ignore-scripts --no-audit --no-fund" in text
     assert "eas workflow:status" in text
+
+
+def test_parse_update_list_recovers_group_then_update_view_recovers_ios_id(tmp_path: Path) -> None:
+    env_path = tmp_path / "env"
+    list_path = tmp_path / "list.json"
+    list_path.write_text(
+        json.dumps({
+            "currentPage": [{
+                "branch": "preview",
+                "message": "CLASSMO 0.0.11 Core UX preview",
+                "runtimeVersion": "0.0.11",
+                "group": "c470fd4f-cb97-4fba-9a41-e55f7a00115b",
+                "platforms": "ios",
+            }]
+        }),
+        encoding="utf-8",
+    )
+    MODULE.parse_update(
+        Namespace(
+            input=str(list_path),
+            message="CLASSMO 0.0.11 Core UX preview",
+            runtime_version="0.0.11",
+            platform="ios",
+            github_env=str(env_path),
+        )
+    )
+    assert "EAS_UPDATE_GROUP_ID=c470fd4f-cb97-4fba-9a41-e55f7a00115b" in env_path.read_text(
+        encoding="utf-8"
+    )
+
+    view_path = tmp_path / "view.json"
+    view_path.write_text(
+        json.dumps([{
+            "id": "01a0fd7a-0000-0000-0000-000000000000",
+            "group": "c470fd4f-cb97-4fba-9a41-e55f7a00115b",
+            "runtimeVersion": "0.0.11",
+            "platform": "ios",
+            "message": "CLASSMO 0.0.11 Core UX preview",
+        }]),
+        encoding="utf-8",
+    )
+    MODULE.parse_update_view(
+        Namespace(
+            input=str(view_path),
+            group_id="c470fd4f-cb97-4fba-9a41-e55f7a00115b",
+            runtime_version="0.0.11",
+            platform="ios",
+            github_env=str(env_path),
+        )
+    )
+    assert "EAS_UPDATE_ID=01a0fd7a-0000-0000-0000-000000000000" in env_path.read_text(
+        encoding="utf-8"
+    )
+
+
+def test_provider_status_uses_group_detail_for_platform_update_id() -> None:
+    text = Path(".github/workflows/provider-status-core.yml").read_text(encoding="utf-8")
+    assert 'eas update:list             --branch "$PROVIDER_CHANNEL"' in text
+    assert 'eas update:view "$EAS_UPDATE_GROUP_ID"' in text
+    assert "parse-update-view" in text
