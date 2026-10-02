@@ -20,7 +20,7 @@ PRODUCTS = {
 
 
 def test_product_v2_workflows_are_isolated_and_task_generic() -> None:
-    for project, config in PRODUCTS.items():
+    for _project, config in PRODUCTS.items():
         text = Path(config["workflow"]).read_text(encoding="utf-8")
         assert f"name: {project} Dispatcher v2" in text
         assert f"[PRODUCT-WAKE][DISPATCHER-V2] {project} " in text
