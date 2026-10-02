@@ -136,3 +136,17 @@ and uploads that local Expo project to EAS. It intentionally does not pass
 `eas workflow:run --ref`: the exact Git SHA is independently proved immediately
 before upload, while local-project mode resolves `.eas/workflows` beside the
 app directory's `eas.json`.
+
+### External provider queues
+
+Long external queues are never held open by the launch runner. EAS Workflow and
+repository-owned GitHub workflow actions capture the provider run ID and write
+`## Dispatcher v2 provider QUEUED evidence` to the exact wake issue, then the
+launch job exits without claiming terminal success.
+
+A later Owner-authored issue comment exactly equal to `[PROVIDER-STATUS]`
+triggers the product's provider-status adapter. It re-reads the historical
+private control record, recovers the queued provider run ID from the issue,
+queries that exact run without creating a duplicate provider action, and writes
+terminal completion evidence only after provider readback. Non-terminal provider
+status remains VALIDATING. Device and physical evidence remain separate.
