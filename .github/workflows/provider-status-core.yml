@@ -147,7 +147,7 @@ jobs:
           eas workflow:status "$PROVIDER_RUN_ID"             --non-interactive             --json > "$RUNNER_TEMP/eas-status.json"
           python "$GITHUB_WORKSPACE/scripts/provider_action.py" parse-eas-status             --input "$RUNNER_TEMP/eas-status.json"             --github-env "$GITHUB_ENV"
 
-      - name: EAS · read update identity after success
+      - name: EAS · resolve update group after success
         if: env.PROVIDER_ACTION == 'eas_workflow_update' && env.PROVIDER_STATUS == 'SUCCESS'
         env:
           EXPO_TOKEN: ${{ secrets.expo_token }}
@@ -157,6 +157,16 @@ jobs:
           cd "$GITHUB_WORKSPACE/.provider/product/$PROVIDER_WORKING_DIRECTORY"
           eas update:list             --all             --platform "$PROVIDER_PLATFORM"             --runtime-version "$PROVIDER_RUNTIME_VERSION"             --limit 25             --json             --non-interactive > "$RUNNER_TEMP/eas-update-list.json"
           python "$GITHUB_WORKSPACE/scripts/provider_action.py" parse-update-group             --input "$RUNNER_TEMP/eas-update-list.json"             --message "$PROVIDER_MESSAGE"             --runtime-version "$PROVIDER_RUNTIME_VERSION"             --platform "$PROVIDER_PLATFORM"             --github-env "$GITHUB_ENV"
+
+      - name: EAS · read platform update after success
+        if: env.PROVIDER_ACTION == 'eas_workflow_update' && env.PROVIDER_STATUS == 'SUCCESS'
+        env:
+          EXPO_TOKEN: ${{ secrets.expo_token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${EAS_UPDATE_GROUP_ID:-}" || { echo "::error::EAS update group identity is missing."; exit 1; }
+          cd "$GITHUB_WORKSPACE/.provider/product/$PROVIDER_WORKING_DIRECTORY"
           eas update:view "$EAS_UPDATE_GROUP_ID"             --json > "$RUNNER_TEMP/eas-update-view.json"
           python "$GITHUB_WORKSPACE/scripts/provider_action.py" parse-update-view             --input "$RUNNER_TEMP/eas-update-view.json"             --group-id "$EAS_UPDATE_GROUP_ID"             --message "$PROVIDER_MESSAGE"             --runtime-version "$PROVIDER_RUNTIME_VERSION"             --platform "$PROVIDER_PLATFORM"             --github-env "$GITHUB_ENV"
 
