@@ -243,6 +243,14 @@ jobs:
           eas workflow:run "$PROVIDER_WORKFLOW_FILE"             --non-interactive             --json             "${args[@]}" > "$RUNNER_TEMP/eas-workflow-run.json"
           python "$GITHUB_WORKSPACE/scripts/provider_action.py" parse-eas-run             --input "$RUNNER_TEMP/eas-workflow-run.json"             --github-env "$GITHUB_ENV"
 
+      - name: EAS · install app dependencies for direct update
+        if: env.PROVIDER_GATE == 'ready' && env.PROVIDER_ACTION == 'eas_update'
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$GITHUB_WORKSPACE/.provider/product/$PROVIDER_WORKING_DIRECTORY"
+          npm ci --ignore-scripts --no-audit --no-fund
+
       - name: EAS · run direct compatible update
         if: env.PROVIDER_GATE == 'ready' && env.PROVIDER_ACTION == 'eas_update'
         env:
