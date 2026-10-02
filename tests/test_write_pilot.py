@@ -20,7 +20,10 @@ def test_parse_model_handoff_accepts_exact_payload() -> None:
     [
         "",
         "{}",
-        '{"ack":"wrong","observation":"GitHub exact-SHA evidence remains authoritative for current source state."}',
+        (
+            '{"ack":"wrong","observation":'
+            '"GitHub exact-SHA evidence remains authoritative for current source state."}'
+        ),
         '{"ack":"AUTHORIZED_CONTROL_WRITE_PILOT","observation":"wrong"}',
     ],
 )
