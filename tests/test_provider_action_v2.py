@@ -249,3 +249,14 @@ def test_provider_readback_uses_update_group_then_update_view() -> None:
         assert "parse-update-group" in text
         assert 'eas update:view "$EAS_UPDATE_GROUP_ID"' in text
         assert "parse-update-view" in text
+
+
+def test_update_group_and_platform_readback_are_separate_steps() -> None:
+    status = Path(".github/workflows/provider-status-core.yml").read_text(encoding="utf-8")
+    action = Path(".github/workflows/provider-action-core.yml").read_text(encoding="utf-8")
+    assert "EAS · resolve update group after success" in status
+    assert "EAS · read platform update after success" in status
+    assert "EAS · resolve direct update group" in action
+    assert "EAS · read back direct platform update" in action
+    assert 'test -n "${EAS_UPDATE_GROUP_ID:-}"' in status
+    assert 'test -n "${EAS_UPDATE_GROUP_ID:-}"' in action
