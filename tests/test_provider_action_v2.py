@@ -1,5 +1,6 @@
 import importlib.util
 import json
+import subprocess
 from argparse import Namespace
 from pathlib import Path
 
@@ -76,6 +77,127 @@ def test_prepare_accepts_bounded_preview_provider_record(tmp_path: Path) -> None
     assert "PROVIDER_CHANNEL=preview" in env
     assert "PROVIDER_RUNTIME_VERSION=0.0.11" in env
 
+def test_prepare_accepts_wafl_alpha83_p5_direct_update_target(tmp_path: Path) -> None:
+    record = _record("WAFL")
+    action = record["provider_action"]
+    action["action"] = "eas_update"
+    action.pop("workflow_file")
+    action["runtime_version"] = "2.0.0-alpha.80-p5"
+    action["parameters"] = {
+        "environment": "development",
+        "channel": "alpha83-p5",
+        "platform": "ios",
+        "message": "WAFL Alpha.83 P5 repair",
+    }
+    record_path = tmp_path / "record.json"
+    env_path = tmp_path / "env"
+    record_path.write_text(json.dumps(record), encoding="utf-8")
+    prepare(
+        Namespace(
+            record=str(record_path),
+            project="WAFL",
+            repository="ChoiWonJae850610/WAFL",
+            target_branch="cloud-dev-v1",
+            wake_title="[PROVIDER-WAKE][DISPATCHER-V2] WAFL WAFL-PROVIDER-OTA-001 "
+            + "c" * 40
+            + " "
+            + "a" * 40,
+            control_sha="c" * 40,
+            source_sha="a" * 40,
+            github_env=str(env_path),
+        )
+    )
+    env = env_path.read_text(encoding="utf-8")
+    assert "PROVIDER_ACTION=eas_update" in env
+    assert "PROVIDER_ENVIRONMENT=development" in env
+    assert "PROVIDER_CHANNEL=alpha83-p5" in env
+    assert "PROVIDER_APP_VARIANT=development" in env
+
+
+def test_prepare_rejects_unallowlisted_wafl_eas_target(tmp_path: Path) -> None:
+    record = _record("WAFL")
+    action = record["provider_action"]
+    action["parameters"]["environment"] = "preview"
+    action["parameters"]["channel"] = "preview"
+    record_path = tmp_path / "record.json"
+    record_path.write_text(json.dumps(record), encoding="utf-8")
+    with pytest.raises(SystemExit):
+        prepare(
+            Namespace(
+                record=str(record_path),
+                project="WAFL",
+                repository="ChoiWonJae850610/WAFL",
+                target_branch="cloud-dev-v1",
+                wake_title="[PROVIDER-WAKE][DISPATCHER-V2] WAFL WAFL-PROVIDER-OTA-001 "
+                + "c" * 40
+                + " "
+                + "a" * 40,
+                control_sha="c" * 40,
+                source_sha="a" * 40,
+                github_env=str(tmp_path / "env"),
+            )
+        )
+
+
+def _git(repo: Path, *args: str) -> str:
+    return subprocess.run(
+        ["git", "-C", str(repo), *args],
+        check=True,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    ).stdout.strip()
+
+
+def test_check_ota_allows_only_exact_wafl_app_variant_manifest_delta(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    config = repo / "apps" / "mobile" / "app.config.js"
+    config.parent.mkdir(parents=True)
+    _git(tmp_path, "init", str(repo))
+    _git(repo, "config", "user.name", "Test")
+    _git(repo, "config", "user.email", "test@example.com")
+    baseline = 'return {\n    extra: {\n      authMode,\n      dataMode,\n    },\n  };\n'
+    config.write_text(baseline, encoding="utf-8")
+    _git(repo, "add", "apps/mobile/app.config.js")
+    _git(repo, "commit", "-m", "baseline")
+    base = _git(repo, "rev-parse", "HEAD")
+    config.write_text(
+        baseline.replace(
+            "      dataMode,\n",
+            '      appVariant: development ? "development" : "production",\n      dataMode,\n',
+        ),
+        encoding="utf-8",
+    )
+    _git(repo, "add", "apps/mobile/app.config.js")
+    _git(repo, "commit", "-m", "safe extra")
+    safe_head = _git(repo, "rev-parse", "HEAD")
+    MODULE.check_ota(
+        Namespace(
+            repo=str(repo),
+            project="WAFL",
+            base=base,
+            head=safe_head,
+            working_directory="apps/mobile",
+        )
+    )
+    config.write_text(
+        config.read_text(encoding="utf-8") + "nativeLikeChange = true;\n",
+        encoding="utf-8",
+    )
+    _git(repo, "add", "apps/mobile/app.config.js")
+    _git(repo, "commit", "-m", "unsafe config")
+    unsafe_head = _git(repo, "rev-parse", "HEAD")
+    with pytest.raises(SystemExit):
+        MODULE.check_ota(
+            Namespace(
+                repo=str(repo),
+                project="WAFL",
+                base=base,
+                head=unsafe_head,
+                working_directory="apps/mobile",
+            )
+        )
+
 
 def test_prepare_rejects_production_provider_authority(tmp_path: Path) -> None:
     record = _record()
@@ -127,6 +249,8 @@ def test_provider_core_supports_common_action_families() -> None:
     assert "github_workflow_dispatch" in text
     assert "provider_action.py check-ota" in text
     assert "source_validation_run" in text
+    assert '--project "$PROJECT"' in text
+    assert 'export APP_VARIANT="$PROVIDER_APP_VARIANT"' in text
 
 
 def test_provider_evidence_uses_printf_not_shell_backtick_substitution() -> None:

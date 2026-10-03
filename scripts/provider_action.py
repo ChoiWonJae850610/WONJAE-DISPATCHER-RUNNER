@@ -11,6 +11,12 @@ from typing import Any
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 TASK_RE = re.compile(r"^[A-Z][A-Z0-9_-]*-[A-Z0-9][A-Z0-9-]*-[0-9]{3}$")
 ALLOWED_ACTIONS = {"eas_workflow_update", "eas_update", "github_workflow_dispatch"}
+ALLOWED_EAS_TARGETS = {
+    "CLASSMO": {("preview", "preview")},
+    "ESC": {("preview", "preview")},
+    "WAFL": {("development", "alpha83-p5")},
+}
+WAFL_SAFE_APP_VARIANT_LINE = '      appVariant: development ? "development" : "production",'
 FORBIDDEN_OTA_NAMES = {
     "app.json",
     "eas.json",
@@ -148,8 +154,9 @@ def prepare(args: argparse.Namespace) -> None:
         channel = require_string(params, "channel")
         platform = require_string(params, "platform")
         message = require_string(params, "message")
-        if environment != "preview" or channel != "preview":
-            fail("provider v2 pilot permits preview EAS environment/channel only")
+        allowed_targets = ALLOWED_EAS_TARGETS.get(args.project, set())
+        if (environment, channel) not in allowed_targets:
+            fail("provider v2 EAS target is not allowlisted for project")
         if platform not in {"ios", "android"}:
             fail("unsupported EAS platform")
         values.update(
@@ -163,6 +170,8 @@ def prepare(args: argparse.Namespace) -> None:
                 "PROVIDER_MESSAGE": message,
             }
         )
+        if args.project == "WAFL":
+            values["PROVIDER_APP_VARIANT"] = "development"
         if kind == "eas_workflow_update":
             workflow_file = safe_rel(require_string(action, "workflow_file"), "workflow_file")
             if not workflow_file.startswith(".eas/workflows/"):
@@ -201,6 +210,22 @@ def git_output(repo: Path, *parts: str) -> str:
     return result.stdout.strip()
 
 
+def _is_safe_wafl_app_variant_only_delta(
+    repo: Path, base: str, head: str, path: str
+) -> bool:
+    diff = git_output(repo, "diff", "--unified=0", f"{base}..{head}", "--", path)
+    added: list[str] = []
+    removed: list[str] = []
+    for line in diff.splitlines():
+        if line.startswith(("+++", "---", "@@")):
+            continue
+        if line.startswith("+"):
+            added.append(line[1:])
+        elif line.startswith("-"):
+            removed.append(line[1:])
+    return not removed and added == [WAFL_SAFE_APP_VARIANT_LINE]
+
+
 def check_ota(args: argparse.Namespace) -> None:
     repo = Path(args.repo).resolve()
     base = args.base
@@ -226,6 +251,12 @@ def check_ota(args: argparse.Namespace) -> None:
             blocked.append(path)
             continue
         if relative.startswith("app.config."):
+            if (
+                args.project == "WAFL"
+                and path == "apps/mobile/app.config.js"
+                and _is_safe_wafl_app_variant_only_delta(repo, base, head, path)
+            ):
+                continue
             blocked.append(path)
     if blocked:
         fail(
@@ -383,6 +414,7 @@ def main() -> None:
 
     p = sub.add_parser("check-ota")
     p.add_argument("--repo", required=True)
+    p.add_argument("--project", required=True)
     p.add_argument("--base", required=True)
     p.add_argument("--head", required=True)
     p.add_argument("--working-directory", required=True)
