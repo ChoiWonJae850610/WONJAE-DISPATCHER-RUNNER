@@ -44,7 +44,7 @@ def test_classmo_v2_recovers_failed_pr_validation_before_terminal_failure() -> N
     assert "max_repairs=2" in text
     assert "run_product_repair.py" in text
     assert "## Dispatcher v2 terminal evidence" in text
-    assert "recovery_state: \`FINAL\`" in text
+    assert "recovery_state: `FINAL`" in text
     assert "terminalize" in text
     assert "product_pr_cleanup" in text
 
