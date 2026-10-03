@@ -27,8 +27,11 @@ jobs:
       wake_title: ${{ github.event.issue.title }}
       issue_number: ${{ github.event.issue.number }}
       control_repository: ${{ vars.CONTROL_REPOSITORY }}
+      gmail_enabled: ${{ vars.GITHUB_NATIVE_GMAIL_ENABLED == 'true' }}
     secrets:
       control_read_token: ${{ secrets.CONTROL_READ_TOKEN }}
+      gmail_username: ${{ secrets.GMAIL_USERNAME }}
+      gmail_app_password: ${{ secrets.GMAIL_APP_PASSWORD }}
       product_token: ${{ secrets.MUVEL_WRITE_TOKEN }}
       github_provider_token: ${{ secrets.MUVEL_PROVIDER_GITHUB_TOKEN }}
 
@@ -48,7 +51,10 @@ jobs:
       wake_title: ${{ github.event.issue.title }}
       issue_number: ${{ github.event.issue.number }}
       control_repository: ${{ vars.CONTROL_REPOSITORY }}
+      gmail_enabled: ${{ vars.GITHUB_NATIVE_GMAIL_ENABLED == 'true' }}
     secrets:
       control_read_token: ${{ secrets.CONTROL_READ_TOKEN }}
+      gmail_username: ${{ secrets.GMAIL_USERNAME }}
+      gmail_app_password: ${{ secrets.GMAIL_APP_PASSWORD }}
       product_token: ${{ secrets.MUVEL_WRITE_TOKEN }}
       github_provider_token: ${{ secrets.MUVEL_PROVIDER_GITHUB_TOKEN }}
