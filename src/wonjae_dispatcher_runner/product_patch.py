@@ -422,7 +422,7 @@ def _prestarted_recovery_prompt(base_prompt: str, failure: str, attempt: int) ->
             "- The previous plan was rejected before any product write.",
             "- Return a complete replacement plan; do not refer to the rejected plan.",
             "- Prefer operation=write for an existing file when exact replace matching is fragile,",
-            "  when multiple edits touch the same region, or when a complete-file rewrite is requested.",
+            "  when edits overlap, or when a complete-file rewrite is requested.",
             "- replace always requires a non-empty exact old_text that matches once.",
             "- Stay strictly inside the original allowed paths and authority.",
         ]
