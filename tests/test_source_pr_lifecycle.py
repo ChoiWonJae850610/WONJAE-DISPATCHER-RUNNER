@@ -71,14 +71,14 @@ def pr_for(source, number=12, state="OPEN", merged_at=None):
         "body": "\n".join(
             [
                 "## Dispatcher v2 metadata",
-                f"- task_id: \`{source.task_id}\`",
-                f"- project: \`{source.project}\`",
-                f"- attempt: \`{source.attempt}\`",
-                "- revision: \`1\`",
-                f"- repository: \`{source.repository}\`",
-                f"- target_branch: \`{source.target_branch}\`",
-                f"- source_base_sha: \`{source.source_sha}\`",
-                f"- control_sha: \`{source.control_sha}\`",
+                f"- task_id: `{source.task_id}`",
+                f"- project: `{source.project}`",
+                f"- attempt: `{source.attempt}`",
+                "- revision: `1`",
+                f"- repository: `{source.repository}`",
+                f"- target_branch: `{source.target_branch}`",
+                f"- source_base_sha: `{source.source_sha}`",
+                f"- control_sha: `{source.control_sha}`",
             ]
         ),
     }
@@ -88,16 +88,16 @@ def evidence(source, result="FAILED", recovery="FINAL", pr_number=12):
     return "\n".join(
         [
             "## Dispatcher v2 terminal evidence",
-            f"- project: \`{source.project}\`",
-            f"- task_id: \`{source.task_id}\`",
-            f"- attempt: \`{source.attempt}\`",
-            f"- control_sha: \`{source.control_sha}\`",
-            f"- source_sha: \`{source.source_sha}\`",
-            f"- product_pr: \`{pr_number}\`",
-            f"- runner_run_id: \`{source.runner_run_id}\`",
-            "- runner_conclusion: \`failure\`",
-            f"- result: \`{result}\`",
-            f"- recovery_state: \`{recovery}\`",
+            f"- project: `{source.project}`",
+            f"- task_id: `{source.task_id}`",
+            f"- attempt: `{source.attempt}`",
+            f"- control_sha: `{source.control_sha}`",
+            f"- source_sha: `{source.source_sha}`",
+            f"- product_pr: `{pr_number}`",
+            f"- runner_run_id: `{source.runner_run_id}`",
+            "- runner_conclusion: `failure`",
+            f"- result: `{result}`",
+            f"- recovery_state: `{recovery}`",
         ]
     )
 
