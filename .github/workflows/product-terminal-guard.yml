@@ -208,6 +208,7 @@ jobs:
 
       - name: Close exact CLASSMO terminal Product PR
         if: env.GUARD_ACTION == 'TERMINALIZE' && env.PROJECT == 'CLASSMO'
+        continue-on-error: true
         env:
           PRODUCT_GH_TOKEN: ${{ secrets.CLASSMO_WRITE_TOKEN }}
         shell: bash
@@ -226,6 +227,7 @@ jobs:
 
       - name: Close exact WAFL terminal Product PR
         if: env.GUARD_ACTION == 'TERMINALIZE' && env.PROJECT == 'WAFL'
+        continue-on-error: true
         env:
           PRODUCT_GH_TOKEN: ${{ secrets.WAFL_WRITE_TOKEN }}
         shell: bash
@@ -244,6 +246,7 @@ jobs:
 
       - name: Close exact ESC terminal Product PR
         if: env.GUARD_ACTION == 'TERMINALIZE' && env.PROJECT == 'ESC'
+        continue-on-error: true
         env:
           PRODUCT_GH_TOKEN: ${{ secrets.ESC_WRITE_TOKEN }}
         shell: bash
@@ -262,6 +265,7 @@ jobs:
 
       - name: Close exact MUVEL terminal Product PR
         if: env.GUARD_ACTION == 'TERMINALIZE' && env.PROJECT == 'MUVEL'
+        continue-on-error: true
         env:
           PRODUCT_GH_TOKEN: ${{ secrets.MUVEL_WRITE_TOKEN }}
         shell: bash
@@ -279,7 +283,7 @@ jobs:
           echo "SOURCE_PR_CLEANUP_NEXT_ACTION=$(echo "$result" | jq -r .next_action)" >> "$GITHUB_ENV"
 
       - name: Record terminal state and Product PR cleanup evidence
-        if: env.GUARD_ACTION == 'TERMINALIZE'
+        if: ${{ always() && env.GUARD_ACTION == 'TERMINALIZE' }}
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
