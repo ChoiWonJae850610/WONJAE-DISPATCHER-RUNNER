@@ -1,0 +1,74 @@
+name: GitHub-native Gmail Smoke
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  gmail-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      GMAIL_USERNAME: ${{ secrets.GMAIL_USERNAME }}
+      GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+
+    steps:
+      - name: Checkout trusted main
+        uses: actions/checkout@v6
+        with:
+          ref: main
+          persist-credentials: false
+
+      - name: Prepare unique smoke identity
+        shell: bash
+        run: |
+          echo "SMOKE_TASK_ID=WAFL-GMAIL-SMOKE-$GITHUB_RUN_ID" >> "$GITHUB_ENV"
+
+      - name: Attempt 1 STARTED
+        run: |
+          PYTHONPATH="$GITHUB_WORKSPACE/src" python scripts/gmail_notify.py \
+            --project WAFL \
+            --task-id "$SMOKE_TASK_ID" \
+            --attempt 1 \
+            --status STARTED \
+            --profile smoke
+
+      - name: Attempt 1 FAILED
+        run: |
+          PYTHONPATH="$GITHUB_WORKSPACE/src" python scripts/gmail_notify.py \
+            --project WAFL \
+            --task-id "$SMOKE_TASK_ID" \
+            --attempt 1 \
+            --status FAILED \
+            --profile smoke \
+            --smallest-next-action "synthetic retry"
+
+      - name: Attempt 2 STARTED supersedes Attempt 1 RESULT
+        run: |
+          PYTHONPATH="$GITHUB_WORKSPACE/src" python scripts/gmail_notify.py \
+            --project WAFL \
+            --task-id "$SMOKE_TASK_ID" \
+            --attempt 2 \
+            --status STARTED \
+            --profile smoke
+
+      - name: Attempt 2 COMPLETED
+        run: |
+          PYTHONPATH="$GITHUB_WORKSPACE/src" python scripts/gmail_notify.py \
+            --project WAFL \
+            --task-id "$SMOKE_TASK_ID" \
+            --attempt 2 \
+            --status COMPLETED \
+            --profile smoke \
+            --integration-evidence "synthetic-smoke-pass"
+
+      - name: Cleanup synthetic terminal RESULT
+        run: |
+          PYTHONPATH="$GITHUB_WORKSPACE/src" python scripts/gmail_notify.py \
+            --project WAFL \
+            --task-id "$SMOKE_TASK_ID" \
+            --attempt 2 \
+            --status COMPLETED \
+            --cleanup-only
