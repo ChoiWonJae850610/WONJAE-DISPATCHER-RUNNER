@@ -10,6 +10,7 @@ from wonjae_dispatcher_runner.product_patch import (
     apply_edit_plan,
     load_work_order,
     parse_edit_plan,
+    validate_branch_scope,
 )
 
 SHA = "03841079f616a8312e9b6c273a788585fa1a7b01"
@@ -218,3 +219,55 @@ def test_apply_edit_plan_requires_unique_old_text(tmp_path: Path) -> None:
     )
     with pytest.raises(ProductPilotError):
         apply_edit_plan(repo, edits, order)
+
+
+def test_repair_scope_accepts_required_path_from_existing_branch_history(tmp_path: Path) -> None:
+    repo = tmp_path / "repo-repair"
+    repo.mkdir()
+    init_repo(repo)
+    required = repo / "apps/mobile/src/components/member-shell.tsx"
+    optional = repo / "apps/mobile/src/presentation/member-home.ts"
+    required.parent.mkdir(parents=True)
+    optional.parent.mkdir(parents=True)
+    required.write_text("base required\n", encoding="utf-8")
+    optional.write_text("base optional\n", encoding="utf-8")
+    (repo / "AGENTS.md").write_text("rules\n", encoding="utf-8")
+    subprocess.run(["git", "-C", str(repo), "add", "."], check=True)
+    subprocess.run(["git", "-C", str(repo), "commit", "-qm", "base"], check=True)
+    base_sha = subprocess.run(
+        ["git", "-C", str(repo), "rev-parse", "HEAD"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+
+    required.write_text("task required\n", encoding="utf-8")
+    subprocess.run(["git", "-C", str(repo), "add", "."], check=True)
+    subprocess.run(["git", "-C", str(repo), "commit", "-qm", "task"], check=True)
+
+    payload = work_order_payload()
+    payload["source_base_sha"] = base_sha
+    path = tmp_path / "repair-work-order.json"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    order = load_work_order(path)
+
+    assert validate_branch_scope(repo, order) == (
+        "apps/mobile/src/components/member-shell.tsx",
+    )
+
+    edits = (
+        ProductEdit(
+            path="apps/mobile/src/presentation/member-home.ts",
+            operation="replace",
+            old_text="base optional",
+            new_text="repaired optional",
+        ),
+    )
+    changed = apply_edit_plan(
+        repo,
+        edits,
+        order,
+        require_required_paths=False,
+    )
+    assert changed == ("apps/mobile/src/presentation/member-home.ts",)
+    validate_branch_scope(repo, order, changed)
