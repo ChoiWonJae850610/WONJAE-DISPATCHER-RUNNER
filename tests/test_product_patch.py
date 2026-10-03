@@ -197,6 +197,104 @@ def test_apply_edit_plan_writes_replace_and_create(tmp_path: Path) -> None:
     assert "updated target" in existing.read_text(encoding="utf-8")
 
 
+def test_parse_edit_plan_accepts_whole_file_write(tmp_path: Path) -> None:
+    order = write_work_order(tmp_path)
+    response = json.dumps(
+        {
+            "edits": [
+                {
+                    "path": "apps/mobile/src/components/member-shell.tsx",
+                    "operation": "write",
+                    "old_text": "",
+                    "new_text": "complete replacement\n",
+                }
+            ],
+            "summary": "Rewrite Member Home coherently.",
+        }
+    )
+    edits = parse_edit_plan(response, order)
+    assert edits[0].operation == "write"
+    assert edits[0].old_text == ""
+
+
+def test_parse_edit_plan_rejects_write_with_old_text(tmp_path: Path) -> None:
+    order = write_work_order(tmp_path)
+    response = json.dumps(
+        {
+            "edits": [
+                {
+                    "path": "apps/mobile/src/components/member-shell.tsx",
+                    "operation": "write",
+                    "old_text": "should be empty",
+                    "new_text": "complete replacement\n",
+                }
+            ],
+            "summary": "Invalid whole-file write.",
+        }
+    )
+    with pytest.raises(ProductPilotError):
+        parse_edit_plan(response, order)
+
+
+def test_apply_edit_plan_writes_existing_file_atomically(tmp_path: Path) -> None:
+    repo = tmp_path / "repo-write"
+    repo.mkdir()
+    init_repo(repo)
+    existing = repo / "apps/mobile/src/components/member-shell.tsx"
+    existing.parent.mkdir(parents=True)
+    existing.write_text("before\n", encoding="utf-8")
+    (repo / "AGENTS.md").write_text("rules\n", encoding="utf-8")
+    subprocess.run(["git", "-C", str(repo), "add", "."], check=True)
+    subprocess.run(["git", "-C", str(repo), "commit", "-qm", "base"], check=True)
+
+    order = write_work_order(tmp_path)
+    edits = (
+        ProductEdit(
+            path="apps/mobile/src/components/member-shell.tsx",
+            operation="write",
+            old_text="",
+            new_text="after\ncomplete\n",
+        ),
+    )
+    changed = apply_edit_plan(repo, edits, order)
+    assert changed == ("apps/mobile/src/components/member-shell.tsx",)
+    assert existing.read_text(encoding="utf-8") == "after\ncomplete\n"
+
+
+def test_apply_edit_plan_rejects_missing_required_path_before_writing(tmp_path: Path) -> None:
+    repo = tmp_path / "repo-required"
+    repo.mkdir()
+    init_repo(repo)
+    required = repo / "apps/mobile/src/components/member-shell.tsx"
+    optional = repo / "apps/mobile/src/presentation/member-home.ts"
+    required.parent.mkdir(parents=True)
+    optional.parent.mkdir(parents=True)
+    required.write_text("required base\n", encoding="utf-8")
+    optional.write_text("optional base\n", encoding="utf-8")
+    (repo / "AGENTS.md").write_text("rules\n", encoding="utf-8")
+    subprocess.run(["git", "-C", str(repo), "add", "."], check=True)
+    subprocess.run(["git", "-C", str(repo), "commit", "-qm", "base"], check=True)
+
+    order = write_work_order(tmp_path)
+    edits = (
+        ProductEdit(
+            path="apps/mobile/src/presentation/member-home.ts",
+            operation="write",
+            old_text="",
+            new_text="optional changed\n",
+        ),
+    )
+    with pytest.raises(ProductPilotError, match="required changed paths"):
+        apply_edit_plan(repo, edits, order)
+    assert optional.read_text(encoding="utf-8") == "optional base\n"
+    assert subprocess.run(
+        ["git", "-C", str(repo), "status", "--porcelain=v1"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout == ""
+
+
 def test_apply_edit_plan_requires_unique_old_text(tmp_path: Path) -> None:
     repo = tmp_path / "repo"
     repo.mkdir()
@@ -271,6 +369,14 @@ def test_repair_scope_accepts_required_path_from_existing_branch_history(tmp_pat
     )
     assert changed == ("apps/mobile/src/presentation/member-home.ts",)
     validate_branch_scope(repo, order, changed)
+
+
+def test_product_patch_source_has_bounded_prestarted_plan_recovery() -> None:
+    text = Path("src/wonjae_dispatcher_runner/product_patch.py").read_text(encoding="utf-8")
+    assert "MAX_PLAN_REGENERATION_ATTEMPTS = 2" in text
+    assert "PRODUCT_PLAN_RECOVERY=" in text
+    assert '"replace", "create", "write"' in text
+    assert "Never use replace with an empty old_text" in text
 
 
 def test_repair_runner_reuses_existing_codex_auth_session() -> None:
