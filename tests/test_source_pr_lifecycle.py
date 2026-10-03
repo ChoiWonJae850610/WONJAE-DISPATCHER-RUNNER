@@ -95,7 +95,7 @@ def evidence(source, result="FAILED", recovery="FINAL", pr_number=12):
             f"- source_sha: \`{source.source_sha}\`",
             f"- product_pr: \`{pr_number}\`",
             f"- runner_run_id: \`{source.runner_run_id}\`",
-            f"- runner_conclusion: \`failure\`",
+            "- runner_conclusion: \`failure\`",
             f"- result: \`{result}\`",
             f"- recovery_state: \`{recovery}\`",
         ]
