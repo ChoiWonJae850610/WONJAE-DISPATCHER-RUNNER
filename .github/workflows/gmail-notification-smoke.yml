@@ -2,12 +2,21 @@ name: GitHub-native Gmail Smoke
 
 on:
   workflow_dispatch:
+  issues:
+    types:
+      - opened
 
 permissions:
   contents: read
+  issues: write
 
 jobs:
   gmail-smoke:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.actor == github.repository_owner &&
+       github.event.issue.user.login == github.repository_owner &&
+       github.event.issue.title == '[GMAIL-SMOKE][GITHUB-NATIVE]')
     runs-on: ubuntu-latest
     timeout-minutes: 5
     env:
@@ -72,3 +81,12 @@ jobs:
             --attempt 2 \
             --status COMPLETED \
             --cleanup-only
+
+      - name: Close smoke wake issue
+        if: ${{ always() && github.event_name == 'issues' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh issue close "${{ github.event.issue.number }}" \
+            --repo "$GITHUB_REPOSITORY" \
+            --reason completed
