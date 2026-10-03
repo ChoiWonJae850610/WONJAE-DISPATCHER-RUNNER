@@ -157,7 +157,7 @@ status remains VALIDATING. Device and physical evidence remain separate.
 The runner contains an opt-in Gmail notification path that sends lifecycle mail directly
 from trusted GitHub Actions instead of relying on a separate ChatGPT observer. It uses
 only Python standard-library SMTP/IMAP clients and is gated by the repository variable
-`GITHUB_NATIVE_GMAIL_ENABLED=true`.
+`WONJAE_NATIVE_GMAIL_ENABLED=true`.
 
 Required runner repository secrets:
 

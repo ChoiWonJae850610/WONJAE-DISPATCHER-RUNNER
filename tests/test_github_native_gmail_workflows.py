@@ -18,7 +18,7 @@ PROVIDER_ADAPTERS = (
 def test_source_workflows_gate_native_gmail_until_explicit_enable() -> None:
     for path in SOURCE_WORKFLOWS:
         text = Path(path).read_text(encoding="utf-8")
-        assert "GITHUB_NATIVE_GMAIL_ENABLED" in text
+        assert "WONJAE_NATIVE_GMAIL_ENABLED" in text
         assert "GMAIL_USERNAME" in text
         assert "GMAIL_APP_PASSWORD" in text
         assert "gmail_notify.py" in text
@@ -29,7 +29,7 @@ def test_source_workflows_gate_native_gmail_until_explicit_enable() -> None:
 
 def test_source_terminal_guard_has_idempotent_native_gmail_fallback() -> None:
     text = Path(".github/workflows/product-terminal-guard.yml").read_text(encoding="utf-8")
-    assert "GITHUB_NATIVE_GMAIL_ENABLED" in text
+    assert "WONJAE_NATIVE_GMAIL_ENABLED" in text
     assert "CONTROL_READ_TOKEN" in text
     assert "GMAIL_USERNAME" in text
     assert "GMAIL_APP_PASSWORD" in text
@@ -52,14 +52,14 @@ def test_provider_reusable_workflows_accept_gmail_credentials() -> None:
 def test_provider_adapters_pass_feature_flag_and_gmail_secrets() -> None:
     for path in PROVIDER_ADAPTERS:
         text = Path(path).read_text(encoding="utf-8")
-        assert "GITHUB_NATIVE_GMAIL_ENABLED" in text
+        assert "WONJAE_NATIVE_GMAIL_ENABLED" in text
         assert "gmail_username: ${{ secrets.GMAIL_USERNAME }}" in text
         assert "gmail_app_password: ${{ secrets.GMAIL_APP_PASSWORD }}" in text
 
 
 def test_provider_terminal_guard_can_reconcile_native_gmail() -> None:
     text = Path(".github/workflows/provider-terminal-guard.yml").read_text(encoding="utf-8")
-    assert "GITHUB_NATIVE_GMAIL_ENABLED" in text
+    assert "WONJAE_NATIVE_GMAIL_ENABLED" in text
     assert "PROVIDER_TERMINAL_RESULT" in text
     assert "gmail_notify.py" in text
     assert "CONTROL_READ_TOKEN" in text

@@ -263,7 +263,7 @@ jobs:
           python scripts/actions_progress.py STARTED PASS --sha "$PILOT_HEAD_SHA" --pr "$pr_number"
 
       - name: "[06] NOTIFY · GitHub-native STARTED"
-        if: ${{ vars.GITHUB_NATIVE_GMAIL_ENABLED == 'true' }}
+        if: ${{ vars.WONJAE_NATIVE_GMAIL_ENABLED == 'true' }}
         continue-on-error: true
         env:
           GMAIL_USERNAME: ${{ secrets.GMAIL_USERNAME }}
@@ -411,7 +411,7 @@ jobs:
           python scripts/actions_progress.py RESULT PASS --sha "$INTEGRATED_SHA" --pr "$PILOT_PR_NUMBER"
 
       - name: "[10] NOTIFY · GitHub-native COMPLETED"
-        if: ${{ vars.GITHUB_NATIVE_GMAIL_ENABLED == 'true' }}
+        if: ${{ vars.WONJAE_NATIVE_GMAIL_ENABLED == 'true' }}
         continue-on-error: true
         env:
           GMAIL_USERNAME: ${{ secrets.GMAIL_USERNAME }}
@@ -463,7 +463,7 @@ jobs:
           python scripts/actions_progress.py RESULT FAIL || true
 
       - name: "[10] NOTIFY · GitHub-native terminal failure"
-        if: ${{ failure() && vars.GITHUB_NATIVE_GMAIL_ENABLED == 'true' }}
+        if: ${{ failure() && vars.WONJAE_NATIVE_GMAIL_ENABLED == 'true' }}
         continue-on-error: true
         env:
           GMAIL_USERNAME: ${{ secrets.GMAIL_USERNAME }}
