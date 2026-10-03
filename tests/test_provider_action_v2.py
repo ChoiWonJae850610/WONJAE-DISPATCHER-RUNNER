@@ -246,6 +246,7 @@ def test_provider_core_supports_common_action_families() -> None:
     text = Path(".github/workflows/provider-action-core.yml").read_text(encoding="utf-8")
     assert "eas_workflow_update" in text
     assert "eas_update" in text
+    assert "eas_build" in text
     assert "github_workflow_dispatch" in text
     assert "provider_action.py check-ota" in text
     assert "source_validation_run" in text
@@ -425,3 +426,61 @@ def test_provider_terminal_guard_preserves_queued_external_runs() -> None:
     assert "MANUAL_REQUIRED" in text
     assert "CANCELLED" in text
     assert "gh issue close" in text
+
+
+def test_prepare_accepts_classmo_preview_eas_build(tmp_path: Path) -> None:
+    record = _record()
+    record["task_id"] = "CLASSMO-PREVIEW-BUILD-001"
+    record["title"] = "Build CLASSMO preview"
+    record["provider_authority"]["new_build"] = True
+    record["provider_action"] = {
+        "action": "eas_build",
+        "working_directory": "apps/mobile",
+        "parameters": {
+            "platform": "ios",
+            "profile": "preview",
+            "app_version": "0.0.11",
+            "build_number": "3",
+        },
+    }
+    record_path = tmp_path / "record.json"
+    env_path = tmp_path / "env"
+    record_path.write_text(json.dumps(record), encoding="utf-8")
+    prepare(
+        Namespace(
+            record=str(record_path),
+            project="CLASSMO",
+            repository="ChoiWonJae850610/CLASSMO",
+            target_branch="cloud-dev-v1",
+            wake_title="[PROVIDER-WAKE][DISPATCHER-V2] CLASSMO CLASSMO-PREVIEW-BUILD-001 "
+            + "c" * 40 + " " + "a" * 40,
+            control_sha="c" * 40,
+            source_sha="a" * 40,
+            github_env=str(env_path),
+        )
+    )
+    env = env_path.read_text(encoding="utf-8")
+    assert "PROVIDER_ACTION=eas_build" in env
+    assert "PROVIDER_BUILD_PROFILE=preview" in env
+    assert "PROVIDER_BUILD_NUMBER=3" in env
+
+
+def test_parse_eas_build_view_captures_finished_internal_artifact(tmp_path: Path) -> None:
+    payload = {
+        "id": "build-123",
+        "status": "FINISHED",
+        "appVersion": "0.0.11",
+        "appBuildVersion": "3",
+        "distribution": "INTERNAL",
+        "artifacts": {"applicationArchiveUrl": "https://example.invalid/classmo.ipa"},
+    }
+    input_path = tmp_path / "build.json"
+    env_path = tmp_path / "env"
+    input_path.write_text(json.dumps(payload), encoding="utf-8")
+    MODULE.parse_eas_build_view(
+        Namespace(input=str(input_path), expected_id="build-123", github_env=str(env_path))
+    )
+    env = env_path.read_text(encoding="utf-8")
+    assert "PROVIDER_STATUS=SUCCESS" in env
+    assert "EAS_BUILD_APP_BUILD_VERSION=3" in env
+    assert "EAS_BUILD_ARTIFACT_URL=https://example.invalid/classmo.ipa" in env
