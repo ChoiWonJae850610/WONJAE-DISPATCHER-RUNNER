@@ -42,3 +42,13 @@ If a secret may have been exposed, revoke/rotate it first and then report the in
 Product source authority is never reused from the DEV-CONTROL credential. A product pilot uses a dedicated fine-grained token restricted to that product repository and the minimum Contents/Pull requests/Actions permissions needed for branch, PR, integration, and exact-SHA validation readback. The public wake event carries no credential and no executable product prose; the private control work order is fetched only after the trusted workflow starts.
 
 Codex runs read-only against the product checkout and returns a patch as data. The trusted runner validates the patch path set before applying it. Secrets, auth files, product source contents, generated patches, and private work-order prose must not be uploaded as artifacts or echoed into public Actions logs.
+
+
+## GitHub-native Gmail credential boundary
+
+Optional lifecycle email uses two additional runner-repository secrets only when
+`GITHUB_NATIVE_GMAIL_ENABLED=true`: `GMAIL_USERNAME` and `GMAIL_APP_PASSWORD`.
+The app password is used only for Gmail SMTP/IMAP from trusted default-branch
+workflows. It must never be committed, echoed, written to artifacts, passed to
+product repositories, or reused as a product/provider credential. Pull-request
+validation never receives these secrets.
