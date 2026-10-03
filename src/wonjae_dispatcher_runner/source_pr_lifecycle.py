@@ -202,26 +202,34 @@ def terminalize_exact_pr(
             "verify exact terminal identity and bounded recovery before Product PR cleanup",
         )
 
-    if pr_number is not None:
-        pr = client.get_pr(identity.repository, pr_number)
-    else:
-        candidates = _matching_open_prs(client, identity)
-        if not candidates:
-            return CleanupResult(
-                "NOT_APPLICABLE",
-                None,
-                "no exact open Product PR exists for this terminal attempt",
-                "inspect the exact runner evidence before retry",
-            )
-        if len(candidates) != 1:
-            return CleanupResult(
-                "RESIDUE",
-                None,
-                "multiple exact open Product PR candidates were found",
-                "resolve duplicate exact Product PRs before starting another source task",
-            )
-        pr = candidates[0]
-        pr_number = int(pr["number"])
+    try:
+        if pr_number is not None:
+            pr = client.get_pr(identity.repository, pr_number)
+        else:
+            candidates = _matching_open_prs(client, identity)
+            if not candidates:
+                return CleanupResult(
+                    "NOT_APPLICABLE",
+                    None,
+                    "no exact open Product PR exists for this terminal attempt",
+                    "inspect the exact runner evidence before retry",
+                )
+            if len(candidates) != 1:
+                return CleanupResult(
+                    "RESIDUE",
+                    None,
+                    "multiple exact open Product PR candidates were found",
+                    "resolve duplicate exact Product PRs before starting another source task",
+                )
+            pr = candidates[0]
+            pr_number = int(pr["number"])
+    except Exception as exc:  # noqa: BLE001 - cleanup residue must preserve terminal result
+        return CleanupResult(
+            "RESIDUE",
+            pr_number,
+            f"Product PR lookup failed: {exc}",
+            "verify the exact terminal Product PR and close it without merge if still open",
+        )
 
     errors = _identity_errors(pr, identity)
     if errors:
