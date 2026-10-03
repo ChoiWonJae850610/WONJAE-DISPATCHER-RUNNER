@@ -9,7 +9,7 @@ from typing import Protocol
 
 TERMINAL_RESULTS = frozenset({"FAILED", "MANUAL_REQUIRED", "CANCELLED"})
 FINAL_RECOVERY_STATES = frozenset({"FINAL", "FINAL_GUARD"})
-MARKDOWN_FIELD = re.compile(r"^- ([A-Za-z0-9_]+): \`([^\`]*)\`\\s*$", re.MULTILINE)
+MARKDOWN_FIELD = re.compile(r"^- ([A-Za-z0-9_]+): `([^`]*)`\s*$", re.MULTILINE)
 
 
 class LifecycleError(RuntimeError):
