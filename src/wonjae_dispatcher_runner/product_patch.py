@@ -95,7 +95,11 @@ def validate_branch_scope(
     work_order: ProductWorkOrder,
     extra_paths: tuple[str, ...] = (),
 ) -> tuple[str, ...]:
-    paths = tuple(dict.fromkeys((*branch_diff_paths(repo_path, work_order.source_base_sha), *extra_paths)))
+    paths = tuple(
+        dict.fromkeys(
+            (*branch_diff_paths(repo_path, work_order.source_base_sha), *extra_paths)
+        )
+    )
     allowed = set(work_order.allowed_paths)
     if any(path not in allowed for path in paths):
         raise ProductPilotError("product branch contains a path outside the work order")
@@ -422,7 +426,8 @@ def _repair_prompt(
     failure = validation_failure[-MAX_TEXT_CHARS:]
     return "\n".join(
         [
-            "You are repairing one already-started Owner-authorized product task after exact PR-head validation failed.",
+            "You are repairing one already-started Owner-authorized product task "
+            "after exact PR-head validation failed.",
             f"Control SHA: {require_sha(control_sha)}",
             f"Task-ID: {work_order.task_id}",
             f"Project: {work_order.project}",
@@ -431,11 +436,16 @@ def _repair_prompt(
             f"Original source base: {work_order.source_base_sha}",
             f"Current PR head: {require_sha(current_head)}",
             "",
-            "Repair the existing implementation in place. Do not restart the task and do not revert correct task work.",
-            "The entire branch must remain inside the original allowed paths and completion conditions.",
-            "Required changed paths apply to the whole branch, not necessarily this repair commit.",
-            "Use the validation failure below as diagnostic evidence only. Do not copy log noise into product files.",
-            "Do not call shell, filesystem, network, or external tools. Use only the supplied repository context and failure log.",
+            "Repair the existing implementation in place. Do not restart the task "
+            "and do not revert correct task work.",
+            "The entire branch must remain inside the original allowed paths and "
+            "completion conditions.",
+            "Required changed paths apply to the whole branch, not necessarily this "
+            "repair commit.",
+            "Use the validation failure below as diagnostic evidence only. Do not "
+            "copy log noise into product files.",
+            "Do not call shell, filesystem, network, or external tools. Use only the "
+            "supplied repository context and failure log.",
             "",
             "Scope:",
             *[f"- {item}" for item in work_order.scope],
@@ -449,7 +459,11 @@ def _repair_prompt(
             "Allowed changed paths:",
             *[f"- {item}" for item in work_order.allowed_paths],
             "",
-            "Return a structured edit plan only. Use operation=replace for existing files with an exact old_text snippet copied from the supplied current context, or operation=create for a missing allowed file. Make the smallest repair that addresses the validation failure. Do not add placeholders, failure markers, or unrelated cleanup.",
+            "Return a structured edit plan only. Use operation=replace for existing "
+            "files with an exact old_text snippet copied from the supplied current "
+            "context, or operation=create for a missing allowed file. Make the "
+            "smallest repair that addresses the validation failure. Do not add "
+            "placeholders, failure markers, or unrelated cleanup.",
             "",
             "VALIDATION FAILURE:",
             failure,
