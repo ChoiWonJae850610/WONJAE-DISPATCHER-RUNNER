@@ -30,8 +30,10 @@ def test_product_v2_workflows_are_isolated_and_task_generic() -> None:
         assert config["validation"] in text
         assert "## Dispatcher v2 metadata" in text
         assert "## Dispatcher v2 completion evidence" in text
-        assert f"Another {project} job pull request is already open." in text
-        assert 'startswith("job/")' in text
+        assert "source_pr_lifecycle.py" in text
+        assert "diagnose-conflicts" in text
+        assert "PRODUCT_GH_TOKEN" in text
+        assert "RUNNER_GH_TOKEN" in text
 
 
 def test_product_v2_workflows_do_not_cross_use_write_tokens() -> None:
@@ -51,6 +53,11 @@ def test_product_v2_workflows_recover_validation_and_terminalize_failure() -> No
         assert "run_product_repair.py" in text
         assert "Repair validation attempt" in text
         assert "## Dispatcher v2 terminal evidence" in text
+        assert "recovery_state: \`FINAL\`" in text
+        assert "source_pr_lifecycle.py" in text
+        assert "terminalize" in text
+        assert "product_pr_cleanup" in text
+        assert "cleanup_residue" in text
         assert "gh issue close" in text
         assert "timeout-minutes: 60" in text
 
@@ -80,3 +87,27 @@ def test_product_v2_higher_attempts_use_fresh_branches_and_track_repair_heads() 
         text = Path(config["workflow"]).read_text(encoding="utf-8")
         assert '("" if attempt == 1 else f"-a{attempt}")' in text
         assert 'echo "PILOT_HEAD_SHA=$repaired_head" >> "$GITHUB_ENV"' in text
+
+
+def test_completed_source_path_still_merges_only_validated_head() -> None:
+    for _project, config in PRODUCTS.items():
+        text = Path(config["workflow"]).read_text(encoding="utf-8")
+        assert "exact PR-head Actions with bounded recovery" in text
+        assert 'merge_method=merge' in text
+        assert '-f sha="$PILOT_HEAD_SHA"' in text
+        assert "exact integrated-SHA Actions" in text
+        assert "exact integrated-SHA validation did not succeed" in text
+
+
+def test_source_terminal_guard_closes_only_exact_product_pr() -> None:
+    text = Path(".github/workflows/product-terminal-guard.yml").read_text(encoding="utf-8")
+    for project in ("CLASSMO", "WAFL", "ESC", "MUVEL"):
+        assert f"Close exact {project} terminal Product PR" in text
+        assert f"secrets.{project}_WRITE_TOKEN" in text
+    assert "source_pr_lifecycle.py" in text
+    assert "FINAL_GUARD" in text
+    assert "terminal PR cleanup evidence" in text
+    assert "product_pr_cleanup" in text
+    assert "cleanup_residue" in text
+    assert "delete-branch" not in text
+    assert "git push --delete" not in text
