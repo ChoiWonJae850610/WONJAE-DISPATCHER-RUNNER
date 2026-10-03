@@ -242,7 +242,7 @@ jobs:
           node-version: "24"
 
       - name: EAS · install pinned CLI
-        if: env.PROVIDER_GATE == 'ready' && (env.PROVIDER_ACTION == 'eas_workflow_update' || env.PROVIDER_ACTION == 'eas_update')
+        if: env.PROVIDER_GATE == 'ready' && (env.PROVIDER_ACTION == 'eas_workflow_update' || env.PROVIDER_ACTION == 'eas_update' || env.PROVIDER_ACTION == 'eas_build')
         run: npm install --global "eas-cli@$EAS_CLI_VERSION"
 
       - name: EAS · run repository workflow update
@@ -480,7 +480,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          run_id="${EAS_WORKFLOW_ID:-${PROVIDER_GITHUB_RUN_ID:-}}"
+          run_id="${EAS_WORKFLOW_ID:-${EAS_BUILD_ID:-${PROVIDER_GITHUB_RUN_ID:-}}}"
           if [ -n "$run_id" ]; then
             {
               echo '## Dispatcher v2 provider QUEUED evidence'
