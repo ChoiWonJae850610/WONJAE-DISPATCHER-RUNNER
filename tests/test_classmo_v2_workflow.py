@@ -42,3 +42,9 @@ def test_classmo_v2_recovers_failed_pr_validation_before_terminal_failure() -> N
     assert "max_repairs=2" in text
     assert "run_product_repair.py" in text
     assert "## Dispatcher v2 terminal evidence" in text
+
+
+def test_classmo_v2_higher_attempt_uses_fresh_branch_and_tracks_repair_head() -> None:
+    text = WORKFLOW.read_text(encoding="utf-8")
+    assert '("" if attempt == 1 else f"-a{attempt}")' in text
+    assert 'echo "PILOT_HEAD_SHA=$repaired_head" >> "$GITHUB_ENV"' in text
