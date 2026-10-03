@@ -24,6 +24,7 @@ jobs:
       SOURCE_RUN_ID: ${{ github.event.workflow_run.id }}
       SOURCE_CONCLUSION: ${{ github.event.workflow_run.conclusion }}
       SOURCE_RUN_URL: ${{ github.event.workflow_run.html_url }}
+      SOURCE_WORKFLOW_NAME: ${{ github.event.workflow_run.name }}
 
     steps:
       - name: Parse exact source wake identity
@@ -47,7 +48,10 @@ jobs:
           project, task_id, control_sha, source_sha = match.groups()
           if not task_id.startswith(project + "-"):
               raise SystemExit("source wake task namespace mismatch")
+          expected_workflow = f"{project} Dispatcher v2"
+          applicable = os.environ["SOURCE_WORKFLOW_NAME"] == expected_workflow
           with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as handle:
+              handle.write(f"GUARD_APPLICABLE={'true' if applicable else 'false'}\n")
               handle.write(f"PROJECT={project}\n")
               handle.write(f"TASK_ID={task_id}\n")
               handle.write(f"CONTROL_SHA={control_sha}\n")
@@ -60,6 +64,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          if [ "${GUARD_APPLICABLE:-false}" != "true" ]; then
+            echo "Ignoring non-matching source workflow $SOURCE_WORKFLOW_NAME for $PROJECT wake."
+            exit 0
+          fi
           issues_json="$(gh api "repos/$GITHUB_REPOSITORY/issues?state=all&per_page=100&sort=created&direction=desc")"
           issue_number="$(echo "$issues_json" | jq -r --arg title "$WAKE_TITLE" '[.[] | select(.pull_request == null and .title == $title)] | first | .number // empty')"
           test -n "$issue_number" || { echo "::error::Exact source wake issue was not found."; exit 1; }

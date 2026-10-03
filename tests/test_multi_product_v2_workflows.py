@@ -65,3 +65,11 @@ def test_terminal_guard_covers_all_source_dispatchers() -> None:
     assert "CANCELLED" in text
     assert "FAILED" in text
     assert "gh issue close" in text
+
+
+def test_terminal_guard_binds_wake_project_to_source_workflow() -> None:
+    text = Path(".github/workflows/product-terminal-guard.yml").read_text(encoding="utf-8")
+    assert "SOURCE_WORKFLOW_NAME" in text
+    assert 'expected_workflow = f"{project} Dispatcher v2"' in text
+    assert "GUARD_APPLICABLE" in text
+    assert "Ignoring non-matching source workflow" in text
