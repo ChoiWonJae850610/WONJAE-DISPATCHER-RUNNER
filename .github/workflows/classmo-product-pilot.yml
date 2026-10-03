@@ -263,7 +263,7 @@ jobs:
           python scripts/actions_progress.py STARTED PASS --sha "$PILOT_HEAD_SHA" --pr "$pr_number"
 
       - name: "[06] NOTIFY · GitHub-native STARTED"
-        if: ${{ vars.GITHUB_NATIVE_GMAIL_ENABLED == 'true' }}
+        if: ${{ true }}
         continue-on-error: true
         env:
           GMAIL_USERNAME: ${{ secrets.GMAIL_USERNAME }}
@@ -411,7 +411,7 @@ jobs:
           python scripts/actions_progress.py RESULT PASS --sha "$INTEGRATED_SHA" --pr "$PILOT_PR_NUMBER"
 
       - name: "[10] NOTIFY · GitHub-native COMPLETED"
-        if: ${{ vars.GITHUB_NATIVE_GMAIL_ENABLED == 'true' }}
+        if: ${{ true }}
         continue-on-error: true
         env:
           GMAIL_USERNAME: ${{ secrets.GMAIL_USERNAME }}
@@ -433,7 +433,26 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh issue comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY"             --body "PASS: CLASSMO Dispatcher v2 integrated with exact-head and exact-integrated-SHA validation."
+          completion_file="$RUNNER_TEMP/classmo-wake-completion.md"
+          {
+            echo '## Dispatcher v2 completion evidence'
+            echo
+            printf -- '- project: `%s`\n' 'CLASSMO'
+            printf -- '- task_id: `%s`\n' "$TASK_ID"
+            printf -- '- attempt: `%s`\n' "$ATTEMPT"
+            printf -- '- revision: `%s`\n' "$REVISION"
+            printf -- '- control_sha: `%s`\n' "$CONTROL_SHA"
+            printf -- '- source_sha: `%s`\n' "$SOURCE_SHA"
+            printf -- '- product_pr: `%s`\n' "$PILOT_PR_NUMBER"
+            printf -- '- final_pr_head: `%s`\n' "$PILOT_HEAD_SHA"
+            printf -- '- exact_pr_head_validation_run: `%s`\n' "$PR_HEAD_RUN_ID"
+            printf -- '- integrated_sha: `%s`\n' "$INTEGRATED_SHA"
+            printf -- '- exact_integrated_sha_validation_run: `%s`\n' "$INTEGRATED_RUN_ID"
+            printf -- '- runner_run_id: `%s`\n' "$GITHUB_RUN_ID"
+            printf -- '- result: `PASS`\n'
+            printf -- '- runtime/device/physical: `NOT_INFERRED`\n'
+          } > "$completion_file"
+          gh issue comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --body-file "$completion_file"
           gh issue close "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --reason completed
 
       - name: "[10] RESULT · terminal failure evidence"
@@ -463,7 +482,7 @@ jobs:
           python scripts/actions_progress.py RESULT FAIL || true
 
       - name: "[10] NOTIFY · GitHub-native terminal failure"
-        if: ${{ failure() && vars.GITHUB_NATIVE_GMAIL_ENABLED == 'true' }}
+        if: ${{ failure() }}
         continue-on-error: true
         env:
           GMAIL_USERNAME: ${{ secrets.GMAIL_USERNAME }}
