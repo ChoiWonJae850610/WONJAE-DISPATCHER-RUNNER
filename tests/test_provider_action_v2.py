@@ -505,3 +505,14 @@ def test_eas_build_launch_and_status_install_cli_and_preserve_build_id() -> None
     assert "EAS_BUILD_ID:-${PROVIDER_GITHUB_RUN_ID:-}" in launch
     assert status_condition in status
     assert 'eas build:view "$PROVIDER_RUN_ID" --json' in status
+
+
+def test_eas_build_status_installs_app_dependencies_for_project_resolution() -> None:
+    text = Path(".github/workflows/provider-status-core.yml").read_text(
+        encoding="utf-8"
+    )
+    section = text.split(
+        "EAS · install app dependencies for config resolution", 1
+    )[1].split("EAS · read build status", 1)[0]
+    assert "env.PROVIDER_ACTION == 'eas_build'" in section
+    assert "npm ci --ignore-scripts --no-audit --no-fund" in section
