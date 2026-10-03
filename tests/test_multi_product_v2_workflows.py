@@ -112,3 +112,14 @@ def test_source_terminal_guard_closes_only_exact_product_pr() -> None:
     assert "cleanup_residue" in text
     assert "delete-branch" not in text
     assert "git push --delete" not in text
+
+
+def test_terminal_guard_records_cleanup_residue_even_if_close_step_errors() -> None:
+    text = Path(".github/workflows/product-terminal-guard.yml").read_text(encoding="utf-8")
+    for project in ("CLASSMO", "WAFL", "ESC", "MUVEL"):
+        marker = f"- name: Close exact {project} terminal Product PR"
+        start = text.index(marker)
+        block = text[start : start + 260]
+        assert "continue-on-error: true" in block
+    assert "always() && env.GUARD_ACTION == 'TERMINALIZE'" in text
+    assert 'SOURCE_PR_CLEANUP_STATUS:-RESIDUE' in text
