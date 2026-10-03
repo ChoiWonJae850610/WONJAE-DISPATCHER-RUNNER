@@ -371,7 +371,11 @@ jobs:
 
       - name: RESULT · manual credential gate
         if: env.PROVIDER_GATE == 'missing_credential'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
         run: |
+          gh issue close "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --reason completed || true
           echo "::error::Project-scoped provider credential is required. See wake issue evidence."
           exit 1
 
@@ -381,14 +385,45 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
+          set -euo pipefail
+          run_id="${EAS_WORKFLOW_ID:-${PROVIDER_GITHUB_RUN_ID:-}}"
+          if [ -n "$run_id" ]; then
+            {
+              echo '## Dispatcher v2 provider QUEUED evidence'
+              echo
+              printf -- '- task_id: `%s`\n' "${TASK_ID:-unknown}"
+              printf -- '- attempt: `%s`\n' "${ATTEMPT:-unknown}"
+              printf -- '- revision: `%s`\n' "${REVISION:-unknown}"
+              printf -- '- control_sha: `%s`\n' "${CONTROL_SHA:-unknown}"
+              printf -- '- source_sha: `%s`\n' "${SOURCE_SHA:-unknown}"
+              printf -- '- action: `%s`\n' "${PROVIDER_ACTION:-unknown}"
+              printf -- '- provider_run_id: `%s`\n' "$run_id"
+              printf -- '- result: `QUEUED`\n'
+              printf -- '- device/physical: `NOT_RUN`\n'
+              echo '- note: launch runner failed after provider run identity was captured; reconcile this exact run only'
+            } > "$RUNNER_TEMP/provider-failed-after-launch.md"
+            gh issue comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --body-file "$RUNNER_TEMP/provider-failed-after-launch.md" || true
+            exit 0
+          fi
+
+          result="FAILED"
+          next_action="inspect the exact launch failure before retry"
+          if [ "${PROVIDER_GATE:-}" = "ready" ]; then
+            result="MANUAL_REQUIRED"
+            next_action="inspect provider launch state before any resubmission because STARTED was recorded without a provider run identity"
+          fi
           {
             echo '## Dispatcher v2 provider completion evidence'
             echo
             printf -- '- task_id: `%s`\n' "${TASK_ID:-unknown}"
+            if [ -n "${ATTEMPT:-}" ]; then printf -- '- attempt: `%s`\n' "$ATTEMPT"; fi
+            if [ -n "${REVISION:-}" ]; then printf -- '- revision: `%s`\n' "$REVISION"; fi
             printf -- '- control_sha: `%s`\n' "${CONTROL_SHA:-unknown}"
             printf -- '- source_sha: `%s`\n' "${SOURCE_SHA:-unknown}"
             printf -- '- action: `%s`\n' "${PROVIDER_ACTION:-unknown}"
-            printf -- '- result: `FAILED`\n'
-            printf -- '- runtime/device/physical: `NOT_RUN`\n'
+            printf -- '- result: `%s`\n' "$result"
+            printf -- '- blocking_action: %s\n' "$next_action"
+            printf -- '- runtime/device/physical: `NOT_INFERRED`\n'
           } > "$RUNNER_TEMP/provider-failed.md"
           gh issue comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --body-file "$RUNNER_TEMP/provider-failed.md" || true
+          gh issue close "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --reason completed || true

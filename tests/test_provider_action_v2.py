@@ -280,3 +280,24 @@ def test_direct_eas_update_installs_app_dependencies_before_publish() -> None:
     assert deps_index < update_index
     section = text[deps_index:update_index]
     assert "npm ci --ignore-scripts --no-audit --no-fund" in section
+
+
+def test_provider_launch_failures_close_or_preserve_exact_lifecycle() -> None:
+    text = Path(".github/workflows/provider-action-core.yml").read_text(encoding="utf-8")
+    assert "RESULT · manual credential gate" in text
+    assert "gh issue close" in text
+    assert "launch runner failed after provider run identity was captured" in text
+    assert "result=\"MANUAL_REQUIRED\"" in text
+    assert "inspect provider launch state before any resubmission" in text
+
+
+def test_provider_terminal_guard_preserves_queued_external_runs() -> None:
+    text = Path(".github/workflows/provider-terminal-guard.yml").read_text(encoding="utf-8")
+    for project in ("CLASSMO", "WAFL", "ESC", "MUVEL"):
+        assert f"{project} Provider v2" in text
+    assert "PROVIDER_QUEUED_EXISTS" in text
+    assert "preserve the open issue for status reconciliation" in text
+    assert "STARTED exists but no provider run identity was captured" in text
+    assert "MANUAL_REQUIRED" in text
+    assert "CANCELLED" in text
+    assert "gh issue close" in text
