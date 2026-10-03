@@ -271,3 +271,9 @@ def test_repair_scope_accepts_required_path_from_existing_branch_history(tmp_pat
     )
     assert changed == ("apps/mobile/src/presentation/member-home.ts",)
     validate_branch_scope(repo, order, changed)
+
+
+def test_repair_runner_reuses_existing_codex_auth_session() -> None:
+    text = Path("scripts/run_product_repair.py").read_text(encoding="utf-8")
+    assert 'if not (codex_home / "auth.json").is_file():' in text
+    assert 'restore_auth_json(codex_home, os.environ["CODEX_AUTH_JSON"])' in text
