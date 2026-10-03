@@ -41,3 +41,27 @@ def test_product_v2_workflows_do_not_cross_use_write_tokens() -> None:
         assert config["secret"] in text
         for token in all_tokens - {config["secret"]}:
             assert token not in text
+
+
+def test_product_v2_workflows_recover_validation_and_terminalize_failure() -> None:
+    for _project, config in PRODUCTS.items():
+        text = Path(config["workflow"]).read_text(encoding="utf-8")
+        assert "exact PR-head Actions with bounded recovery" in text
+        assert "max_repairs=2" in text
+        assert "run_product_repair.py" in text
+        assert "Repair validation attempt" in text
+        assert "## Dispatcher v2 terminal evidence" in text
+        assert "gh issue close" in text
+        assert "timeout-minutes: 60" in text
+
+
+def test_terminal_guard_covers_all_source_dispatchers() -> None:
+    text = Path(".github/workflows/product-terminal-guard.yml").read_text(encoding="utf-8")
+    for project in ("CLASSMO", "WAFL", "ESC", "MUVEL"):
+        assert f"{project} Dispatcher v2" in text
+    assert "workflow_run:" in text
+    assert "## Dispatcher v2 terminal evidence" in text
+    assert "MANUAL_REQUIRED" in text
+    assert "CANCELLED" in text
+    assert "FAILED" in text
+    assert "gh issue close" in text
