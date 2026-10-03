@@ -150,3 +150,26 @@ private control record, recovers the queued provider run ID from the issue,
 queries that exact run without creating a duplicate provider action, and writes
 terminal completion evidence only after provider readback. Non-terminal provider
 status remains VALIDATING. Device and physical evidence remain separate.
+
+
+## GitHub-native Gmail lifecycle notifications
+
+The runner contains an opt-in Gmail notification path that sends lifecycle mail directly
+from trusted GitHub Actions instead of relying on a separate ChatGPT observer. It uses
+only Python standard-library SMTP/IMAP clients and is gated by the repository variable
+`GITHUB_NATIVE_GMAIL_ENABLED=true`.
+
+Required runner repository secrets:
+
+- `GMAIL_USERNAME`: the authenticated Gmail address used only at runtime;
+- `GMAIL_APP_PASSWORD`: a Google App Password for that account.
+
+The public repository never stores either value. The notification module adds an exact
+`X-WONJAE-Notification-Key` header, suppresses duplicate sends, applies the existing
+`<PROJECT>-CODEX` Gmail label, moves the exact same-attempt STARTED message to Trash
+after terminal RESULT readback, and supersedes the immediately prior failed/manual/
+cancelled RESULT only after a higher Attempt STARTED notification is readable.
+
+Until the two secrets are configured and the feature variable is explicitly enabled,
+existing lifecycle notification observers remain authoritative and product execution is
+unchanged.
