@@ -7,6 +7,7 @@ import pytest
 from wonjae_dispatcher_runner.product_patch import (
     ProductEdit,
     ProductPilotError,
+    apply_binary_assets,
     apply_edit_plan,
     load_work_order,
     parse_edit_plan,
@@ -383,3 +384,56 @@ def test_repair_runner_reuses_existing_codex_auth_session() -> None:
     text = Path("scripts/run_product_repair.py").read_text(encoding="utf-8")
     assert 'if not (codex_home / "auth.json").is_file():' in text
     assert 'restore_auth_json(codex_home, os.environ["CODEX_AUTH_JSON"])' in text
+
+
+def test_binary_assets_are_bounded_verified_and_runner_written(tmp_path: Path) -> None:
+    payload = work_order_payload()
+    payload["allowed_paths"].append("apps/mobile/assets/icon.png")
+    payload["required_changed_paths"].append("apps/mobile/assets/icon.png")
+    binary = b"\x89PNG\r\n\x1a\nclassmo"
+    import base64
+    import hashlib
+    payload["binary_assets"] = [{
+        "path": "apps/mobile/assets/icon.png",
+        "base64": base64.b64encode(binary).decode("ascii"),
+        "sha256": hashlib.sha256(binary).hexdigest(),
+    }]
+    path = tmp_path / "binary-work-order.json"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    order = load_work_order(path)
+    assert order.binary_assets[0].path == "apps/mobile/assets/icon.png"
+    repo = tmp_path / "binary-repo"
+    repo.mkdir()
+    written = apply_binary_assets(repo, order)
+    assert written == ("apps/mobile/assets/icon.png",)
+    assert (repo / written[0]).read_bytes() == binary
+
+
+def test_binary_assets_reject_sha_mismatch_and_text_edit_target(tmp_path: Path) -> None:
+    import base64
+    payload = work_order_payload()
+    payload["allowed_paths"].append("apps/mobile/assets/icon.png")
+    payload["binary_assets"] = [{
+        "path": "apps/mobile/assets/icon.png",
+        "base64": base64.b64encode(b"png").decode("ascii"),
+        "sha256": "0" * 64,
+    }]
+    path = tmp_path / "bad-binary-work-order.json"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    with pytest.raises(ProductPilotError, match="sha256 mismatch"):
+        load_work_order(path)
+
+    payload["binary_assets"][0]["sha256"] = __import__("hashlib").sha256(b"png").hexdigest()
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    order = load_work_order(path)
+    response = json.dumps({
+        "edits": [{
+            "path": "apps/mobile/assets/icon.png",
+            "operation": "create",
+            "old_text": "",
+            "new_text": "not binary",
+        }],
+        "summary": "unsafe",
+    })
+    with pytest.raises(ProductPilotError, match="outside the work order"):
+        parse_edit_plan(response, order)
