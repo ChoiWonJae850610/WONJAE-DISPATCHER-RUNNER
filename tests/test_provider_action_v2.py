@@ -484,3 +484,12 @@ def test_parse_eas_build_view_captures_finished_internal_artifact(tmp_path: Path
     assert "PROVIDER_STATUS=SUCCESS" in env
     assert "EAS_BUILD_APP_BUILD_VERSION=3" in env
     assert "EAS_BUILD_ARTIFACT_URL=https://example.invalid/classmo.ipa" in env
+
+
+def test_eas_build_launch_and_status_install_cli_and_preserve_build_id() -> None:
+    launch = Path(".github/workflows/provider-action-core.yml").read_text(encoding="utf-8")
+    status = Path(".github/workflows/provider-status-core.yml").read_text(encoding="utf-8")
+    assert "env.PROVIDER_ACTION == \'eas_update\' || env.PROVIDER_ACTION == \'eas_build\'" in launch
+    assert "EAS_BUILD_ID:-${PROVIDER_GITHUB_RUN_ID:-}" in launch
+    assert "env.PROVIDER_ACTION == \'eas_workflow_update\' || env.PROVIDER_ACTION == \'eas_build\'" in status
+    assert \'eas build:view "$PROVIDER_RUN_ID" --json\' in status
