@@ -28,6 +28,7 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument("--exact-head-sha", default="")
     result.add_argument("--integration-evidence", default="")
     result.add_argument("--smallest-next-action", default="")
+    result.add_argument("--cleanup-only", action="store_true")
     return result
 
 
@@ -35,9 +36,8 @@ def main() -> int:
     args = parser().parse_args()
     username = os.environ.get("GMAIL_USERNAME", "")
     app_password = os.environ.get("GMAIL_APP_PASSWORD", "")
-    service = NotificationService(GmailClient(username, app_password))
-    outcome = service.deliver(
-        Notification(
+    client = GmailClient(username, app_password)
+    notification = Notification(
             project=args.project,
             task_id=args.task_id,
             attempt=args.attempt,
@@ -50,7 +50,14 @@ def main() -> int:
             integration_evidence=args.integration_evidence,
             smallest_next_action=args.smallest_next_action,
         )
-    )
+    if args.cleanup_only:
+        cleaned = client.trash_notification(notification.key)
+        if not cleaned:
+            raise SystemExit(f"notification key was not found for cleanup: {notification.key}")
+        print(f"GITHUB_NATIVE_GMAIL_CLEANUP_OK key={notification.key}")
+        return 0
+
+    outcome = NotificationService(client).deliver(notification)
     cleaned = ",".join(outcome["cleaned_keys"]) or "none"
     print(
         "GITHUB_NATIVE_GMAIL_OK "
