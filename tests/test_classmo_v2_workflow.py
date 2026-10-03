@@ -34,3 +34,11 @@ def test_classmo_v2_guards_concurrent_job_prs() -> None:
     text = WORKFLOW.read_text(encoding="utf-8")
     assert "Another CLASSMO job pull request is already open." in text
     assert 'startswith("job/")' in text
+
+
+def test_classmo_v2_recovers_failed_pr_validation_before_terminal_failure() -> None:
+    text = WORKFLOW.read_text(encoding="utf-8")
+    assert "exact PR-head Actions with bounded recovery" in text
+    assert "max_repairs=2" in text
+    assert "run_product_repair.py" in text
+    assert "## Dispatcher v2 terminal evidence" in text
