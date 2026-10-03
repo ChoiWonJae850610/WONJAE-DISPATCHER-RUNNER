@@ -17,7 +17,8 @@ def main() -> int:
     )
     control_sha = os.environ["CONTROL_SHA"]
 
-    restore_auth_json(codex_home, os.environ["CODEX_AUTH_JSON"])
+    if not (codex_home / "auth.json").is_file():
+        restore_auth_json(codex_home, os.environ["CODEX_AUTH_JSON"])
     work_order, paths = generate_and_apply_product_repair(
         repo_path,
         work_order_path,
