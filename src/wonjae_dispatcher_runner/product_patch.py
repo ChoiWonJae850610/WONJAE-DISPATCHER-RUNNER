@@ -397,7 +397,7 @@ def _bounded_prompt(
             "operation=replace with an exact non-empty old_text snippet copied verbatim from the "
             "supplied context and the intended new_text; the snippet must match exactly once. When "
             "an existing file needs a coherent whole-file rewrite, or several edits would overlap "
-            "or depend on earlier edits, use operation=write, old_text='', and the complete new file "
+            "or depend on earlier edits, use operation=write with old_text='' and complete file "
             "content. For a new file use operation=create, old_text='', and the complete new file "
             "content. Never use replace with an empty old_text. Return at least one "
             "effective edit. Do not return placeholders, blocked markers, sandbox-error markers, "
