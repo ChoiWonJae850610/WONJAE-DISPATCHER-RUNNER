@@ -145,7 +145,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python scripts/provider_action.py check-ota             --repo "$GITHUB_WORKSPACE/.provider/product"             --base "$PROVIDER_COMPATIBILITY_BASE_SHA"             --head "$SOURCE_SHA"             --working-directory "$PROVIDER_WORKING_DIRECTORY"
+          python scripts/provider_action.py check-ota             --repo "$GITHUB_WORKSPACE/.provider/product"             --project "$PROJECT"             --base "$PROVIDER_COMPATIBILITY_BASE_SHA"             --head "$SOURCE_SHA"             --working-directory "$PROVIDER_WORKING_DIRECTORY"
 
       - name: PROVIDER · credential gate
         env:
@@ -259,6 +259,7 @@ jobs:
         run: |
           set -euo pipefail
           cd "$GITHUB_WORKSPACE/.provider/product/$PROVIDER_WORKING_DIRECTORY"
+          if [ -n "${PROVIDER_APP_VARIANT:-}" ]; then export APP_VARIANT="$PROVIDER_APP_VARIANT"; fi
           eas update             --channel "$PROVIDER_CHANNEL"             --environment "$PROVIDER_ENVIRONMENT"             --platform "$PROVIDER_PLATFORM"             --message "$PROVIDER_MESSAGE"             --json             --non-interactive > "$RUNNER_TEMP/eas-update-run.json"
 
       - name: EAS · resolve direct update group
