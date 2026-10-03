@@ -152,6 +152,8 @@ jobs:
       - name: "[03] PRODUCT · verify branch and source identity"
         env:
           GH_TOKEN: ${{ secrets.WAFL_WRITE_TOKEN }}
+          PRODUCT_GH_TOKEN: ${{ secrets.WAFL_WRITE_TOKEN }}
+          RUNNER_GH_TOKEN: ${{ github.token }}
         run: |
           actual="$(git -C "$PRODUCT_CHECKOUT" rev-parse HEAD)"
           test "$actual" = "$SOURCE_SHA" || { echo "::error::Product checkout mismatch."; exit 1; }
@@ -164,12 +166,12 @@ jobs:
             echo "::error::Target branch advanced after work-order creation."
             exit 1
           }
-          conflict_prs="$(gh pr list --repo "$PRODUCT_REPOSITORY" --state open --base "$TARGET_BRANCH" --json number,headRefName --jq '.[] | select(.headRefName | startswith("job/")) | "\(.number) \(.headRefName)"')"
-          if [ -n "$conflict_prs" ]; then
-            echo "::error::Another WAFL job pull request is already open."
-            echo "$conflict_prs"
-            exit 1
-          fi
+          PYTHONPATH="$GITHUB_WORKSPACE/src" python scripts/source_pr_lifecycle.py \
+            diagnose-conflicts \
+            --project WAFL \
+            --repository "$PRODUCT_REPOSITORY" \
+            --target-branch "$TARGET_BRANCH" \
+            --runner-repository "$GITHUB_REPOSITORY"
           git -C "$PRODUCT_CHECKOUT" checkout -b "$PRODUCT_BRANCH"
           git -C "$PRODUCT_CHECKOUT" config user.name "WONJAE Dispatcher Runner"
           git -C "$PRODUCT_CHECKOUT" config user.email "41898282+github-actions[bot]@users.noreply.github.com"
@@ -440,11 +442,21 @@ jobs:
         if: ${{ failure() }}
         env:
           GH_TOKEN: ${{ github.token }}
+          PRODUCT_GH_TOKEN: ${{ secrets.WAFL_WRITE_TOKEN }}
+        shell: bash
         run: |
+          set -euo pipefail
+          terminal_status="${SOURCE_TERMINAL_RESULT:-FAILED}"
+          case "$terminal_status" in
+            FAILED|MANUAL_REQUIRED|CANCELLED) ;;
+            *) terminal_status="FAILED" ;;
+          esac
+
           terminal_file="$RUNNER_TEMP/source-terminal-result.md"
           {
             echo '## Dispatcher v2 terminal evidence'
             echo
+            printf -- '- project: `%s`\n' 'WAFL'
             if [ -n "${TASK_ID:-}" ]; then printf -- '- task_id: `%s`\n' "$TASK_ID"; fi
             if [ -n "${ATTEMPT:-}" ]; then printf -- '- attempt: `%s`\n' "$ATTEMPT"; fi
             if [ -n "${REVISION:-}" ]; then printf -- '- revision: `%s`\n' "$REVISION"; fi
@@ -454,10 +466,58 @@ jobs:
             if [ -n "${PILOT_HEAD_SHA:-}" ]; then printf -- '- last_pr_head: `%s`\n' "$PILOT_HEAD_SHA"; fi
             printf -- '- runner_run_id: `%s`\n' "$GITHUB_RUN_ID"
             printf -- '- runner_conclusion: `failure`\n'
-            printf -- '- result: `FAILED`\n'
-            printf -- '- next_action: inspect the exact runner/validation evidence before a new task or retry\n'
+            printf -- '- result: `%s`\n' "$terminal_status"
+            printf -- '- recovery_state: `FINAL`\n'
             printf -- '- runtime/device/physical: `NOT_INFERRED`\n'
           } > "$terminal_file"
+
+          cleanup_status="NOT_APPLICABLE"
+          cleanup_pr=""
+          cleanup_detail="no exact Product PR was established before terminal"
+          cleanup_next_action="inspect the exact runner/validation evidence before a new task or retry"
+          if [ -n "${ATTEMPT:-}" ] && [ -n "${TASK_ID:-}" ] && [ -n "${CONTROL_SHA:-}" ] && [ -n "${SOURCE_SHA:-}" ]; then
+            pr_args=()
+            if [ -n "${PILOT_PR_NUMBER:-}" ]; then
+              pr_args=(--pr-number "$PILOT_PR_NUMBER")
+            fi
+            if cleanup_json="$(PYTHONPATH="$GITHUB_WORKSPACE/src" python scripts/source_pr_lifecycle.py \
+              terminalize \
+              --project WAFL \
+              --repository "$PRODUCT_REPOSITORY" \
+              --target-branch "$TARGET_BRANCH" \
+              --task-id "$TASK_ID" \
+              --attempt "$ATTEMPT" \
+              --control-sha "$CONTROL_SHA" \
+              --source-sha "$SOURCE_SHA" \
+              --runner-run-id "$GITHUB_RUN_ID" \
+              --terminal-status "$terminal_status" \
+              --evidence-file "$terminal_file" \
+              "${pr_args[@]}")"; then
+              cleanup_status="$(echo "$cleanup_json" | jq -r .status)"
+              cleanup_pr="$(echo "$cleanup_json" | jq -r '.pr_number // empty')"
+              cleanup_detail="$(echo "$cleanup_json" | jq -r .detail)"
+              cleanup_next_action="$(echo "$cleanup_json" | jq -r .next_action)"
+            else
+              cleanup_status="RESIDUE"
+              cleanup_detail="source PR lifecycle helper failed before exact close readback"
+              cleanup_next_action="verify and close only the exact terminal Product PR without merge"
+            fi
+          fi
+
+          {
+            if [ -n "$cleanup_pr" ]; then printf -- '- product_pr: `%s`\n' "$cleanup_pr"; fi
+            printf -- '- product_pr_cleanup: `%s`\n' "$cleanup_status"
+            printf -- '- product_pr_cleanup_detail: %s\n' "$cleanup_detail"
+            if [ "$cleanup_status" = "RESIDUE" ]; then
+              printf -- '- cleanup_residue: `OPEN_PRODUCT_PR_POSSIBLE`\n'
+            fi
+            printf -- '- next_action: %s\n' "$cleanup_next_action"
+          } >> "$terminal_file"
+
+          echo "SOURCE_TERMINAL_STATUS=$terminal_status" >> "$GITHUB_ENV"
+          echo "SOURCE_PR_CLEANUP_STATUS=$cleanup_status" >> "$GITHUB_ENV"
+          echo "SOURCE_PR_CLEANUP_NEXT_ACTION=$cleanup_next_action" >> "$GITHUB_ENV"
+
           gh issue comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --body-file "$terminal_file"
           gh issue close "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --reason completed
           python scripts/actions_progress.py RESULT FAIL || true
@@ -477,13 +537,13 @@ jobs:
             --project WAFL \
             --task-id "$TASK_ID" \
             --attempt "$ATTEMPT" \
-            --status FAILED \
+            --status "${SOURCE_TERMINAL_STATUS:-FAILED}" \
             --profile "${PROFILE:-}" \
             --control-sha "${CONTROL_SHA:-}" \
             --source-sha "${SOURCE_SHA:-}" \
             --product-pr "${PILOT_PR_URL:-}" \
             --exact-head-sha "${PILOT_HEAD_SHA:-}" \
-            --smallest-next-action "inspect exact runner and validation evidence before retry"
+            --smallest-next-action "${SOURCE_PR_CLEANUP_NEXT_ACTION:-inspect exact runner and validation evidence before retry}"
 
       - name: "[11] Cleanup · ephemeral credentials"
         if: ${{ always() }}
