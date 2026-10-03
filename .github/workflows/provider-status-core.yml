@@ -136,7 +136,7 @@ jobs:
         run: npm install --global "eas-cli@$EAS_CLI_VERSION"
 
       - name: EAS · install app dependencies for config resolution
-        if: env.PROVIDER_ACTION == 'eas_workflow_update'
+        if: env.PROVIDER_ACTION == 'eas_workflow_update' || env.PROVIDER_ACTION == 'eas_build'
         shell: bash
         run: |
           set -euo pipefail
