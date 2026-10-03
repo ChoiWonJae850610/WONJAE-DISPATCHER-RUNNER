@@ -79,6 +79,32 @@ def changed_paths(repo_path: Path) -> list[str]:
     return paths
 
 
+def branch_diff_paths(repo_path: Path, base_sha: str) -> tuple[str, ...]:
+    base = require_sha(base_sha)
+    output = _git(repo_path, "diff", "--name-only", f"{base}...HEAD")
+    paths = tuple(line.strip() for line in output.splitlines() if line.strip())
+    for relative in paths:
+        value = Path(relative)
+        if value.is_absolute() or ".." in value.parts:
+            raise ProductPilotError("branch diff contained an unsafe path")
+    return paths
+
+
+def validate_branch_scope(
+    repo_path: Path,
+    work_order: ProductWorkOrder,
+    extra_paths: tuple[str, ...] = (),
+) -> tuple[str, ...]:
+    paths = tuple(dict.fromkeys((*branch_diff_paths(repo_path, work_order.source_base_sha), *extra_paths)))
+    allowed = set(work_order.allowed_paths)
+    if any(path not in allowed for path in paths):
+        raise ProductPilotError("product branch contains a path outside the work order")
+    missing = [path for path in work_order.required_changed_paths if path not in set(paths)]
+    if missing:
+        raise ProductPilotError("product branch omitted required changed paths")
+    return paths
+
+
 def _string_list(
     payload: dict[str, object],
     key: str,
@@ -237,6 +263,8 @@ def apply_edit_plan(
     repo_path: Path,
     edits: tuple[ProductEdit, ...],
     work_order: ProductWorkOrder,
+    *,
+    require_required_paths: bool = True,
 ) -> tuple[str, ...]:
     allowed = set(work_order.allowed_paths)
     contents: dict[str, str | None] = {}
@@ -284,11 +312,12 @@ def apply_edit_plan(
         raise ProductPilotError("worktree paths did not match the validated edit plan")
     if any(path not in allowed for path in actual):
         raise ProductPilotError("worktree contains a path outside the work order")
-    missing_required = [
-        path for path in work_order.required_changed_paths if path not in set(actual)
-    ]
-    if missing_required:
-        raise ProductPilotError("worktree omitted required changed paths")
+    if require_required_paths:
+        missing_required = [
+            path for path in work_order.required_changed_paths if path not in set(actual)
+        ]
+        if missing_required:
+            raise ProductPilotError("worktree omitted required changed paths")
     return actual
 
 
@@ -357,6 +386,166 @@ def _bounded_prompt(
             context,
         ]
     )
+
+
+def _repair_context(repo_path: Path, work_order: ProductWorkOrder) -> str:
+    paths = tuple(dict.fromkeys((*work_order.required_reads, *work_order.allowed_paths)))
+    chunks: list[str] = []
+    total = 0
+    for relative in paths:
+        path = repo_path / relative
+        if not path.is_file():
+            if relative in work_order.required_reads:
+                raise ProductPilotError(f"required product read is missing: {relative}")
+            content = "<MISSING FILE; creation is allowed only if this path is in allowed_paths>"
+        else:
+            content = path.read_text(encoding="utf-8")
+            if "\x00" in content:
+                raise ProductPilotError("repair context contained a NUL byte")
+        chunk = f"\n--- BEGIN {relative} ---\n{content}\n--- END {relative} ---\n"
+        total += len(chunk)
+        if total > MAX_CONTEXT_CHARS:
+            raise ProductPilotError("repair context exceeded the bounded size limit")
+        chunks.append(chunk)
+    return "".join(chunks)
+
+
+def _repair_prompt(
+    work_order: ProductWorkOrder,
+    control_sha: str,
+    current_head: str,
+    context: str,
+    validation_failure: str,
+) -> str:
+    if "\x00" in validation_failure:
+        raise ProductPilotError("validation failure log contained a NUL byte")
+    failure = validation_failure[-MAX_TEXT_CHARS:]
+    return "\n".join(
+        [
+            "You are repairing one already-started Owner-authorized product task after exact PR-head validation failed.",
+            f"Control SHA: {require_sha(control_sha)}",
+            f"Task-ID: {work_order.task_id}",
+            f"Project: {work_order.project}",
+            f"Repository: {work_order.repository}",
+            f"Target branch: {work_order.target_branch}",
+            f"Original source base: {work_order.source_base_sha}",
+            f"Current PR head: {require_sha(current_head)}",
+            "",
+            "Repair the existing implementation in place. Do not restart the task and do not revert correct task work.",
+            "The entire branch must remain inside the original allowed paths and completion conditions.",
+            "Required changed paths apply to the whole branch, not necessarily this repair commit.",
+            "Use the validation failure below as diagnostic evidence only. Do not copy log noise into product files.",
+            "Do not call shell, filesystem, network, or external tools. Use only the supplied repository context and failure log.",
+            "",
+            "Scope:",
+            *[f"- {item}" for item in work_order.scope],
+            "",
+            "Exclusions:",
+            *[f"- {item}" for item in work_order.exclusions],
+            "",
+            "Completion conditions:",
+            *[f"- {item}" for item in work_order.completion_conditions],
+            "",
+            "Allowed changed paths:",
+            *[f"- {item}" for item in work_order.allowed_paths],
+            "",
+            "Return a structured edit plan only. Use operation=replace for existing files with an exact old_text snippet copied from the supplied current context, or operation=create for a missing allowed file. Make the smallest repair that addresses the validation failure. Do not add placeholders, failure markers, or unrelated cleanup.",
+            "",
+            "VALIDATION FAILURE:",
+            failure,
+            "",
+            "CURRENT REPOSITORY CONTEXT:",
+            context,
+        ]
+    )
+
+
+def generate_and_apply_product_repair(
+    repo_path: Path,
+    work_order_path: Path,
+    control_sha: str,
+    codex_home: Path,
+    validation_failure: str,
+) -> tuple[ProductWorkOrder, tuple[str, ...]]:
+    work_order = load_work_order(work_order_path)
+    current_head = git_head(repo_path)
+    if changed_paths(repo_path):
+        raise ProductPilotError("product checkout must be clean before repair")
+    validate_branch_scope(repo_path, work_order)
+
+    context = _repair_context(repo_path, work_order)
+    config = CodexConfig(
+        cwd=str(repo_path),
+        env={
+            "CODEX_HOME": str(codex_home),
+            "CODEX_APP_SERVER_DISABLE_MANAGED_CONFIG": "1",
+        },
+    )
+    output_schema = {
+        "type": "object",
+        "properties": {
+            "edits": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": MAX_EDIT_COUNT,
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "path": {"type": "string", "enum": list(work_order.allowed_paths)},
+                        "operation": {"type": "string", "enum": ["replace", "create"]},
+                        "old_text": {"type": "string"},
+                        "new_text": {"type": "string", "minLength": 1},
+                    },
+                    "required": ["path", "operation", "old_text", "new_text"],
+                    "additionalProperties": False,
+                },
+            },
+            "summary": {"type": "string", "minLength": 1},
+        },
+        "required": ["edits", "summary"],
+        "additionalProperties": False,
+    }
+
+    with Codex(config=config) as codex:
+        account = codex.account(refresh_token=False)
+        if account.account is None:
+            raise ProductPilotError("Codex account session is missing")
+        thread = codex.thread_start(
+            approval_mode=ApprovalMode.deny_all,
+            cwd=str(repo_path),
+            ephemeral=True,
+            sandbox=Sandbox.read_only,
+            config={"history": {"persistence": "none"}, "allow_login_shell": False},
+        )
+        result = thread.run(
+            _repair_prompt(
+                work_order,
+                control_sha,
+                current_head,
+                context,
+                validation_failure,
+            ),
+            approval_mode=ApprovalMode.deny_all,
+            output_schema=output_schema,
+            sandbox=Sandbox.read_only,
+        )
+
+    status = str(getattr(result.status, "value", result.status)).lower()
+    if status != "completed" or result.error is not None:
+        raise ProductPilotError("Codex repair turn did not complete successfully")
+
+    edits = parse_edit_plan(result.final_response or "", work_order)
+    if git_head(repo_path) != current_head or changed_paths(repo_path):
+        raise ProductPilotError("product repository changed during the read-only repair turn")
+
+    applied = apply_edit_plan(
+        repo_path,
+        edits,
+        work_order,
+        require_required_paths=False,
+    )
+    validate_branch_scope(repo_path, work_order, applied)
+    return work_order, applied
 
 
 def generate_and_apply_product_patch(
