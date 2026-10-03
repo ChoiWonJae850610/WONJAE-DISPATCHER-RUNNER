@@ -165,7 +165,7 @@ jobs:
           set -euo pipefail
           missing=""
           case "$PROVIDER_ACTION" in
-            eas_workflow_update|eas_update)
+            eas_workflow_update|eas_update|eas_build)
               if [ -z "${EXPO_TOKEN_VALUE:-}" ]; then missing="EXPO_TOKEN"; fi
               ;;
             github_workflow_dispatch)
@@ -236,7 +236,7 @@ jobs:
             --integration-evidence "provider-action:$PROVIDER_ACTION source-validation:$SOURCE_VALIDATION_RUN_ID"
 
       - name: EAS · set up Node
-        if: env.PROVIDER_GATE == 'ready' && (env.PROVIDER_ACTION == 'eas_workflow_update' || env.PROVIDER_ACTION == 'eas_update')
+        if: env.PROVIDER_GATE == 'ready' && (env.PROVIDER_ACTION == 'eas_workflow_update' || env.PROVIDER_ACTION == 'eas_update' || env.PROVIDER_ACTION == 'eas_build')
         uses: actions/setup-node@v7
         with:
           node-version: "24"
@@ -268,6 +268,34 @@ jobs:
           }
           eas workflow:run "$PROVIDER_WORKFLOW_FILE"             --non-interactive             --json             "${args[@]}" > "$RUNNER_TEMP/eas-workflow-run.json"
           python "$GITHUB_WORKSPACE/scripts/provider_action.py" parse-eas-run             --input "$RUNNER_TEMP/eas-workflow-run.json"             --github-env "$GITHUB_ENV"
+
+      - name: EAS · install app dependencies for build
+        if: env.PROVIDER_GATE == 'ready' && env.PROVIDER_ACTION == 'eas_build'
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$GITHUB_WORKSPACE/.provider/product/$PROVIDER_WORKING_DIRECTORY"
+          npm ci --ignore-scripts --no-audit --no-fund
+
+      - name: EAS · launch internal preview build
+        if: env.PROVIDER_GATE == 'ready' && env.PROVIDER_ACTION == 'eas_build'
+        env:
+          EXPO_TOKEN: ${{ secrets.expo_token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$GITHUB_WORKSPACE/.provider/product/$PROVIDER_WORKING_DIRECTORY"
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          eas build \
+            --platform "$PROVIDER_PLATFORM" \
+            --profile "$PROVIDER_BUILD_PROFILE" \
+            --freeze-credentials \
+            --no-wait \
+            --json \
+            --non-interactive > "$RUNNER_TEMP/eas-build-launch.json"
+          python "$GITHUB_WORKSPACE/scripts/provider_action.py" parse-eas-build-launch \
+            --input "$RUNNER_TEMP/eas-build-launch.json" \
+            --github-env "$GITHUB_ENV"
 
       - name: EAS · install app dependencies for direct update
         if: env.PROVIDER_GATE == 'ready' && env.PROVIDER_ACTION == 'eas_update'
@@ -343,12 +371,12 @@ jobs:
       - name: RESULT · record queued external provider
         if: >-
           env.PROVIDER_GATE == 'ready' &&
-          (env.PROVIDER_ACTION == 'eas_workflow_update' || env.PROVIDER_ACTION == 'github_workflow_dispatch')
+          (env.PROVIDER_ACTION == 'eas_workflow_update' || env.PROVIDER_ACTION == 'eas_build' || env.PROVIDER_ACTION == 'github_workflow_dispatch')
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
-          run_id="${EAS_WORKFLOW_ID:-${PROVIDER_GITHUB_RUN_ID:-}}"
+          run_id="${EAS_WORKFLOW_ID:-${EAS_BUILD_ID:-${PROVIDER_GITHUB_RUN_ID:-}}}"
           test -n "$run_id"
           {
             echo '## Dispatcher v2 provider QUEUED evidence'
