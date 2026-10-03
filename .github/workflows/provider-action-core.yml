@@ -21,6 +21,10 @@ on:
       control_repository:
         required: true
         type: string
+      gmail_enabled:
+        required: false
+        type: boolean
+        default: false
     secrets:
       control_read_token:
         required: true
@@ -29,6 +33,10 @@ on:
       expo_token:
         required: false
       github_provider_token:
+        required: false
+      gmail_username:
+        required: false
+      gmail_app_password:
         required: false
 
 permissions:
@@ -209,6 +217,24 @@ jobs:
           gh issue comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --body-file "$RUNNER_TEMP/provider-started.md"
           python scripts/actions_progress.py STARTED PASS --sha "$SOURCE_SHA"
 
+      - name: NOTIFY · GitHub-native provider STARTED
+        if: inputs.gmail_enabled && env.PROVIDER_GATE == 'ready'
+        continue-on-error: true
+        env:
+          GMAIL_USERNAME: ${{ secrets.gmail_username }}
+          GMAIL_APP_PASSWORD: ${{ secrets.gmail_app_password }}
+        shell: bash
+        run: |
+          PYTHONPATH="$GITHUB_WORKSPACE/src" python scripts/gmail_notify.py \
+            --project "$PROJECT" \
+            --task-id "$TASK_ID" \
+            --attempt "$ATTEMPT" \
+            --status STARTED \
+            --profile "$PROFILE" \
+            --control-sha "$CONTROL_SHA" \
+            --source-sha "$SOURCE_SHA" \
+            --integration-evidence "provider-action:$PROVIDER_ACTION source-validation:$SOURCE_VALIDATION_RUN_ID"
+
       - name: EAS · set up Node
         if: env.PROVIDER_GATE == 'ready' && (env.PROVIDER_ACTION == 'eas_workflow_update' || env.PROVIDER_ACTION == 'eas_update')
         uses: actions/setup-node@v7
@@ -369,6 +395,42 @@ jobs:
           gh issue close "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --reason completed
           python scripts/actions_progress.py RESULT PASS --sha "$SOURCE_SHA"
 
+      - name: NOTIFY · GitHub-native provider COMPLETED
+        if: inputs.gmail_enabled && env.PROVIDER_GATE == 'ready' && env.PROVIDER_ACTION == 'eas_update'
+        continue-on-error: true
+        env:
+          GMAIL_USERNAME: ${{ secrets.gmail_username }}
+          GMAIL_APP_PASSWORD: ${{ secrets.gmail_app_password }}
+        shell: bash
+        run: |
+          PYTHONPATH="$GITHUB_WORKSPACE/src" python scripts/gmail_notify.py \
+            --project "$PROJECT" \
+            --task-id "$TASK_ID" \
+            --attempt "$ATTEMPT" \
+            --status COMPLETED \
+            --profile "$PROFILE" \
+            --control-sha "$CONTROL_SHA" \
+            --source-sha "$SOURCE_SHA" \
+            --integration-evidence "provider-action:$PROVIDER_ACTION source-validation:$SOURCE_VALIDATION_RUN_ID"
+
+      - name: NOTIFY · GitHub-native provider MANUAL_REQUIRED
+        if: inputs.gmail_enabled && env.PROVIDER_GATE == 'missing_credential'
+        continue-on-error: true
+        env:
+          GMAIL_USERNAME: ${{ secrets.gmail_username }}
+          GMAIL_APP_PASSWORD: ${{ secrets.gmail_app_password }}
+        shell: bash
+        run: |
+          PYTHONPATH="$GITHUB_WORKSPACE/src" python scripts/gmail_notify.py \
+            --project "$PROJECT" \
+            --task-id "$TASK_ID" \
+            --attempt "$ATTEMPT" \
+            --status MANUAL_REQUIRED \
+            --profile "$PROFILE" \
+            --control-sha "$CONTROL_SHA" \
+            --source-sha "$SOURCE_SHA" \
+            --smallest-next-action "add the exact project-scoped provider credential"
+
       - name: RESULT · manual credential gate
         if: env.PROVIDER_GATE == 'missing_credential'
         env:
@@ -383,6 +445,9 @@ jobs:
         if: failure() && env.PROVIDER_GATE != 'missing_credential'
         env:
           GH_TOKEN: ${{ github.token }}
+          GMAIL_ENABLED: ${{ inputs.gmail_enabled }}
+          GMAIL_USERNAME: ${{ secrets.gmail_username }}
+          GMAIL_APP_PASSWORD: ${{ secrets.gmail_app_password }}
         shell: bash
         run: |
           set -euo pipefail
@@ -427,3 +492,14 @@ jobs:
           } > "$RUNNER_TEMP/provider-failed.md"
           gh issue comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --body-file "$RUNNER_TEMP/provider-failed.md" || true
           gh issue close "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --reason completed || true
+          if [ "$GMAIL_ENABLED" = "true" ] && [ -n "${ATTEMPT:-}" ]; then
+            PYTHONPATH="$GITHUB_WORKSPACE/src" python scripts/gmail_notify.py \
+              --project "$PROJECT" \
+              --task-id "$TASK_ID" \
+              --attempt "$ATTEMPT" \
+              --status "$result" \
+              --profile "${PROFILE:-}" \
+              --control-sha "${CONTROL_SHA:-}" \
+              --source-sha "${SOURCE_SHA:-}" \
+              --smallest-next-action "$next_action" || true
+          fi
