@@ -244,13 +244,13 @@ def parse_edit_plan(response: str, work_order: ProductWorkOrder) -> tuple[Produc
             if old_text:
                 raise ProductPilotError(f"{operation} edits must use an empty old_text")
             if path in whole_file_paths or path in replace_paths:
-                raise ProductPilotError(\n                    "whole-file edits may not be mixed or duplicated for one path"\n                )
+                raise ProductPilotError("whole-file edits cannot mix or repeat on one path")
             whole_file_paths.add(path)
         else:
             if not old_text:
                 raise ProductPilotError("replace edits require a non-empty old_text")
             if path in whole_file_paths:
-                raise ProductPilotError(\n                    "replace edits may not follow a whole-file edit for one path"\n                )
+                raise ProductPilotError("replace cannot follow a whole-file edit on one path")
             replace_paths.add(path)
             if old_text == new_text:
                 continue
