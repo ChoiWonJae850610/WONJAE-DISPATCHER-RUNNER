@@ -121,7 +121,7 @@ jobs:
           gh issue close "$issue_number" --repo "$GITHUB_REPOSITORY" --reason completed
 
       - name: GitHub-native Gmail · reconcile terminal notification
-        if: ${{ always() && vars.GITHUB_NATIVE_GMAIL_ENABLED == 'true' && env.GUARD_APPLICABLE == 'true' }}
+        if: ${{ always() && env.GUARD_APPLICABLE == 'true' }}
         continue-on-error: true
         env:
           CONTROL_READ_TOKEN: ${{ secrets.CONTROL_READ_TOKEN }}
