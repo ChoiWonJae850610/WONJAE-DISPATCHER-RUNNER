@@ -32,8 +32,10 @@ def test_classmo_v2_pr_and_result_are_observable() -> None:
 
 def test_classmo_v2_guards_concurrent_job_prs() -> None:
     text = WORKFLOW.read_text(encoding="utf-8")
-    assert "Another CLASSMO job pull request is already open." in text
-    assert 'startswith("job/")' in text
+    assert "source_pr_lifecycle.py" in text
+    assert "diagnose-conflicts" in text
+    assert "PRODUCT_GH_TOKEN" in text
+    assert "RUNNER_GH_TOKEN" in text
 
 
 def test_classmo_v2_recovers_failed_pr_validation_before_terminal_failure() -> None:
@@ -42,6 +44,9 @@ def test_classmo_v2_recovers_failed_pr_validation_before_terminal_failure() -> N
     assert "max_repairs=2" in text
     assert "run_product_repair.py" in text
     assert "## Dispatcher v2 terminal evidence" in text
+    assert "recovery_state: `FINAL`" in text
+    assert "terminalize" in text
+    assert "product_pr_cleanup" in text
 
 
 def test_classmo_v2_higher_attempt_uses_fresh_branch_and_tracks_repair_head() -> None:

@@ -18,7 +18,7 @@ jobs:
   terminalize:
     if: ${{ github.event.workflow_run.conclusion != 'success' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 8
     env:
       WAKE_TITLE: ${{ github.event.workflow_run.display_title }}
       SOURCE_RUN_ID: ${{ github.event.workflow_run.id }}
@@ -28,7 +28,7 @@ jobs:
       CONTROL_REPOSITORY: ${{ vars.CONTROL_REPOSITORY }}
 
     steps:
-      - name: Runner · trusted notification code
+      - name: Runner · trusted terminal code
         uses: actions/checkout@v6
         with:
           ref: main
@@ -65,96 +65,283 @@ jobs:
               handle.write(f"SOURCE_SHA={source_sha}\n")
           PY
 
-      - name: Record terminal state if source runner left the wake open
+      - name: Recover exact control and terminal authority
+        if: env.GUARD_APPLICABLE == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CONTROL_READ_TOKEN: ${{ secrets.CONTROL_READ_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CONTROL_REPOSITORY" || {
+            echo "::error::CONTROL_REPOSITORY is missing."
+            exit 1
+          }
+
+          case "$PROJECT" in
+            CLASSMO) expected_repository="ChoiWonJae850610/CLASSMO" ;;
+            WAFL) expected_repository="ChoiWonJae850610/WAFL" ;;
+            ESC) expected_repository="ChoiWonJae850610/ESC" ;;
+            MUVEL) expected_repository="ChoiWonJae850610/MUVEL" ;;
+            *) echo "::error::Unsupported source project."; exit 1 ;;
+          esac
+          expected_branch="cloud-dev-v1"
+
+          record="$RUNNER_TEMP/source-terminal-control.json"
+          GH_TOKEN="$CONTROL_READ_TOKEN" gh api \
+            "repos/$CONTROL_REPOSITORY/contents/tasks-v2/$PROJECT/$TASK_ID.json?ref=$CONTROL_SHA" \
+            --jq .content | base64 --decode > "$record"
+
+          ATTEMPT="$(jq -r '.attempt // empty' "$record")"
+          REVISION="$(jq -r '.revision // empty' "$record")"
+          PROFILE="$(jq -r '.profile // empty' "$record")"
+          PRODUCT_REPOSITORY="$(jq -r '.repository // empty' "$record")"
+          TARGET_BRANCH="$(jq -r '.target_branch // empty' "$record")"
+          record_project="$(jq -r '.project // empty' "$record")"
+          record_task="$(jq -r '.task_id // empty' "$record")"
+          record_source="$(jq -r '.source_base_sha // empty' "$record")"
+          test "$record_project" = "$PROJECT"
+          test "$record_task" = "$TASK_ID"
+          test "$record_source" = "$SOURCE_SHA"
+          test "$PRODUCT_REPOSITORY" = "$expected_repository"
+          test "$TARGET_BRANCH" = "$expected_branch"
+          test -n "$ATTEMPT"
+
+          issues_json="$RUNNER_TEMP/source-terminal-issues.json"
+          comments_json="$RUNNER_TEMP/source-terminal-comments.json"
+          gh api "repos/$GITHUB_REPOSITORY/issues?state=all&per_page=100&sort=created&direction=desc" > "$issues_json"
+          ISSUE_NUMBER="$(jq -r --arg title "$WAKE_TITLE" \
+            '[.[] | select(.pull_request == null and .title == $title)] | first | .number // empty' \
+            "$issues_json")"
+          test -n "$ISSUE_NUMBER" || {
+            echo "::error::Exact source wake issue was not found."
+            exit 1
+          }
+          gh api "repos/$GITHUB_REPOSITORY/issues/$ISSUE_NUMBER/comments?per_page=100" > "$comments_json"
+
+          export ATTEMPT REVISION PROFILE PRODUCT_REPOSITORY TARGET_BRANCH ISSUE_NUMBER
+          export COMMENTS_JSON="$comments_json"
+          evidence_file="$RUNNER_TEMP/source-terminal-guard-evidence.md"
+          export EVIDENCE_FILE="$evidence_file"
+
+          python - <<'PY'
+          import json
+          import os
+          import re
+          from pathlib import Path
+
+          comments = json.loads(Path(os.environ["COMMENTS_JSON"]).read_text(encoding="utf-8"))
+          bodies = [item.get("body") or "" for item in comments if isinstance(item, dict)]
+
+          if any("## Dispatcher v2 completion evidence" in body for body in bodies):
+              with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as handle:
+                  handle.write("GUARD_ACTION=SKIP_COMPLETED\n")
+              raise SystemExit(0)
+
+          def fields(body: str) -> dict[str, str]:
+              return dict(re.findall(r"^- ([A-Za-z0-9_]+): \`([^\`]*)\`$", body, re.MULTILINE))
+
+          exact_terminal = ""
+          for body in reversed(bodies):
+              if "## Dispatcher v2 terminal evidence" not in body:
+                  continue
+              values = fields(body)
+              if (
+                  values.get("task_id") == os.environ["TASK_ID"]
+                  and values.get("attempt") == os.environ["ATTEMPT"]
+                  and values.get("control_sha") == os.environ["CONTROL_SHA"]
+                  and values.get("source_sha") == os.environ["SOURCE_SHA"]
+                  and values.get("runner_run_id") == os.environ["SOURCE_RUN_ID"]
+                  and values.get("result") in {"FAILED", "MANUAL_REQUIRED", "CANCELLED"}
+              ):
+                  exact_terminal = body
+                  break
+
+          if exact_terminal:
+              terminal_status = fields(exact_terminal)["result"]
+              evidence_exists = "true"
+          else:
+              terminal_status = {
+                  "cancelled": "CANCELLED",
+                  "action_required": "MANUAL_REQUIRED",
+              }.get(os.environ["SOURCE_CONCLUSION"], "FAILED")
+              evidence_exists = "false"
+
+          previous_product_pr = fields(exact_terminal).get("product_pr", "") if exact_terminal else ""
+          lines = [
+              "## Dispatcher v2 terminal evidence",
+              "",
+              f"- project: \`{os.environ['PROJECT']}\`",
+              f"- task_id: \`{os.environ['TASK_ID']}\`",
+              f"- attempt: \`{os.environ['ATTEMPT']}\`",
+              f"- revision: \`{os.environ.get('REVISION', '')}\`",
+              f"- control_sha: \`{os.environ['CONTROL_SHA']}\`",
+              f"- source_sha: \`{os.environ['SOURCE_SHA']}\`",
+          ]
+          if previous_product_pr:
+              lines.append(f"- product_pr: \`{previous_product_pr}\`")
+          lines.extend(
+              [
+                  f"- runner_run_id: \`{os.environ['SOURCE_RUN_ID']}\`",
+                  f"- runner_conclusion: \`{os.environ['SOURCE_CONCLUSION']}\`",
+                  f"- result: \`{terminal_status}\`",
+                  "- recovery_state: \`FINAL_GUARD\`",
+                  "- runtime/device/physical: \`NOT_INFERRED\`",
+              ]
+          )
+          Path(os.environ["EVIDENCE_FILE"]).write_text("\n".join(lines) + "\n", encoding="utf-8")
+          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as handle:
+              handle.write("GUARD_ACTION=TERMINALIZE\n")
+              handle.write(f"TERMINAL_STATUS={terminal_status}\n")
+              handle.write(f"TERMINAL_EVIDENCE_EXISTS={evidence_exists}\n")
+          PY
+
+          {
+            echo "ATTEMPT=$ATTEMPT"
+            echo "REVISION=$REVISION"
+            echo "PROFILE=$PROFILE"
+            echo "PRODUCT_REPOSITORY=$PRODUCT_REPOSITORY"
+            echo "TARGET_BRANCH=$TARGET_BRANCH"
+            echo "ISSUE_NUMBER=$ISSUE_NUMBER"
+            echo "TERMINAL_EVIDENCE_FILE=$evidence_file"
+          } >> "$GITHUB_ENV"
+
+      - name: Close exact CLASSMO terminal Product PR
+        if: env.GUARD_ACTION == 'TERMINALIZE' && env.PROJECT == 'CLASSMO'
+        env:
+          PRODUCT_GH_TOKEN: ${{ secrets.CLASSMO_WRITE_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          result="$(PYTHONPATH="$GITHUB_WORKSPACE/src" python scripts/source_pr_lifecycle.py \
+            terminalize --project CLASSMO --repository "$PRODUCT_REPOSITORY" \
+            --target-branch "$TARGET_BRANCH" --task-id "$TASK_ID" --attempt "$ATTEMPT" \
+            --control-sha "$CONTROL_SHA" --source-sha "$SOURCE_SHA" \
+            --runner-run-id "$SOURCE_RUN_ID" --terminal-status "$TERMINAL_STATUS" \
+            --evidence-file "$TERMINAL_EVIDENCE_FILE")"
+          echo "SOURCE_PR_CLEANUP_STATUS=$(echo "$result" | jq -r .status)" >> "$GITHUB_ENV"
+          echo "SOURCE_PR_CLEANUP_PR=$(echo "$result" | jq -r '.pr_number // empty')" >> "$GITHUB_ENV"
+          echo "SOURCE_PR_CLEANUP_DETAIL=$(echo "$result" | jq -r .detail)" >> "$GITHUB_ENV"
+          echo "SOURCE_PR_CLEANUP_NEXT_ACTION=$(echo "$result" | jq -r .next_action)" >> "$GITHUB_ENV"
+
+      - name: Close exact WAFL terminal Product PR
+        if: env.GUARD_ACTION == 'TERMINALIZE' && env.PROJECT == 'WAFL'
+        env:
+          PRODUCT_GH_TOKEN: ${{ secrets.WAFL_WRITE_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          result="$(PYTHONPATH="$GITHUB_WORKSPACE/src" python scripts/source_pr_lifecycle.py \
+            terminalize --project WAFL --repository "$PRODUCT_REPOSITORY" \
+            --target-branch "$TARGET_BRANCH" --task-id "$TASK_ID" --attempt "$ATTEMPT" \
+            --control-sha "$CONTROL_SHA" --source-sha "$SOURCE_SHA" \
+            --runner-run-id "$SOURCE_RUN_ID" --terminal-status "$TERMINAL_STATUS" \
+            --evidence-file "$TERMINAL_EVIDENCE_FILE")"
+          echo "SOURCE_PR_CLEANUP_STATUS=$(echo "$result" | jq -r .status)" >> "$GITHUB_ENV"
+          echo "SOURCE_PR_CLEANUP_PR=$(echo "$result" | jq -r '.pr_number // empty')" >> "$GITHUB_ENV"
+          echo "SOURCE_PR_CLEANUP_DETAIL=$(echo "$result" | jq -r .detail)" >> "$GITHUB_ENV"
+          echo "SOURCE_PR_CLEANUP_NEXT_ACTION=$(echo "$result" | jq -r .next_action)" >> "$GITHUB_ENV"
+
+      - name: Close exact ESC terminal Product PR
+        if: env.GUARD_ACTION == 'TERMINALIZE' && env.PROJECT == 'ESC'
+        env:
+          PRODUCT_GH_TOKEN: ${{ secrets.ESC_WRITE_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          result="$(PYTHONPATH="$GITHUB_WORKSPACE/src" python scripts/source_pr_lifecycle.py \
+            terminalize --project ESC --repository "$PRODUCT_REPOSITORY" \
+            --target-branch "$TARGET_BRANCH" --task-id "$TASK_ID" --attempt "$ATTEMPT" \
+            --control-sha "$CONTROL_SHA" --source-sha "$SOURCE_SHA" \
+            --runner-run-id "$SOURCE_RUN_ID" --terminal-status "$TERMINAL_STATUS" \
+            --evidence-file "$TERMINAL_EVIDENCE_FILE")"
+          echo "SOURCE_PR_CLEANUP_STATUS=$(echo "$result" | jq -r .status)" >> "$GITHUB_ENV"
+          echo "SOURCE_PR_CLEANUP_PR=$(echo "$result" | jq -r '.pr_number // empty')" >> "$GITHUB_ENV"
+          echo "SOURCE_PR_CLEANUP_DETAIL=$(echo "$result" | jq -r .detail)" >> "$GITHUB_ENV"
+          echo "SOURCE_PR_CLEANUP_NEXT_ACTION=$(echo "$result" | jq -r .next_action)" >> "$GITHUB_ENV"
+
+      - name: Close exact MUVEL terminal Product PR
+        if: env.GUARD_ACTION == 'TERMINALIZE' && env.PROJECT == 'MUVEL'
+        env:
+          PRODUCT_GH_TOKEN: ${{ secrets.MUVEL_WRITE_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          result="$(PYTHONPATH="$GITHUB_WORKSPACE/src" python scripts/source_pr_lifecycle.py \
+            terminalize --project MUVEL --repository "$PRODUCT_REPOSITORY" \
+            --target-branch "$TARGET_BRANCH" --task-id "$TASK_ID" --attempt "$ATTEMPT" \
+            --control-sha "$CONTROL_SHA" --source-sha "$SOURCE_SHA" \
+            --runner-run-id "$SOURCE_RUN_ID" --terminal-status "$TERMINAL_STATUS" \
+            --evidence-file "$TERMINAL_EVIDENCE_FILE")"
+          echo "SOURCE_PR_CLEANUP_STATUS=$(echo "$result" | jq -r .status)" >> "$GITHUB_ENV"
+          echo "SOURCE_PR_CLEANUP_PR=$(echo "$result" | jq -r '.pr_number // empty')" >> "$GITHUB_ENV"
+          echo "SOURCE_PR_CLEANUP_DETAIL=$(echo "$result" | jq -r .detail)" >> "$GITHUB_ENV"
+          echo "SOURCE_PR_CLEANUP_NEXT_ACTION=$(echo "$result" | jq -r .next_action)" >> "$GITHUB_ENV"
+
+      - name: Record terminal state and Product PR cleanup evidence
+        if: env.GUARD_ACTION == 'TERMINALIZE'
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
-          if [ "${GUARD_APPLICABLE:-false}" != "true" ]; then
-            echo "Ignoring non-matching source workflow $SOURCE_WORKFLOW_NAME for $PROJECT wake."
-            exit 0
+          cleanup_status="${SOURCE_PR_CLEANUP_STATUS:-RESIDUE}"
+          cleanup_pr="${SOURCE_PR_CLEANUP_PR:-}"
+          cleanup_detail="${SOURCE_PR_CLEANUP_DETAIL:-terminal cleanup step did not produce readback}"
+          cleanup_next_action="${SOURCE_PR_CLEANUP_NEXT_ACTION:-verify exact terminal Product PR cleanup}"
+
+          if [ "$TERMINAL_EVIDENCE_EXISTS" != "true" ]; then
+            {
+              if [ -n "$cleanup_pr" ]; then printf -- '- product_pr: `%s`\n' "$cleanup_pr"; fi
+              printf -- '- product_pr_cleanup: `%s`\n' "$cleanup_status"
+              printf -- '- product_pr_cleanup_detail: %s\n' "$cleanup_detail"
+              if [ "$cleanup_status" = "RESIDUE" ]; then
+                printf -- '- cleanup_residue: `OPEN_PRODUCT_PR_POSSIBLE`\n'
+              fi
+              printf -- '- next_action: %s\n' "$cleanup_next_action"
+            } >> "$TERMINAL_EVIDENCE_FILE"
+            gh issue comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" \
+              --body-file "$TERMINAL_EVIDENCE_FILE"
+          else
+            cleanup_file="$RUNNER_TEMP/source-terminal-pr-cleanup.md"
+            {
+              echo '## Dispatcher v2 terminal PR cleanup evidence'
+              echo
+              printf -- '- project: `%s`\n' "$PROJECT"
+              printf -- '- task_id: `%s`\n' "$TASK_ID"
+              printf -- '- attempt: `%s`\n' "$ATTEMPT"
+              printf -- '- control_sha: `%s`\n' "$CONTROL_SHA"
+              printf -- '- source_sha: `%s`\n' "$SOURCE_SHA"
+              printf -- '- runner_run_id: `%s`\n' "$SOURCE_RUN_ID"
+              printf -- '- result: `%s`\n' "$TERMINAL_STATUS"
+              if [ -n "$cleanup_pr" ]; then printf -- '- product_pr: `%s`\n' "$cleanup_pr"; fi
+              printf -- '- product_pr_cleanup: `%s`\n' "$cleanup_status"
+              printf -- '- product_pr_cleanup_detail: %s\n' "$cleanup_detail"
+              if [ "$cleanup_status" = "RESIDUE" ]; then
+                printf -- '- cleanup_residue: `OPEN_PRODUCT_PR_POSSIBLE`\n'
+              fi
+              printf -- '- next_action: %s\n' "$cleanup_next_action"
+            } > "$cleanup_file"
+            gh issue comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --body-file "$cleanup_file"
           fi
-          issues_json="$(gh api "repos/$GITHUB_REPOSITORY/issues?state=all&per_page=100&sort=created&direction=desc")"
-          issue_number="$(echo "$issues_json" | jq -r --arg title "$WAKE_TITLE" '[.[] | select(.pull_request == null and .title == $title)] | first | .number // empty')"
-          test -n "$issue_number" || { echo "::error::Exact source wake issue was not found."; exit 1; }
 
-          issue_state="$(echo "$issues_json" | jq -r --argjson number "$issue_number" '.[] | select(.number == $number) | .state')"
-          comments_json="$(gh api "repos/$GITHUB_REPOSITORY/issues/$issue_number/comments?per_page=100")"
-          if echo "$comments_json" | jq -e 'map(.body // "") | any(contains("## Dispatcher v2 terminal evidence") or contains("## Dispatcher v2 completion evidence"))' >/dev/null; then
-            echo "Terminal evidence already exists; no duplicate guard result."
-            exit 0
-          fi
-          if [ "$issue_state" = "closed" ]; then
-            echo "Wake issue is already closed; no duplicate guard result."
-            exit 0
-          fi
-
-          case "$SOURCE_CONCLUSION" in
-            cancelled)
-              result="CANCELLED"
-              ;;
-            action_required)
-              result="MANUAL_REQUIRED"
-              ;;
-            *)
-              result="FAILED"
-              ;;
-          esac
-
-          terminal_file="$RUNNER_TEMP/source-terminal-guard.md"
-          {
-            echo '## Dispatcher v2 terminal evidence'
-            echo
-            printf -- '- project: `%s`\n' "$PROJECT"
-            printf -- '- task_id: `%s`\n' "$TASK_ID"
-            printf -- '- control_sha: `%s`\n' "$CONTROL_SHA"
-            printf -- '- source_sha: `%s`\n' "$SOURCE_SHA"
-            printf -- '- runner_run_id: `%s`\n' "$SOURCE_RUN_ID"
-            printf -- '- runner_conclusion: `%s`\n' "$SOURCE_CONCLUSION"
-            printf -- '- result: `%s`\n' "$result"
-            printf -- '- next_action: inspect the exact runner and product PR evidence; do not leave STARTED non-terminal\n'
-            printf -- '- runtime/device/physical: `NOT_INFERRED`\n'
-          } > "$terminal_file"
-
-          gh issue comment "$issue_number" --repo "$GITHUB_REPOSITORY" --body-file "$terminal_file"
-          gh issue close "$issue_number" --repo "$GITHUB_REPOSITORY" --reason completed
+          gh issue close "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --reason completed || true
 
       - name: GitHub-native Gmail · reconcile terminal notification
-        if: ${{ always() && vars.WONJAE_NATIVE_GMAIL_ENABLED == 'true' && env.GUARD_APPLICABLE == 'true' }}
+        if: ${{ always() && vars.WONJAE_NATIVE_GMAIL_ENABLED == 'true' && env.GUARD_ACTION == 'TERMINALIZE' }}
         continue-on-error: true
         env:
-          CONTROL_READ_TOKEN: ${{ secrets.CONTROL_READ_TOKEN }}
           GMAIL_USERNAME: ${{ secrets.GMAIL_USERNAME }}
           GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
         shell: bash
         run: |
           set -euo pipefail
-          test -n "$CONTROL_REPOSITORY" || {
-            echo "::warning::CONTROL_REPOSITORY missing; Gmail terminal reconciliation skipped."
-            exit 0
-          }
-          record="$RUNNER_TEMP/native-gmail-control-record.json"
-          GH_TOKEN="$CONTROL_READ_TOKEN" gh api \
-            "repos/$CONTROL_REPOSITORY/contents/tasks-v2/$PROJECT/$TASK_ID.json?ref=$CONTROL_SHA" \
-            --jq .content | base64 --decode > "$record"
-          ATTEMPT="$(jq -r '.attempt // empty' "$record")"
-          PROFILE="$(jq -r '.profile // empty' "$record")"
-          test -n "$ATTEMPT" || {
-            echo "::warning::Attempt identity unavailable; Gmail terminal reconciliation skipped."
-            exit 0
-          }
-          case "$SOURCE_CONCLUSION" in
-            cancelled) terminal_status="CANCELLED" ;;
-            action_required) terminal_status="MANUAL_REQUIRED" ;;
-            *) terminal_status="FAILED" ;;
-          esac
           PYTHONPATH="$GITHUB_WORKSPACE/src" python scripts/gmail_notify.py \
             --project "$PROJECT" \
             --task-id "$TASK_ID" \
             --attempt "$ATTEMPT" \
-            --status "$terminal_status" \
+            --status "$TERMINAL_STATUS" \
             --profile "$PROFILE" \
             --control-sha "$CONTROL_SHA" \
             --source-sha "$SOURCE_SHA" \
-            --smallest-next-action "inspect the exact terminal runner evidence before retry"
+            --smallest-next-action "${SOURCE_PR_CLEANUP_NEXT_ACTION:-inspect the exact terminal runner evidence before retry}"

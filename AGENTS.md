@@ -26,3 +26,16 @@ the exact external run ID, record QUEUED evidence on the wake issue, and exit
 without terminal PASS. A later exact Owner `[PROVIDER-STATUS]` issue comment may
 query that same run ID; status reconciliation must never create or resubmit the
 provider action.
+
+
+19. A source-writing task that reaches final FAILED, MANUAL_REQUIRED, or CANCELLED
+must not leave its exact Dispatcher Product PR open after bounded recovery is over.
+Before close, bind project, task_id, attempt, Control SHA, source SHA, Product PR
+metadata, terminal authority run, and final recovery state. Close only that exact PR;
+never merge it and never delete its job branch, commits, checks, conversation, or
+terminal evidence. Cleanup failure is residue on the same terminal result, not a
+reason to upgrade or replace the result.
+20. Startup concurrency remains fail-closed. Every open same-product job/* PR blocks
+new source mutation. If exact prior terminal evidence proves the open PR is stale,
+diagnose that residue explicitly but do not silently ignore or auto-close it from
+startup; terminalization/terminal-guard cleanup owns PR closure.
