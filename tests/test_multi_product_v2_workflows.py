@@ -73,3 +73,10 @@ def test_terminal_guard_binds_wake_project_to_source_workflow() -> None:
     assert 'expected_workflow = f"{project} Dispatcher v2"' in text
     assert "GUARD_APPLICABLE" in text
     assert "Ignoring non-matching source workflow" in text
+
+
+def test_product_v2_higher_attempts_use_fresh_branches_and_track_repair_heads() -> None:
+    for _project, config in PRODUCTS.items():
+        text = Path(config["workflow"]).read_text(encoding="utf-8")
+        assert '("" if attempt == 1 else f"-a{attempt}")' in text
+        assert 'echo "PILOT_HEAD_SHA=$repaired_head" >> "$GITHUB_ENV"' in text

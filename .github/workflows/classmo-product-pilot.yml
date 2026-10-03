@@ -124,7 +124,7 @@ jobs:
           values = {
               "PRODUCT_REPOSITORY": work["repository"],
               "TARGET_BRANCH": work["target_branch"],
-              "PRODUCT_BRANCH": "job/" + work["task_id"],
+              "PRODUCT_BRANCH": "job/" + work["task_id"] + ("" if attempt == 1 else f"-a{attempt}"),
               "PRODUCT_PR_TITLE": f"[{work['task_id']}] {work['title']}",
               "VALIDATION_WORKFLOW_FILE": Path(work["validation_workflow_path"]).name,
               "ATTEMPT": str(attempt),
@@ -322,6 +322,7 @@ jobs:
             git add --all
             git commit -m "[$TASK_ID] Repair validation attempt $repair_attempt"
             repaired_head="$(git rev-parse HEAD)"
+            echo "PILOT_HEAD_SHA=$repaired_head" >> "$GITHUB_ENV"
             gh auth setup-git
             git push origin "HEAD:refs/heads/$PRODUCT_BRANCH"
             cd "$GITHUB_WORKSPACE"
