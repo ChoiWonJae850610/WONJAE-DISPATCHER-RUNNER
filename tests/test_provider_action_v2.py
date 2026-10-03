@@ -487,9 +487,21 @@ def test_parse_eas_build_view_captures_finished_internal_artifact(tmp_path: Path
 
 
 def test_eas_build_launch_and_status_install_cli_and_preserve_build_id() -> None:
-    launch = Path(".github/workflows/provider-action-core.yml").read_text(encoding="utf-8")
-    status = Path(".github/workflows/provider-status-core.yml").read_text(encoding="utf-8")
-    assert "env.PROVIDER_ACTION == \'eas_update\' || env.PROVIDER_ACTION == \'eas_build\'" in launch
+    launch = Path(".github/workflows/provider-action-core.yml").read_text(
+        encoding="utf-8"
+    )
+    status = Path(".github/workflows/provider-status-core.yml").read_text(
+        encoding="utf-8"
+    )
+    launch_condition = (
+        "env.PROVIDER_ACTION == 'eas_update' || "
+        "env.PROVIDER_ACTION == 'eas_build'"
+    )
+    status_condition = (
+        "env.PROVIDER_ACTION == 'eas_workflow_update' || "
+        "env.PROVIDER_ACTION == 'eas_build'"
+    )
+    assert launch_condition in launch
     assert "EAS_BUILD_ID:-${PROVIDER_GITHUB_RUN_ID:-}" in launch
-    assert "env.PROVIDER_ACTION == \'eas_workflow_update\' || env.PROVIDER_ACTION == \'eas_build\'" in status
-    assert \'eas build:view "$PROVIDER_RUN_ID" --json\' in status
+    assert status_condition in status
+    assert 'eas build:view "$PROVIDER_RUN_ID" --json' in status
