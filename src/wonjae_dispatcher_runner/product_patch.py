@@ -177,7 +177,11 @@ def _binary_assets(
         _validate_relative_paths((path,), "binary_assets")
         if path in seen:
             raise ProductPilotError("duplicate binary asset path")
-        if not expected_sha or len(expected_sha) != 64 or any(ch not in "0123456789abcdef" for ch in expected_sha):
+        valid_sha = (
+            len(expected_sha) == 64
+            and all(ch in "0123456789abcdef" for ch in expected_sha)
+        )
+        if not valid_sha:
             raise ProductPilotError("binary asset sha256 must be lowercase hex")
         try:
             content = base64.b64decode(encoded, validate=True)
@@ -194,6 +198,11 @@ def _binary_assets(
         assets.append(ProductBinaryAsset(path=path, content=content, sha256=expected_sha))
         seen.add(path)
     return tuple(assets)
+
+
+def _text_allowed_paths(work_order: ProductWorkOrder) -> tuple[str, ...]:
+    binary_paths = {asset.path for asset in work_order.binary_assets}
+    return tuple(path for path in work_order.allowed_paths if path not in binary_paths)
 
 
 def load_work_order(path: Path) -> ProductWorkOrder:
@@ -470,10 +479,13 @@ def _bounded_prompt(
             *[f"- {item}" for item in work_order.completion_conditions],
             "",
             "Text-editable changed paths:",
-            *[f"- {item}" for item in work_order.allowed_paths if item not in {asset.path for asset in work_order.binary_assets}],
+            *[f"- {item}" for item in _text_allowed_paths(work_order)],
             "",
             "Trusted binary assets (written only by the runner after SHA-256 verification):",
-            *([f"- {asset.path} sha256={asset.sha256}" for asset in work_order.binary_assets] or ["- none"]),
+            *(
+                [f"- {asset.path} sha256={asset.sha256}" for asset in work_order.binary_assets]
+                or ["- none"]
+            ),
             "",
             "Required changed paths:",
             *[f"- {item}" for item in work_order.required_changed_paths],
@@ -633,7 +645,10 @@ def generate_and_apply_product_repair(
                 "items": {
                     "type": "object",
                     "properties": {
-                        "path": {"type": "string", "enum": [path for path in work_order.allowed_paths if path not in {asset.path for asset in work_order.binary_assets}]},
+                        "path": {
+                            "type": "string",
+                            "enum": list(_text_allowed_paths(work_order)),
+                        },
                         "operation": {"type": "string", "enum": ["replace", "create", "write"]},
                         "old_text": {"type": "string"},
                         "new_text": {"type": "string", "minLength": 1},
@@ -723,7 +738,7 @@ def generate_and_apply_product_patch(
                     "properties": {
                         "path": {
                             "type": "string",
-                            "enum": [path for path in work_order.allowed_paths if path not in {asset.path for asset in work_order.binary_assets}],
+                            "enum": list(_text_allowed_paths(work_order)),
                         },
                         "operation": {
                             "type": "string",
@@ -786,7 +801,7 @@ def generate_and_apply_product_patch(
                     raise ProductPilotError(
                         "product repository changed during the read-only Codex turn"
                     )
-                applied = apply_edit_plan(
+                apply_edit_plan(
                     repo_path,
                     edits,
                     work_order,
