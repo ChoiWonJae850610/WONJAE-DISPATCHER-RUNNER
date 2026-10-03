@@ -10,7 +10,7 @@ from typing import Any
 
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 TASK_RE = re.compile(r"^[A-Z][A-Z0-9_-]*-[A-Z0-9][A-Z0-9-]*-[0-9]{3}$")
-ALLOWED_ACTIONS = {"eas_workflow_update", "eas_update", "github_workflow_dispatch"}
+ALLOWED_ACTIONS = {"eas_workflow_update", "eas_update", "eas_build", "github_workflow_dispatch"}
 ALLOWED_EAS_TARGETS = {
     "CLASSMO": {("preview", "preview")},
     "ESC": {("preview", "preview")},
@@ -62,20 +62,19 @@ def write_env(path: str | Path, values: dict[str, str]) -> None:
             handle.write(f"{key}={value}\n")
 
 
-def validate_authority(record: dict[str, Any]) -> None:
+def validate_authority(record: dict[str, Any], project: str, action: str) -> None:
     authority = record.get("provider_authority")
     if not isinstance(authority, dict):
         fail("provider_authority must be an object")
-    required_false = (
-        "production",
-        "new_build",
-        "credential_mutation",
-        "device_mutation",
-        "destructive",
-    )
-    for key in required_false:
+    for key in ("production", "credential_mutation", "device_mutation", "destructive"):
         if authority.get(key) is not False:
-            fail(f"provider_authority.{key} must be false for provider v2 pilot")
+            fail(f"provider_authority.{key} must be false for provider v2")
+    expected_new_build = project == "CLASSMO" and action == "eas_build"
+    if authority.get("new_build") is not expected_new_build:
+        fail(
+            "provider_authority.new_build must be true only for the registered "
+            "CLASSMO eas_build action"
+        )
 
 
 def prepare(args: argparse.Namespace) -> None:
@@ -113,7 +112,6 @@ def prepare(args: argparse.Namespace) -> None:
         fail("revision must be a positive integer")
     profile = require_string(record, "profile")
     require_string(record, "title")
-    validate_authority(record)
 
     action = record.get("provider_action")
     if not isinstance(action, dict):
@@ -121,6 +119,7 @@ def prepare(args: argparse.Namespace) -> None:
     kind = require_string(action, "action")
     if kind not in ALLOWED_ACTIONS:
         fail("unsupported provider action")
+    validate_authority(record, args.project, kind)
 
     validation_path = require_string(record, "validation_workflow_path")
     if not validation_path.startswith(".github/workflows/"):
@@ -183,6 +182,33 @@ def prepare(args: argparse.Namespace) -> None:
             ):
                 fail("provider_action.inputs must be a string mapping")
             values["PROVIDER_INPUTS_JSON"] = json.dumps(inputs, separators=(",", ":"))
+
+    if kind == "eas_build":
+        if args.project != "CLASSMO":
+            fail("eas_build is registered only for CLASSMO")
+        working_directory = safe_rel(
+            require_string(action, "working_directory"),
+            "working_directory",
+        )
+        platform = require_string(params, "platform")
+        build_profile = require_string(params, "profile")
+        app_version = require_string(params, "app_version")
+        build_number = require_string(params, "build_number")
+        if platform != "ios":
+            fail("CLASSMO eas_build must target ios")
+        if build_profile != "preview":
+            fail("CLASSMO eas_build must use preview profile")
+        if app_version != "0.0.11" or build_number != "3":
+            fail("CLASSMO eas_build must target 0.0.11 (3)")
+        values.update(
+            {
+                "PROVIDER_WORKING_DIRECTORY": working_directory,
+                "PROVIDER_PLATFORM": platform,
+                "PROVIDER_BUILD_PROFILE": build_profile,
+                "PROVIDER_APP_VERSION": app_version,
+                "PROVIDER_BUILD_NUMBER": build_number,
+            }
+        )
 
     if kind == "github_workflow_dispatch":
         workflow_file = safe_rel(require_string(action, "workflow_file"), "workflow_file")
@@ -300,6 +326,62 @@ def parse_eas_run(args: argparse.Namespace) -> None:
     values = {"EAS_WORKFLOW_ID": run_id}
     if isinstance(status, str) and status:
         values["EAS_WORKFLOW_STATUS"] = status
+    write_env(args.github_env, values)
+
+
+def parse_eas_build_launch(args: argparse.Namespace) -> None:
+    data = read_json(args.input)
+    for item in _walk(data):
+        build_id = item.get("id")
+        if isinstance(build_id, str) and build_id:
+            write_env(args.github_env, {"EAS_BUILD_ID": build_id})
+            return
+    fail("EAS build ID missing from launch result")
+
+
+def parse_eas_build_view(args: argparse.Namespace) -> None:
+    data = read_json(args.input)
+    chosen = None
+    for item in _walk(data):
+        if item.get("id") == args.expected_id:
+            chosen = item
+            break
+    if not isinstance(chosen, dict):
+        fail("matching EAS build view was not found")
+
+    raw_status = chosen.get("status")
+    if not isinstance(raw_status, str):
+        fail("EAS build status missing")
+    normalized = raw_status.strip().lower().replace("_", "-")
+    status_map = {
+        "new": "NEW",
+        "in-queue": "WAITING",
+        "in-progress": "IN_PROGRESS",
+        "pending-cancel": "IN_PROGRESS",
+        "finished": "SUCCESS",
+        "errored": "FAILURE",
+        "canceled": "CANCELED",
+        "cancelled": "CANCELED",
+    }
+    provider_status = status_map.get(normalized)
+    if provider_status is None:
+        fail(f"unsupported EAS build status: {raw_status}")
+
+    values = {"PROVIDER_STATUS": provider_status}
+    app_version = chosen.get("appVersion")
+    build_version = chosen.get("appBuildVersion")
+    distribution = chosen.get("distribution")
+    if isinstance(app_version, str) and app_version:
+        values["EAS_BUILD_APP_VERSION"] = app_version
+    if isinstance(build_version, str) and build_version:
+        values["EAS_BUILD_APP_BUILD_VERSION"] = build_version
+    if isinstance(distribution, str) and distribution:
+        values["EAS_BUILD_DISTRIBUTION"] = distribution
+    artifacts = chosen.get("artifacts")
+    if isinstance(artifacts, dict):
+        artifact_url = artifacts.get("applicationArchiveUrl") or artifacts.get("buildUrl")
+        if isinstance(artifact_url, str) and artifact_url.startswith("https://"):
+            values["EAS_BUILD_ARTIFACT_URL"] = artifact_url
     write_env(args.github_env, values)
 
 
@@ -430,6 +512,17 @@ def main() -> None:
     p.add_argument("--input", required=True)
     p.add_argument("--github-env", required=True)
     p.set_defaults(func=parse_eas_run)
+
+    p = sub.add_parser("parse-eas-build-launch")
+    p.add_argument("--input", required=True)
+    p.add_argument("--github-env", required=True)
+    p.set_defaults(func=parse_eas_build_launch)
+
+    p = sub.add_parser("parse-eas-build-view")
+    p.add_argument("--input", required=True)
+    p.add_argument("--expected-id", required=True)
+    p.add_argument("--github-env", required=True)
+    p.set_defaults(func=parse_eas_build_view)
 
     p = sub.add_parser("extract-provider-run")
     p.add_argument("--input", required=True)
