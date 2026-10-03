@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import base64
+import binascii
+import hashlib
 import json
 import subprocess
 from dataclasses import dataclass
@@ -13,6 +16,9 @@ MAX_EDIT_COUNT = 48
 MAX_TEXT_CHARS = 80_000
 MAX_CONTEXT_CHARS = 600_000
 MAX_PLAN_REGENERATION_ATTEMPTS = 2
+MAX_BINARY_ASSET_COUNT = 8
+MAX_BINARY_ASSET_BYTES = 2_000_000
+MAX_BINARY_ASSET_TOTAL_BYTES = 4_000_000
 PROHIBITED_FAILURE_MARKERS = (
     "blocked pending checkout inspection",
     "do not integrate this marker",
@@ -24,6 +30,13 @@ PROHIBITED_FAILURE_MARKERS = (
 
 class ProductPilotError(RuntimeError):
     """Raised when a product pilot violates its bounded work order."""
+
+
+@dataclass(frozen=True)
+class ProductBinaryAsset:
+    path: str
+    content: bytes
+    sha256: str
 
 
 @dataclass(frozen=True)
@@ -39,6 +52,7 @@ class ProductWorkOrder:
     required_reads: tuple[str, ...]
     allowed_paths: tuple[str, ...]
     required_changed_paths: tuple[str, ...]
+    binary_assets: tuple[ProductBinaryAsset, ...]
     scope: tuple[str, ...]
     exclusions: tuple[str, ...]
     completion_conditions: tuple[str, ...]
@@ -133,6 +147,64 @@ def _validate_relative_paths(paths: tuple[str, ...], label: str) -> None:
             raise ProductPilotError(f"{label} contains an unsafe path")
 
 
+def _binary_assets(
+    payload: dict[str, object],
+    allowed_paths: tuple[str, ...],
+) -> tuple[ProductBinaryAsset, ...]:
+    raw_assets = payload.get("binary_assets", [])
+    if not isinstance(raw_assets, list):
+        raise ProductPilotError("binary_assets must be a list")
+    if len(raw_assets) > MAX_BINARY_ASSET_COUNT:
+        raise ProductPilotError("binary_assets exceeded the bounded asset count")
+
+    allowed = set(allowed_paths)
+    assets: list[ProductBinaryAsset] = []
+    seen: set[str] = set()
+    total = 0
+    for raw in raw_assets:
+        if not isinstance(raw, dict) or set(raw) != {"path", "base64", "sha256"}:
+            raise ProductPilotError("binary asset entry shape was invalid")
+        path = raw.get("path")
+        encoded = raw.get("base64")
+        expected_sha = raw.get("sha256")
+        if not all(isinstance(value, str) for value in (path, encoded, expected_sha)):
+            raise ProductPilotError("binary asset entry values must be strings")
+        assert isinstance(path, str)
+        assert isinstance(encoded, str)
+        assert isinstance(expected_sha, str)
+        if path not in allowed:
+            raise ProductPilotError("binary asset path is outside allowed_paths")
+        _validate_relative_paths((path,), "binary_assets")
+        if path in seen:
+            raise ProductPilotError("duplicate binary asset path")
+        valid_sha = (
+            len(expected_sha) == 64
+            and all(ch in "0123456789abcdef" for ch in expected_sha)
+        )
+        if not valid_sha:
+            raise ProductPilotError("binary asset sha256 must be lowercase hex")
+        try:
+            content = base64.b64decode(encoded, validate=True)
+        except (binascii.Error, ValueError) as exc:
+            raise ProductPilotError("binary asset base64 is invalid") from exc
+        if not content or len(content) > MAX_BINARY_ASSET_BYTES:
+            raise ProductPilotError("binary asset size is outside bounds")
+        total += len(content)
+        if total > MAX_BINARY_ASSET_TOTAL_BYTES:
+            raise ProductPilotError("binary assets exceeded the total byte bound")
+        actual_sha = hashlib.sha256(content).hexdigest()
+        if actual_sha != expected_sha:
+            raise ProductPilotError("binary asset sha256 mismatch")
+        assets.append(ProductBinaryAsset(path=path, content=content, sha256=expected_sha))
+        seen.add(path)
+    return tuple(assets)
+
+
+def _text_allowed_paths(work_order: ProductWorkOrder) -> tuple[str, ...]:
+    binary_paths = {asset.path for asset in work_order.binary_assets}
+    return tuple(path for path in work_order.allowed_paths if path not in binary_paths)
+
+
 def load_work_order(path: Path) -> ProductWorkOrder:
     payload = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(payload, dict) or payload.get("schema_version") != 1:
@@ -160,6 +232,8 @@ def load_work_order(path: Path) -> ProductWorkOrder:
     if any(path not in set(allowed_paths) for path in required_changed_paths):
         raise ProductPilotError("required_changed_paths must be a subset of allowed_paths")
 
+    binary_assets = _binary_assets(payload, allowed_paths)
+
     return ProductWorkOrder(
         task_id=required_string("task_id"),
         project=required_string("project"),
@@ -172,6 +246,7 @@ def load_work_order(path: Path) -> ProductWorkOrder:
         required_reads=_string_list(payload, "required_reads"),
         allowed_paths=allowed_paths,
         required_changed_paths=required_changed_paths,
+        binary_assets=binary_assets,
         scope=_string_list(payload, "scope"),
         exclusions=_string_list(payload, "exclusions"),
         completion_conditions=_string_list(payload, "completion_conditions"),
@@ -201,7 +276,8 @@ def parse_edit_plan(response: str, work_order: ProductWorkOrder) -> tuple[Produc
     if len(edits) > MAX_EDIT_COUNT:
         raise ProductPilotError("Codex edit plan exceeded the bounded edit count")
 
-    allowed = set(work_order.allowed_paths)
+    binary_paths = {asset.path for asset in work_order.binary_assets}
+    allowed = set(work_order.allowed_paths) - binary_paths
     parsed: list[ProductEdit] = []
     whole_file_paths: set[str] = set()
     replace_paths: set[str] = set()
@@ -341,6 +417,21 @@ def apply_edit_plan(
     return actual
 
 
+def apply_binary_assets(
+    repo_path: Path,
+    work_order: ProductWorkOrder,
+) -> tuple[str, ...]:
+    written: list[str] = []
+    for asset in work_order.binary_assets:
+        target = repo_path / asset.path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(asset.content)
+        if hashlib.sha256(target.read_bytes()).hexdigest() != asset.sha256:
+            raise ProductPilotError("binary asset write verification failed")
+        written.append(asset.path)
+    return tuple(written)
+
+
 def _required_context(repo_path: Path, work_order: ProductWorkOrder) -> str:
     chunks: list[str] = []
     total = 0
@@ -387,8 +478,14 @@ def _bounded_prompt(
             "Completion conditions:",
             *[f"- {item}" for item in work_order.completion_conditions],
             "",
-            "Allowed changed paths:",
-            *[f"- {item}" for item in work_order.allowed_paths],
+            "Text-editable changed paths:",
+            *[f"- {item}" for item in _text_allowed_paths(work_order)],
+            "",
+            "Trusted binary assets (written only by the runner after SHA-256 verification):",
+            *(
+                [f"- {asset.path} sha256={asset.sha256}" for asset in work_order.binary_assets]
+                or ["- none"]
+            ),
             "",
             "Required changed paths:",
             *[f"- {item}" for item in work_order.required_changed_paths],
@@ -431,11 +528,14 @@ def _prestarted_recovery_prompt(base_prompt: str, failure: str, attempt: int) ->
 
 def _repair_context(repo_path: Path, work_order: ProductWorkOrder) -> str:
     paths = tuple(dict.fromkeys((*work_order.required_reads, *work_order.allowed_paths)))
+    binary_paths = {asset.path for asset in work_order.binary_assets}
     chunks: list[str] = []
     total = 0
     for relative in paths:
         path = repo_path / relative
-        if not path.is_file():
+        if relative in binary_paths:
+            content = "<BINARY ASSET; trusted runner-owned, not text-editable>"
+        elif not path.is_file():
             if relative in work_order.required_reads:
                 raise ProductPilotError(f"required product read is missing: {relative}")
             content = "<MISSING FILE; creation is allowed only if this path is in allowed_paths>"
@@ -545,7 +645,10 @@ def generate_and_apply_product_repair(
                 "items": {
                     "type": "object",
                     "properties": {
-                        "path": {"type": "string", "enum": list(work_order.allowed_paths)},
+                        "path": {
+                            "type": "string",
+                            "enum": list(_text_allowed_paths(work_order)),
+                        },
                         "operation": {"type": "string", "enum": ["replace", "create", "write"]},
                         "old_text": {"type": "string"},
                         "new_text": {"type": "string", "minLength": 1},
@@ -635,7 +738,7 @@ def generate_and_apply_product_patch(
                     "properties": {
                         "path": {
                             "type": "string",
-                            "enum": list(work_order.allowed_paths),
+                            "enum": list(_text_allowed_paths(work_order)),
                         },
                         "operation": {
                             "type": "string",
@@ -698,8 +801,24 @@ def generate_and_apply_product_patch(
                     raise ProductPilotError(
                         "product repository changed during the read-only Codex turn"
                     )
-                applied = apply_edit_plan(repo_path, edits, work_order)
-                return work_order, applied
+                apply_edit_plan(
+                    repo_path,
+                    edits,
+                    work_order,
+                    require_required_paths=not bool(work_order.binary_assets),
+                )
+                binary_written = apply_binary_assets(repo_path, work_order)
+                actual = tuple(changed_paths(repo_path))
+                if any(path not in set(work_order.allowed_paths) for path in actual):
+                    raise ProductPilotError("worktree contains a path outside the work order")
+                missing_required = [
+                    path for path in work_order.required_changed_paths if path not in set(actual)
+                ]
+                if missing_required:
+                    raise ProductPilotError("worktree omitted required changed paths")
+                if not set(binary_written).issubset(set(actual)):
+                    raise ProductPilotError("binary asset write did not appear in the worktree")
+                return work_order, actual
             except ProductPilotError as exc:
                 if (
                     git_head(repo_path) != work_order.source_base_sha
