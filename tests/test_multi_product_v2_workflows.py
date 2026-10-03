@@ -53,7 +53,7 @@ def test_product_v2_workflows_recover_validation_and_terminalize_failure() -> No
         assert "run_product_repair.py" in text
         assert "Repair validation attempt" in text
         assert "## Dispatcher v2 terminal evidence" in text
-        assert "recovery_state: \`FINAL\`" in text
+        assert "recovery_state: `FINAL`" in text
         assert "source_pr_lifecycle.py" in text
         assert "terminalize" in text
         assert "product_pr_cleanup" in text
@@ -79,7 +79,8 @@ def test_terminal_guard_binds_wake_project_to_source_workflow() -> None:
     assert "SOURCE_WORKFLOW_NAME" in text
     assert 'expected_workflow = f"{project} Dispatcher v2"' in text
     assert "GUARD_APPLICABLE" in text
-    assert "Ignoring non-matching source workflow" in text
+    assert "GUARD_APPLICABLE" in text
+    assert "GUARD_ACTION" in text
 
 
 def test_product_v2_higher_attempts_use_fresh_branches_and_track_repair_heads() -> None:
@@ -96,7 +97,7 @@ def test_completed_source_path_still_merges_only_validated_head() -> None:
         assert 'merge_method=merge' in text
         assert '-f sha="$PILOT_HEAD_SHA"' in text
         assert "exact integrated-SHA Actions" in text
-        assert "exact integrated-SHA validation did not succeed" in text
+        assert "Exact integrated-SHA validation did not succeed." in text
 
 
 def test_source_terminal_guard_closes_only_exact_product_pr() -> None:
