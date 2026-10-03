@@ -180,7 +180,10 @@ def test_check_ota_allows_only_exact_wafl_app_variant_manifest_delta(tmp_path: P
             working_directory="apps/mobile",
         )
     )
-    config.write_text(config.read_text(encoding="utf-8") + "nativeLikeChange = true;\n", encoding="utf-8")
+    config.write_text(
+        config.read_text(encoding="utf-8") + "nativeLikeChange = true;\n",
+        encoding="utf-8",
+    )
     _git(repo, "add", "apps/mobile/app.config.js")
     _git(repo, "commit", "-m", "unsafe config")
     unsafe_head = _git(repo, "rev-parse", "HEAD")
