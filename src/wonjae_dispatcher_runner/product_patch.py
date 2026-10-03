@@ -12,6 +12,7 @@ from .guards import require_sha
 MAX_EDIT_COUNT = 48
 MAX_TEXT_CHARS = 80_000
 MAX_CONTEXT_CHARS = 600_000
+MAX_PLAN_REGENERATION_ATTEMPTS = 2
 PROHIBITED_FAILURE_MARKERS = (
     "blocked pending checkout inspection",
     "do not integrate this marker",
@@ -202,7 +203,8 @@ def parse_edit_plan(response: str, work_order: ProductWorkOrder) -> tuple[Produc
 
     allowed = set(work_order.allowed_paths)
     parsed: list[ProductEdit] = []
-    created_paths: set[str] = set()
+    whole_file_paths: set[str] = set()
+    replace_paths: set[str] = set()
     for raw in edits:
         if not isinstance(raw, dict) or set(raw) != {
             "path",
@@ -227,7 +229,7 @@ def parse_edit_plan(response: str, work_order: ProductWorkOrder) -> tuple[Produc
         path_value = Path(path)
         if path_value.is_absolute() or ".." in path_value.parts:
             raise ProductPilotError("Codex edit included an unsafe path")
-        if operation not in {"replace", "create"}:
+        if operation not in {"replace", "create", "write"}:
             raise ProductPilotError("Codex edit operation was invalid")
         if "\x00" in old_text or "\x00" in new_text:
             raise ProductPilotError("Codex edit contained a NUL byte")
@@ -238,16 +240,20 @@ def parse_edit_plan(response: str, work_order: ProductWorkOrder) -> tuple[Produc
                 "Codex edit may not delete a file or replace with empty content"
             )
         _reject_failure_marker(new_text)
-        if operation == "create":
+        if operation in {"create", "write"}:
             if old_text:
-                raise ProductPilotError("create edits must use an empty old_text")
-            if path in created_paths:
-                raise ProductPilotError("duplicate create edit for one path")
-            created_paths.add(path)
-        elif not old_text:
-            raise ProductPilotError("replace edits require a non-empty old_text")
-        if operation == "replace" and old_text == new_text:
-            continue
+                raise ProductPilotError(f"{operation} edits must use an empty old_text")
+            if path in whole_file_paths or path in replace_paths:
+                raise ProductPilotError("whole-file edits may not be mixed or duplicated for one path")
+            whole_file_paths.add(path)
+        else:
+            if not old_text:
+                raise ProductPilotError("replace edits require a non-empty old_text")
+            if path in whole_file_paths:
+                raise ProductPilotError("replace edits may not follow a whole-file edit for one path")
+            replace_paths.add(path)
+            if old_text == new_text:
+                continue
 
         parsed.append(
             ProductEdit(
@@ -290,6 +296,12 @@ def apply_edit_plan(
             contents[edit.path] = edit.new_text
             continue
 
+        if edit.operation == "write":
+            if current is None:
+                raise ProductPilotError("write edit targeted a missing file")
+            contents[edit.path] = edit.new_text
+            continue
+
         if current is None:
             raise ProductPilotError("replace edit targeted a missing file")
         occurrences = current.count(edit.old_text)
@@ -299,29 +311,33 @@ def apply_edit_plan(
             )
         contents[edit.path] = current.replace(edit.old_text, edit.new_text, 1)
 
-    changed: list[str] = []
-    for path, value in contents.items():
-        if value is None or value == original[path]:
-            continue
+    changed = [
+        path for path, value in contents.items()
+        if value is not None and value != original[path]
+    ]
+    if not changed:
+        raise ProductPilotError("Codex edit plan produced no repository changes")
+    if any(path not in allowed for path in changed):
+        raise ProductPilotError("validated edit plan contains a path outside the work order")
+    if require_required_paths:
+        missing_required = [
+            path for path in work_order.required_changed_paths if path not in set(changed)
+        ]
+        if missing_required:
+            raise ProductPilotError("worktree omitted required changed paths")
+
+    for path in changed:
+        value = contents[path]
+        assert value is not None
         target = repo_path / path
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(value, encoding="utf-8")
-        changed.append(path)
-
-    if not changed:
-        raise ProductPilotError("Codex edit plan produced no repository changes")
 
     actual = tuple(changed_paths(repo_path))
     if set(actual) != set(changed):
         raise ProductPilotError("worktree paths did not match the validated edit plan")
     if any(path not in allowed for path in actual):
         raise ProductPilotError("worktree contains a path outside the work order")
-    if require_required_paths:
-        missing_required = [
-            path for path in work_order.required_changed_paths if path not in set(actual)
-        ]
-        if missing_required:
-            raise ProductPilotError("worktree omitted required changed paths")
     return actual
 
 
@@ -377,10 +393,13 @@ def _bounded_prompt(
             "Required changed paths:",
             *[f"- {item}" for item in work_order.required_changed_paths],
             "",
-            "Return a structured edit plan only. For an existing file use operation=replace with "
-            "an exact old_text snippet copied verbatim from the supplied context and the intended "
-            "new_text; choose the smallest snippet that matches exactly once. For a new file use "
-            "operation=create, old_text='', and the complete new file content. Return at least one "
+            "Return a structured edit plan only. For a small local change in an existing file use "
+            "operation=replace with an exact non-empty old_text snippet copied verbatim from the "
+            "supplied context and the intended new_text; the snippet must match exactly once. When "
+            "an existing file needs a coherent whole-file rewrite, or several edits would overlap "
+            "or depend on earlier edits, use operation=write, old_text='', and the complete new file "
+            "content. For a new file use operation=create, old_text='', and the complete new file "
+            "content. Never use replace with an empty old_text. Return at least one "
             "effective edit. Do not return placeholders, blocked markers, sandbox-error markers, "
             "or commentary instead of implementation. Implement the task completely within the "
             "allowed paths, include focused tests, preserve truthful evidence boundaries, and do "
@@ -388,6 +407,24 @@ def _bounded_prompt(
             "",
             "REQUIRED REPOSITORY CONTEXT:",
             context,
+        ]
+    )
+
+
+def _prestarted_recovery_prompt(base_prompt: str, failure: str, attempt: int) -> str:
+    return "\n".join(
+        [
+            base_prompt,
+            "",
+            "PRE-STARTED HANDOFF RECOVERY:",
+            f"- regeneration attempt: {attempt}",
+            f"- trusted runner rejection: {failure}",
+            "- The previous plan was rejected before any product write.",
+            "- Return a complete replacement plan; do not refer to the rejected plan.",
+            "- Prefer operation=write for an existing file when exact replace matching is fragile,",
+            "  when multiple edits touch the same region, or when a complete-file rewrite is requested.",
+            "- replace always requires a non-empty exact old_text that matches once.",
+            "- Stay strictly inside the original allowed paths and authority.",
         ]
     )
 
@@ -459,9 +496,12 @@ def _repair_prompt(
             "Allowed changed paths:",
             *[f"- {item}" for item in work_order.allowed_paths],
             "",
-            "Return a structured edit plan only. Use operation=replace for existing "
-            "files with an exact old_text snippet copied from the supplied current "
-            "context, or operation=create for a missing allowed file. Make the "
+            "Return a structured edit plan only. Use operation=replace for a small "
+            "existing-file change with an exact non-empty old_text snippet copied from "
+            "the supplied current context. Use operation=write with old_text='' and "
+            "complete file content for a coherent whole-file rewrite, and operation=create "
+            "with old_text='' for a missing allowed file. Never use replace with an empty "
+            "old_text. Make the "
             "smallest repair that addresses the validation failure. Do not add "
             "placeholders, failure markers, or unrelated cleanup.",
             "",
@@ -506,7 +546,7 @@ def generate_and_apply_product_repair(
                     "type": "object",
                     "properties": {
                         "path": {"type": "string", "enum": list(work_order.allowed_paths)},
-                        "operation": {"type": "string", "enum": ["replace", "create"]},
+                        "operation": {"type": "string", "enum": ["replace", "create", "write"]},
                         "old_text": {"type": "string"},
                         "new_text": {"type": "string", "minLength": 1},
                     },
@@ -599,7 +639,7 @@ def generate_and_apply_product_patch(
                         },
                         "operation": {
                             "type": "string",
-                            "enum": ["replace", "create"],
+                            "enum": ["replace", "create", "write"],
                         },
                         "old_text": {"type": "string"},
                         "new_text": {"type": "string", "minLength": 1},
@@ -614,35 +654,65 @@ def generate_and_apply_product_patch(
         "additionalProperties": False,
     }
 
+    prior_failure: str | None = None
     with Codex(config=config) as codex:
         account = codex.account(refresh_token=False)
         if account.account is None:
             raise ProductPilotError("Codex account session is missing")
-        thread = codex.thread_start(
-            approval_mode=ApprovalMode.deny_all,
-            cwd=str(repo_path),
-            ephemeral=True,
-            sandbox=Sandbox.read_only,
-            config={
-                "history": {"persistence": "none"},
-                "allow_login_shell": False,
-            },
-        )
-        result = thread.run(
-            _bounded_prompt(work_order, control_sha, context),
-            approval_mode=ApprovalMode.deny_all,
-            output_schema=output_schema,
-            sandbox=Sandbox.read_only,
-        )
 
-    status = str(getattr(result.status, "value", result.status)).lower()
-    if status != "completed" or result.error is not None:
-        raise ProductPilotError("Codex product turn did not complete successfully")
+        for plan_attempt in range(MAX_PLAN_REGENERATION_ATTEMPTS + 1):
+            prompt = _bounded_prompt(work_order, control_sha, context)
+            if prior_failure is not None:
+                prompt = _prestarted_recovery_prompt(
+                    prompt,
+                    prior_failure,
+                    plan_attempt,
+                )
+            thread = codex.thread_start(
+                approval_mode=ApprovalMode.deny_all,
+                cwd=str(repo_path),
+                ephemeral=True,
+                sandbox=Sandbox.read_only,
+                config={
+                    "history": {"persistence": "none"},
+                    "allow_login_shell": False,
+                },
+            )
+            result = thread.run(
+                prompt,
+                approval_mode=ApprovalMode.deny_all,
+                output_schema=output_schema,
+                sandbox=Sandbox.read_only,
+            )
 
-    edits = parse_edit_plan(result.final_response or "", work_order)
+            status = str(getattr(result.status, "value", result.status)).lower()
+            if status != "completed" or result.error is not None:
+                raise ProductPilotError("Codex product turn did not complete successfully")
 
-    if git_head(repo_path) != work_order.source_base_sha or changed_paths(repo_path):
-        raise ProductPilotError("product repository changed during the read-only Codex turn")
+            try:
+                edits = parse_edit_plan(result.final_response or "", work_order)
+                if (
+                    git_head(repo_path) != work_order.source_base_sha
+                    or changed_paths(repo_path)
+                ):
+                    raise ProductPilotError(
+                        "product repository changed during the read-only Codex turn"
+                    )
+                applied = apply_edit_plan(repo_path, edits, work_order)
+                return work_order, applied
+            except ProductPilotError as exc:
+                if (
+                    git_head(repo_path) != work_order.source_base_sha
+                    or changed_paths(repo_path)
+                ):
+                    raise
+                if plan_attempt >= MAX_PLAN_REGENERATION_ATTEMPTS:
+                    raise
+                prior_failure = str(exc)
+                print(
+                    "PRODUCT_PLAN_RECOVERY="
+                    f"{plan_attempt + 1}/{MAX_PLAN_REGENERATION_ATTEMPTS}:"
+                    f"{prior_failure}"
+                )
 
-    applied = apply_edit_plan(repo_path, edits, work_order)
-    return work_order, applied
+    raise ProductPilotError("bounded pre-STARTED plan recovery exhausted unexpectedly")
