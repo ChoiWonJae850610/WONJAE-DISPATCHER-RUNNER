@@ -250,7 +250,7 @@ def parse_edit_plan(response: str, work_order: ProductWorkOrder) -> tuple[Produc
             if not old_text:
                 raise ProductPilotError("replace edits require a non-empty old_text")
             if path in whole_file_paths:
-                raise ProductPilotError("replace edits may not follow a whole-file edit for one path")
+                raise ProductPilotError(\n                    "replace edits may not follow a whole-file edit for one path"\n                )
             replace_paths.add(path)
             if old_text == new_text:
                 continue
