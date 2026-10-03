@@ -35,6 +35,14 @@ jobs:
         run: |
           echo "SMOKE_TASK_ID=WAFL-GMAIL-SMOKE-$GITHUB_RUN_ID" >> "$GITHUB_ENV"
 
+      - name: Verify GitHub-native Gmail activation variable
+        shell: bash
+        run: |
+          test "${{ vars.GITHUB_NATIVE_GMAIL_ENABLED }}" = "true" || {
+            echo "::error::GITHUB_NATIVE_GMAIL_ENABLED must be true before activation smoke."
+            exit 1
+          }
+
       - name: Attempt 1 STARTED
         run: |
           PYTHONPATH="$GITHUB_WORKSPACE/src" python scripts/gmail_notify.py \
