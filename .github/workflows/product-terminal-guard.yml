@@ -25,8 +25,15 @@ jobs:
       SOURCE_CONCLUSION: ${{ github.event.workflow_run.conclusion }}
       SOURCE_RUN_URL: ${{ github.event.workflow_run.html_url }}
       SOURCE_WORKFLOW_NAME: ${{ github.event.workflow_run.name }}
+      CONTROL_REPOSITORY: ${{ vars.CONTROL_REPOSITORY }}
 
     steps:
+      - name: Runner · trusted notification code
+        uses: actions/checkout@v6
+        with:
+          ref: main
+          persist-credentials: false
+
       - name: Parse exact source wake identity
         shell: bash
         run: |
@@ -112,3 +119,42 @@ jobs:
 
           gh issue comment "$issue_number" --repo "$GITHUB_REPOSITORY" --body-file "$terminal_file"
           gh issue close "$issue_number" --repo "$GITHUB_REPOSITORY" --reason completed
+
+      - name: GitHub-native Gmail · reconcile terminal notification
+        if: ${{ always() && vars.GITHUB_NATIVE_GMAIL_ENABLED == 'true' && env.GUARD_APPLICABLE == 'true' }}
+        continue-on-error: true
+        env:
+          CONTROL_READ_TOKEN: ${{ secrets.CONTROL_READ_TOKEN }}
+          GMAIL_USERNAME: ${{ secrets.GMAIL_USERNAME }}
+          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CONTROL_REPOSITORY" || {
+            echo "::warning::CONTROL_REPOSITORY missing; Gmail terminal reconciliation skipped."
+            exit 0
+          }
+          record="$RUNNER_TEMP/native-gmail-control-record.json"
+          GH_TOKEN="$CONTROL_READ_TOKEN" gh api \
+            "repos/$CONTROL_REPOSITORY/contents/tasks-v2/$PROJECT/$TASK_ID.json?ref=$CONTROL_SHA" \
+            --jq .content | base64 --decode > "$record"
+          ATTEMPT="$(jq -r '.attempt // empty' "$record")"
+          PROFILE="$(jq -r '.profile // empty' "$record")"
+          test -n "$ATTEMPT" || {
+            echo "::warning::Attempt identity unavailable; Gmail terminal reconciliation skipped."
+            exit 0
+          }
+          case "$SOURCE_CONCLUSION" in
+            cancelled) terminal_status="CANCELLED" ;;
+            action_required) terminal_status="MANUAL_REQUIRED" ;;
+            *) terminal_status="FAILED" ;;
+          esac
+          PYTHONPATH="$GITHUB_WORKSPACE/src" python scripts/gmail_notify.py \
+            --project "$PROJECT" \
+            --task-id "$TASK_ID" \
+            --attempt "$ATTEMPT" \
+            --status "$terminal_status" \
+            --profile "$PROFILE" \
+            --control-sha "$CONTROL_SHA" \
+            --source-sha "$SOURCE_SHA" \
+            --smallest-next-action "inspect the exact terminal runner evidence before retry"

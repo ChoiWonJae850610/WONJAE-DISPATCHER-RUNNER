@@ -29,8 +29,15 @@ jobs:
       SOURCE_WORKFLOW: ${{ github.event.workflow_run.name }}
       SOURCE_RUN_ID: ${{ github.event.workflow_run.id }}
       SOURCE_CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+      CONTROL_REPOSITORY: ${{ vars.CONTROL_REPOSITORY }}
 
     steps:
+      - name: Runner · trusted notification code
+        uses: actions/checkout@v6
+        with:
+          ref: main
+          persist-credentials: false
+
       - name: Parse exact provider wake identity
         shell: bash
         run: |
@@ -82,7 +89,15 @@ jobs:
 
           comments = json.loads(Path(os.environ["COMMENTS_JSON"]).read_text(encoding="utf-8"))
           bodies = [item.get("body") or "" for item in comments if isinstance(item, dict)]
-          terminal = any("## Dispatcher v2 provider completion evidence" in body for body in bodies)
+          terminal_body = next(
+              (
+                  body
+                  for body in reversed(bodies)
+                  if "## Dispatcher v2 provider completion evidence" in body
+              ),
+              "",
+          )
+          terminal = bool(terminal_body)
           queued = any("## Dispatcher v2 provider QUEUED evidence" in body for body in bodies)
           started_body = next(
               (body for body in reversed(bodies) if "## Dispatcher v2 provider STARTED evidence" in body),
@@ -93,6 +108,10 @@ jobs:
               "PROVIDER_QUEUED_EXISTS": "true" if queued else "false",
               "PROVIDER_STARTED_EXISTS": "true" if started_body else "false",
           }
+          if terminal_body:
+              result_match = re.search(r"- result: `([^`]+)`", terminal_body)
+              if result_match:
+                  values["PROVIDER_TERMINAL_RESULT"] = result_match.group(1)
           if started_body:
               for key, pattern in {
                   "ATTEMPT": r"- attempt: `([^\`]+)`",
@@ -154,3 +173,52 @@ jobs:
           } > "$terminal_file"
           gh issue comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --body-file "$terminal_file"
           gh issue close "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --reason completed
+          echo "PROVIDER_TERMINAL_RESULT=$result" >> "$GITHUB_ENV"
+
+      - name: GitHub-native Gmail · reconcile provider terminal notification
+        if: ${{ always() && vars.GITHUB_NATIVE_GMAIL_ENABLED == 'true' && env.PROVIDER_QUEUED_EXISTS != 'true' }}
+        continue-on-error: true
+        env:
+          CONTROL_READ_TOKEN: ${{ secrets.CONTROL_READ_TOKEN }}
+          GMAIL_USERNAME: ${{ secrets.GMAIL_USERNAME }}
+          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CONTROL_REPOSITORY" || {
+            echo "::warning::CONTROL_REPOSITORY missing; provider Gmail reconciliation skipped."
+            exit 0
+          }
+          record="$RUNNER_TEMP/native-gmail-provider-control.json"
+          GH_TOKEN="$CONTROL_READ_TOKEN" gh api \
+            "repos/$CONTROL_REPOSITORY/contents/tasks-v2/$PROJECT/$TASK_ID.json?ref=$CONTROL_SHA" \
+            --jq .content | base64 --decode > "$record"
+          ATTEMPT="$(jq -r '.attempt // empty' "$record")"
+          PROFILE="$(jq -r '.profile // empty' "$record")"
+          test -n "$ATTEMPT" || {
+            echo "::warning::Provider attempt identity unavailable; Gmail reconciliation skipped."
+            exit 0
+          }
+          evidence_result="${PROVIDER_TERMINAL_RESULT:-}"
+          case "$evidence_result" in
+            PASS) mail_status="COMPLETED" ;;
+            MANUAL_REQUIRED) mail_status="MANUAL_REQUIRED" ;;
+            CANCELLED|CANCELED) mail_status="CANCELLED" ;;
+            FAILED) mail_status="FAILED" ;;
+            *)
+              case "$SOURCE_CONCLUSION" in
+                cancelled) mail_status="CANCELLED" ;;
+                action_required) mail_status="MANUAL_REQUIRED" ;;
+                *) mail_status="FAILED" ;;
+              esac
+              ;;
+          esac
+          PYTHONPATH="$GITHUB_WORKSPACE/src" python scripts/gmail_notify.py \
+            --project "$PROJECT" \
+            --task-id "$TASK_ID" \
+            --attempt "$ATTEMPT" \
+            --status "$mail_status" \
+            --profile "$PROFILE" \
+            --control-sha "$CONTROL_SHA" \
+            --source-sha "$SOURCE_SHA" \
+            --smallest-next-action "inspect the exact provider terminal evidence before any retry"

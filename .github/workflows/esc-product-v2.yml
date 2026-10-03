@@ -262,6 +262,24 @@ jobs:
           echo "PILOT_PR_NUMBER=$pr_number" >> "$GITHUB_ENV"
           python scripts/actions_progress.py STARTED PASS --sha "$PILOT_HEAD_SHA" --pr "$pr_number"
 
+      - name: "[06] NOTIFY · GitHub-native STARTED"
+        if: ${{ vars.GITHUB_NATIVE_GMAIL_ENABLED == 'true' }}
+        continue-on-error: true
+        env:
+          GMAIL_USERNAME: ${{ secrets.GMAIL_USERNAME }}
+          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+        run: |
+          PYTHONPATH="$GITHUB_WORKSPACE/src" python scripts/gmail_notify.py \
+            --project ESC \
+            --task-id "$TASK_ID" \
+            --attempt "$ATTEMPT" \
+            --status STARTED \
+            --profile "$PROFILE" \
+            --control-sha "$CONTROL_SHA" \
+            --source-sha "$SOURCE_SHA" \
+            --product-pr "$PILOT_PR_URL" \
+            --exact-head-sha "$PILOT_HEAD_SHA"
+
       - name: "[07] VALIDATE · exact PR-head Actions with bounded recovery"
         env:
           GH_TOKEN: ${{ secrets.ESC_WRITE_TOKEN }}
@@ -392,6 +410,25 @@ jobs:
           gh pr comment "$PILOT_PR_NUMBER" --repo "$PRODUCT_REPOSITORY" --body-file "$result_file"
           python scripts/actions_progress.py RESULT PASS --sha "$INTEGRATED_SHA" --pr "$PILOT_PR_NUMBER"
 
+      - name: "[10] NOTIFY · GitHub-native COMPLETED"
+        if: ${{ vars.GITHUB_NATIVE_GMAIL_ENABLED == 'true' }}
+        continue-on-error: true
+        env:
+          GMAIL_USERNAME: ${{ secrets.GMAIL_USERNAME }}
+          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+        run: |
+          PYTHONPATH="$GITHUB_WORKSPACE/src" python scripts/gmail_notify.py \
+            --project ESC \
+            --task-id "$TASK_ID" \
+            --attempt "$ATTEMPT" \
+            --status COMPLETED \
+            --profile "$PROFILE" \
+            --control-sha "$CONTROL_SHA" \
+            --source-sha "$SOURCE_SHA" \
+            --product-pr "$PILOT_PR_URL" \
+            --exact-head-sha "$PILOT_HEAD_SHA" \
+            --integration-evidence "integrated-sha:$INTEGRATED_SHA validation-run:$INTEGRATED_RUN_ID"
+
       - name: "[10] RESULT · close wake issue"
         env:
           GH_TOKEN: ${{ github.token }}
@@ -424,6 +461,29 @@ jobs:
           gh issue comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --body-file "$terminal_file"
           gh issue close "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --reason completed
           python scripts/actions_progress.py RESULT FAIL || true
+
+      - name: "[10] NOTIFY · GitHub-native terminal failure"
+        if: ${{ failure() && vars.GITHUB_NATIVE_GMAIL_ENABLED == 'true' }}
+        continue-on-error: true
+        env:
+          GMAIL_USERNAME: ${{ secrets.GMAIL_USERNAME }}
+          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+        run: |
+          if [ -z "${ATTEMPT:-}" ]; then
+            echo "::warning::GitHub-native Gmail skipped because attempt identity is unavailable."
+            exit 0
+          fi
+          PYTHONPATH="$GITHUB_WORKSPACE/src" python scripts/gmail_notify.py \
+            --project ESC \
+            --task-id "$TASK_ID" \
+            --attempt "$ATTEMPT" \
+            --status FAILED \
+            --profile "${PROFILE:-}" \
+            --control-sha "${CONTROL_SHA:-}" \
+            --source-sha "${SOURCE_SHA:-}" \
+            --product-pr "${PILOT_PR_URL:-}" \
+            --exact-head-sha "${PILOT_HEAD_SHA:-}" \
+            --smallest-next-action "inspect exact runner and validation evidence before retry"
 
       - name: "[11] Cleanup · ephemeral credentials"
         if: ${{ always() }}
