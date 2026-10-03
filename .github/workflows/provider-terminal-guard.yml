@@ -176,7 +176,7 @@ jobs:
           echo "PROVIDER_TERMINAL_RESULT=$result" >> "$GITHUB_ENV"
 
       - name: GitHub-native Gmail · reconcile provider terminal notification
-        if: ${{ always() && vars.GITHUB_NATIVE_GMAIL_ENABLED == 'true' && env.PROVIDER_QUEUED_EXISTS != 'true' }}
+        if: ${{ always() && vars.WONJAE_NATIVE_GMAIL_ENABLED == 'true' && env.PROVIDER_QUEUED_EXISTS != 'true' }}
         continue-on-error: true
         env:
           CONTROL_READ_TOKEN: ${{ secrets.CONTROL_READ_TOKEN }}
