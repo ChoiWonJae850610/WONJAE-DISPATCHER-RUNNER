@@ -126,13 +126,13 @@ jobs:
           python scripts/provider_action.py extract-provider-run             --input "$RUNNER_TEMP/provider-comments.json"             --github-env "$GITHUB_ENV"
 
       - name: EAS · set up Node
-        if: env.PROVIDER_ACTION == 'eas_workflow_update'
+        if: env.PROVIDER_ACTION == 'eas_workflow_update' || env.PROVIDER_ACTION == 'eas_build'
         uses: actions/setup-node@v7
         with:
           node-version: "24"
 
       - name: EAS · install pinned CLI
-        if: env.PROVIDER_ACTION == 'eas_workflow_update'
+        if: env.PROVIDER_ACTION == 'eas_workflow_update' || env.PROVIDER_ACTION == 'eas_build'
         run: npm install --global "eas-cli@$EAS_CLI_VERSION"
 
       - name: EAS · install app dependencies for config resolution
@@ -142,6 +142,21 @@ jobs:
           set -euo pipefail
           cd "$GITHUB_WORKSPACE/.provider/product/$PROVIDER_WORKING_DIRECTORY"
           npm ci --ignore-scripts --no-audit --no-fund
+
+      - name: EAS · read build status
+        if: env.PROVIDER_ACTION == 'eas_build'
+        env:
+          EXPO_TOKEN: ${{ secrets.expo_token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${EXPO_TOKEN:-}" || { echo "::error::Missing project-scoped Expo token."; exit 1; }
+          cd "$GITHUB_WORKSPACE/.provider/product/$PROVIDER_WORKING_DIRECTORY"
+          eas build:view "$PROVIDER_RUN_ID" --json > "$RUNNER_TEMP/eas-build-view.json"
+          python "$GITHUB_WORKSPACE/scripts/provider_action.py" parse-eas-build-view \
+            --input "$RUNNER_TEMP/eas-build-view.json" \
+            --expected-id "$PROVIDER_RUN_ID" \
+            --github-env "$GITHUB_ENV"
 
       - name: EAS · read workflow status
         if: env.PROVIDER_ACTION == 'eas_workflow_update'
@@ -229,6 +244,10 @@ jobs:
             printf -- '- source_sha: `%s`\n' "$SOURCE_SHA"
             printf -- '- action: `%s`\n' "$PROVIDER_ACTION"
             printf -- '- provider_run_id: `%s`\n' "$PROVIDER_RUN_ID"
+            if [ -n "${EAS_BUILD_APP_VERSION:-}" ]; then printf -- '- app_version: `%s`\n' "$EAS_BUILD_APP_VERSION"; fi
+            if [ -n "${EAS_BUILD_APP_BUILD_VERSION:-}" ]; then printf -- '- build_number: `%s`\n' "$EAS_BUILD_APP_BUILD_VERSION"; fi
+            if [ -n "${EAS_BUILD_DISTRIBUTION:-}" ]; then printf -- '- distribution: `%s`\n' "$EAS_BUILD_DISTRIBUTION"; fi
+            if [ -n "${EAS_BUILD_ARTIFACT_URL:-}" ]; then printf -- '- artifact_url: %s\n' "$EAS_BUILD_ARTIFACT_URL"; fi
             if [ -n "${EAS_UPDATE_ID:-}" ]; then printf -- '- update_id: `%s`\n' "$EAS_UPDATE_ID"; fi
             if [ -n "${EAS_UPDATE_GROUP_ID:-}" ]; then printf -- '- update_group_id: `%s`\n' "$EAS_UPDATE_GROUP_ID"; fi
             if [ -n "${PROVIDER_RUNTIME_VERSION:-}" ]; then printf -- '- runtime_version: `%s`\n' "$PROVIDER_RUNTIME_VERSION"; fi
