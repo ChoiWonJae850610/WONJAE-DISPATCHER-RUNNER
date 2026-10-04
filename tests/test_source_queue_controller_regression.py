@@ -41,7 +41,7 @@ def queue(monkeypatch):
         "title": TITLE,
         "state": "CLOSED",
         "author": {"login": "owner"},
-        "comments": [{"body": body}],
+        "comments": [{"body": body, "author": {"login": "github-actions[bot]"}}],
     }
     b = {
         "number": 102,
@@ -99,7 +99,11 @@ def queue(monkeypatch):
     )
     monkeypatch.setattr(MODULE, "read_control_for_registration", lambda _: record)
     monkeypatch.setattr(
-        MODULE, "post_comment", lambda repo, n, text: issues[n]["comments"].append({"body": text})
+        MODULE,
+        "post_comment",
+        lambda repo, n, text: issues[n]["comments"].append(
+            {"body": text, "author": {"login": "github-actions[bot]"}}
+        ),
     )
     monkeypatch.setattr(MODULE, "run", lambda command, **kwargs: calls.append(command) or "")
     args = Namespace(
@@ -161,7 +165,10 @@ def test_missed_event_reconcile_uses_existing_queue_issue(queue):
 
 def test_cancelled_successor_is_not_revived(queue):
     queue.b["comments"].append(
-        {"body": "## Dispatcher v2 terminal evidence\n- result: `CANCELLED`"}
+        {
+            "body": "## Dispatcher v2 terminal evidence\n- result: `CANCELLED`",
+            "author": {"login": "owner"},
+        }
     )
     MODULE.reconcile(queue.args)
     assert queue.calls == []
@@ -191,6 +198,13 @@ def test_failed_actual_source_run_cannot_advance_from_stale_completed_comment(qu
     queue.run.update(status="completed", conclusion="failure")
     with pytest.raises(RuntimeError, match="conclusion mismatch"):
         MODULE.reconcile(queue.args)
+    assert queue.calls == []
+
+
+def test_untrusted_completion_comment_cannot_activate_successor(queue):
+    queue.a["comments"][0]["author"]["login"] = "untrusted-contributor"
+    MODULE.intake(queue.args)
+    assert queue_state(MODULE.issue_comments(queue.b)) == "QUEUED"
     assert queue.calls == []
 
 

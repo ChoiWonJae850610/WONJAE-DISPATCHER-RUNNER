@@ -70,7 +70,23 @@ def issue_comments(issue: Mapping[str, Any]) -> list[str]:
     comments = issue.get("comments")
     if not isinstance(comments, list):
         return []
-    return [str(comment.get("body") or "") for comment in comments if isinstance(comment, dict)]
+    trusted = {owner_login(issue), "github-actions", "github-actions[bot]"}
+    bodies = []
+    for comment in comments:
+        if not isinstance(comment, dict):
+            continue
+        author = comment.get("author") or comment.get("user") or {}
+        login = author.get("login")
+        body = str(comment.get("body") or "")
+        if login not in trusted:
+            continue
+        if (QUEUE_HEADING in body or QUEUE_TERMINAL_HEADING in body) and login not in {
+            "github-actions",
+            "github-actions[bot]",
+        }:
+            continue
+        bodies.append(body)
+    return bodies
 
 
 def list_issues(repository: str, state: str) -> list[dict[str, Any]]:

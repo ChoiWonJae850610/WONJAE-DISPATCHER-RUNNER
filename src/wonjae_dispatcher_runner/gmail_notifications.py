@@ -8,6 +8,7 @@ import ssl
 import time
 from contextlib import contextmanager
 from dataclasses import dataclass
+from email import policy
 from email.message import EmailMessage
 from email.parser import BytesParser
 from typing import Callable, Iterator
@@ -173,7 +174,7 @@ class GmailClient:
             headers = [entry[1] for entry in entries if isinstance(entry, tuple)]
             if len(headers) != 1 or not isinstance(headers[0], bytes):
                 raise GmailNotificationError("notification header readback was ambiguous")
-            message = BytesParser().parsebytes(headers[0], headersonly=True)
+            message = BytesParser(policy=policy.default).parsebytes(headers[0], headersonly=True)
             if message.get_all(HEADER_KEY) == [key]:
                 exact.append(uid)
         return tuple(exact)
