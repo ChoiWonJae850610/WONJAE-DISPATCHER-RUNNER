@@ -1,9 +1,18 @@
 name: WAFL Dispatcher v2
 
+run-name: ${{ inputs.wake_title }}
+
 on:
-  issues:
-    types:
-      - opened
+  workflow_dispatch:
+    inputs:
+      wake_issue_number:
+        description: Exact owner source wake issue number
+        required: true
+        type: string
+      wake_title:
+        description: Exact owner source wake issue title
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -12,21 +21,34 @@ permissions:
 jobs:
   wafl-product:
     if: >-
-      github.actor == github.repository_owner &&
-      github.event.issue.user.login == github.repository_owner &&
-      startsWith(
-        github.event.issue.title,
-        '[PRODUCT-WAKE][DISPATCHER-V2] WAFL '
-      )
+      startsWith(inputs.wake_title, '[PRODUCT-WAKE][DISPATCHER-V2] WAFL ')
     runs-on: ubuntu-latest
     timeout-minutes: 60
     env:
       CONTROL_REPOSITORY: ${{ vars.CONTROL_REPOSITORY }}
-      WAKE_TITLE: ${{ github.event.issue.title }}
-      ISSUE_NUMBER: ${{ github.event.issue.number }}
+      WAKE_TITLE: ${{ inputs.wake_title }}
+      ISSUE_NUMBER: ${{ inputs.wake_issue_number }}
       PYTHONUNBUFFERED: "1"
 
     steps:
+      - name: "[00] QUEUE · verify persistent dispatch claim"
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EXPECTED_WORKFLOW_FILE: wafl-product-v2.yml
+        shell: bash
+        run: |
+          set -euo pipefail
+          issue_json="$(gh issue view "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --json title,state,author,comments)"
+          echo "$issue_json" | jq -e \
+            --arg owner "$GITHUB_REPOSITORY_OWNER" \
+            --arg title "$WAKE_TITLE" \
+            '.title == $title and .state == "OPEN" and .author.login == $owner' >/dev/null
+          latest_queue="$(echo "$issue_json" | jq -r \
+            '[.comments[].body | select(contains("## Dispatcher v2 source queue evidence"))] | last // ""')"
+          test -n "$latest_queue" || { echo "::error::Missing persistent queue claim."; exit 1; }
+          grep -F -- '- queue_state: `DISPATCHED`' <<<"$latest_queue" >/dev/null
+          grep -F -- "- workflow_file: \`${EXPECTED_WORKFLOW_FILE}\`" <<<"$latest_queue" >/dev/null
+
       - name: "[00] Security · protected configuration"
         env:
           CODEX_AUTH_JSON: ${{ secrets.CODEX_AUTH_JSON }}
@@ -435,7 +457,18 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh issue comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY"             --body "PASS: WAFL Dispatcher v2 integrated with exact-head and exact-integrated-SHA validation."
+          set -euo pipefail
+          PYTHONPATH="$GITHUB_WORKSPACE/src" python scripts/source_queue.py record-completed \
+            --repository "$GITHUB_REPOSITORY" \
+            --owner "$GITHUB_REPOSITORY_OWNER" \
+            --issue-number "$ISSUE_NUMBER" \
+            --project WAFL \
+            --wake-title "$WAKE_TITLE" \
+            --attempt "$ATTEMPT" \
+            --source-run-id "$GITHUB_RUN_ID" \
+            --product-pr "$PILOT_PR_NUMBER" \
+            --integrated-sha "$INTEGRATED_SHA" \
+            --validation-run "$INTEGRATED_RUN_ID"
           gh issue close "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --reason completed
 
       - name: "[10] RESULT · terminal failure evidence"
