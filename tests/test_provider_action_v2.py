@@ -222,6 +222,90 @@ def test_prepare_rejects_production_provider_authority(tmp_path: Path) -> None:
         )
 
 
+
+def _production_dispatch_record() -> dict:
+    record = _record("ESC")
+    record["task_id"] = "ESC-CLOUDFLARE-001"
+    record["title"] = "Deploy ESC realtime Worker"
+    record["provider_authority"]["production"] = True
+    record["provider_action"] = {
+        "action": "github_workflow_dispatch",
+        "workflow_file": ".github/workflows/deploy-realtime.yml",
+        "inputs": {},
+        "parameters": {},
+    }
+    return record
+
+
+def test_prepare_accepts_exact_registered_production_workflow_dispatch(tmp_path: Path) -> None:
+    record = _production_dispatch_record()
+    record_path = tmp_path / "record.json"
+    env_path = tmp_path / "env"
+    record_path.write_text(json.dumps(record), encoding="utf-8")
+    prepare(
+        Namespace(
+            record=str(record_path),
+            project="ESC",
+            repository="ChoiWonJae850610/ESC",
+            target_branch="cloud-dev-v1",
+            wake_title="[PROVIDER-WAKE][DISPATCHER-V2] ESC ESC-CLOUDFLARE-001 "
+            + "c" * 40
+            + " "
+            + "a" * 40,
+            control_sha="c" * 40,
+            source_sha="a" * 40,
+            github_env=str(env_path),
+            production_workflow_file=".github/workflows/deploy-realtime.yml",
+        )
+    )
+    env = env_path.read_text(encoding="utf-8")
+    assert "PROVIDER_ACTION=github_workflow_dispatch" in env
+    assert "PROVIDER_WORKFLOW_FILE=deploy-realtime.yml" in env
+
+
+def test_prepare_rejects_production_workflow_not_on_adapter_allowlist(tmp_path: Path) -> None:
+    record = _production_dispatch_record()
+    record["provider_action"]["workflow_file"] = ".github/workflows/other.yml"
+    record_path = tmp_path / "record.json"
+    record_path.write_text(json.dumps(record), encoding="utf-8")
+    with pytest.raises(SystemExit):
+        prepare(
+            Namespace(
+                record=str(record_path),
+                project="ESC",
+                repository="ChoiWonJae850610/ESC",
+                target_branch="cloud-dev-v1",
+                wake_title="[PROVIDER-WAKE][DISPATCHER-V2] ESC ESC-CLOUDFLARE-001 "
+                + "c" * 40
+                + " "
+                + "a" * 40,
+                control_sha="c" * 40,
+                source_sha="a" * 40,
+                github_env=str(tmp_path / "env"),
+                production_workflow_file=".github/workflows/deploy-realtime.yml",
+            )
+        )
+
+
+def test_only_esc_adapter_registers_realtime_production_workflow() -> None:
+    expected = "production_workflow_file: .github/workflows/deploy-realtime.yml"
+    esc = Path(".github/workflows/esc-provider-v2.yml").read_text(encoding="utf-8")
+    assert esc.count(expected) == 2
+    for project in ("classmo", "wafl", "muvel"):
+        text = Path(f".github/workflows/{project}-provider-v2.yml").read_text(encoding="utf-8")
+        assert expected not in text
+
+
+def test_provider_cores_forward_production_workflow_allowlist() -> None:
+    for workflow in (
+        ".github/workflows/provider-action-core.yml",
+        ".github/workflows/provider-status-core.yml",
+    ):
+        text = Path(workflow).read_text(encoding="utf-8")
+        assert "production_workflow_file:" in text
+        assert '--production-workflow-file "${{ inputs.production_workflow_file }}"' in text
+
+
 def test_product_provider_workflows_keep_credentials_isolated() -> None:
     mapping = {
         "CLASSMO": ("CLASSMO_WRITE_TOKEN", "CLASSMO_EXPO_TOKEN"),
