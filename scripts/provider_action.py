@@ -149,7 +149,7 @@ def prepare(args: argparse.Namespace) -> None:
     kind = require_string(action, "action")
     if kind not in ALLOWED_ACTIONS:
         fail("unsupported provider action")
-    validate_authority(record, args.project, kind, args.production_workflow_file)
+    validate_authority(record, args.project, kind, getattr(args, "production_workflow_file", ""))
 
     validation_path = require_string(record, "validation_workflow_path")
     if not validation_path.startswith(".github/workflows/"):
