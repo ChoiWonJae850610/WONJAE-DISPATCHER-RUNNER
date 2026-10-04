@@ -501,7 +501,7 @@ def resolve_control(args: argparse.Namespace) -> int:
         issue,
         owner=args.owner,
         expected_project=args.project,
-        require_open=True,
+        require_open=not args.allow_closed,
     )
     if registration.task_id != args.task_id:
         raise RuntimeError("queue issue task_id mismatch")
@@ -784,6 +784,7 @@ def parser() -> argparse.ArgumentParser:
     resolve_parser.add_argument("--source-sha", required=True)
     resolve_parser.add_argument("--work-order-file", required=True)
     resolve_parser.add_argument("--output", required=True)
+    resolve_parser.add_argument("--allow-closed", action="store_true")
     resolve_parser.set_defaults(func=resolve_control)
 
     completed_parser = sub.add_parser("record-completed")
