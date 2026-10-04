@@ -88,18 +88,41 @@ jobs:
           expected_branch="cloud-dev-v1"
 
           record="$RUNNER_TEMP/source-terminal-control.json"
+          resolved_record="$RUNNER_TEMP/source-terminal-resolved-control.json"
           GH_TOKEN="$CONTROL_READ_TOKEN" gh api \
             "repos/$CONTROL_REPOSITORY/contents/tasks-v2/$PROJECT/$TASK_ID.json?ref=$CONTROL_SHA" \
             --jq .content | base64 --decode > "$record"
 
-          ATTEMPT="$(jq -r '.attempt // empty' "$record")"
-          REVISION="$(jq -r '.revision // empty' "$record")"
-          PROFILE="$(jq -r '.profile // empty' "$record")"
-          PRODUCT_REPOSITORY="$(jq -r '.repository // empty' "$record")"
-          TARGET_BRANCH="$(jq -r '.target_branch // empty' "$record")"
-          record_project="$(jq -r '.project // empty' "$record")"
-          record_task="$(jq -r '.task_id // empty' "$record")"
-          record_source="$(jq -r '.source_base_sha // empty' "$record")"
+          locate_json="$(PYTHONPATH="$GITHUB_WORKSPACE/src" python scripts/source_queue.py locate \
+            --repository "$GITHUB_REPOSITORY" \
+            --owner "$GITHUB_REPOSITORY_OWNER" \
+            --project "$PROJECT" \
+            --task-id "$TASK_ID" \
+            --control-sha "$CONTROL_SHA" \
+            --source-sha "$SOURCE_SHA")"
+          ISSUE_NUMBER="$(echo "$locate_json" | jq -r .issue_number)"
+          test -n "$ISSUE_NUMBER" && test "$ISSUE_NUMBER" != "null"
+
+          PYTHONPATH="$GITHUB_WORKSPACE/src" python scripts/source_queue.py resolve-control \
+            --repository "$GITHUB_REPOSITORY" \
+            --owner "$GITHUB_REPOSITORY_OWNER" \
+            --issue-number "$ISSUE_NUMBER" \
+            --project "$PROJECT" \
+            --task-id "$TASK_ID" \
+            --control-sha "$CONTROL_SHA" \
+            --source-sha "$SOURCE_SHA" \
+            --work-order-file "$record" \
+            --output "$resolved_record" \
+            --allow-closed
+
+          ATTEMPT="$(jq -r '.attempt // empty' "$resolved_record")"
+          REVISION="$(jq -r '.revision // empty' "$resolved_record")"
+          PROFILE="$(jq -r '.profile // empty' "$resolved_record")"
+          PRODUCT_REPOSITORY="$(jq -r '.repository // empty' "$resolved_record")"
+          TARGET_BRANCH="$(jq -r '.target_branch // empty' "$resolved_record")"
+          record_project="$(jq -r '.project // empty' "$resolved_record")"
+          record_task="$(jq -r '.task_id // empty' "$resolved_record")"
+          record_source="$(jq -r '.source_base_sha // empty' "$resolved_record")"
           test "$record_project" = "$PROJECT"
           test "$record_task" = "$TASK_ID"
           test "$record_source" = "$SOURCE_SHA"
@@ -107,16 +130,7 @@ jobs:
           test "$TARGET_BRANCH" = "$expected_branch"
           test -n "$ATTEMPT"
 
-          issues_json="$RUNNER_TEMP/source-terminal-issues.json"
           comments_json="$RUNNER_TEMP/source-terminal-comments.json"
-          gh api "repos/$GITHUB_REPOSITORY/issues?state=all&per_page=100&sort=created&direction=desc" > "$issues_json"
-          ISSUE_NUMBER="$(jq -r --arg title "$WAKE_TITLE" \
-            '[.[] | select(.pull_request == null and .title == $title)] | first | .number // empty' \
-            "$issues_json")"
-          test -n "$ISSUE_NUMBER" || {
-            echo "::error::Exact source wake issue was not found."
-            exit 1
-          }
           gh api "repos/$GITHUB_REPOSITORY/issues/$ISSUE_NUMBER/comments?per_page=100" > "$comments_json"
 
           export ATTEMPT REVISION PROFILE PRODUCT_REPOSITORY TARGET_BRANCH ISSUE_NUMBER
