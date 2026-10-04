@@ -25,6 +25,10 @@ on:
         required: false
         type: boolean
         default: false
+      production_workflow_file:
+        required: false
+        type: string
+        default: ""
     secrets:
       control_read_token:
         required: true
@@ -106,7 +110,7 @@ jobs:
           set -euo pipefail
           record="$GITHUB_WORKSPACE/.provider/control/$CONTROL_RECORD_PATH"
           test -f "$record"
-          python scripts/provider_action.py prepare             --record "$record"             --project "$PROJECT"             --repository "$PRODUCT_REPOSITORY"             --target-branch "$TARGET_BRANCH"             --wake-title "$WAKE_TITLE"             --control-sha "$CONTROL_SHA"             --source-sha "$SOURCE_SHA"             --github-env "$GITHUB_ENV"
+          python scripts/provider_action.py prepare             --record "$record"             --project "$PROJECT"             --repository "$PRODUCT_REPOSITORY"             --target-branch "$TARGET_BRANCH"             --wake-title "$WAKE_TITLE"             --control-sha "$CONTROL_SHA"             --source-sha "$SOURCE_SHA"             --github-env "$GITHUB_ENV"             --production-workflow-file "${{ inputs.production_workflow_file }}"
 
       - name: PRODUCT · checkout exact source
         uses: actions/checkout@v6

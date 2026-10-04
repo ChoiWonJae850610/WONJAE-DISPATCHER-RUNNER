@@ -151,6 +151,8 @@ Thin product adapters keep credentials isolated:
 
 The common core supports compatible EAS Workflow updates, direct compatible EAS updates, and dispatch of an already repository-owned GitHub Actions workflow. EAS actions fail closed on app/native/dependency configuration changes since the declared compatible signed baseline. A missing project-scoped provider credential is terminal `MANUAL_REQUIRED`, not a reason to reuse a credential from another product.
 
+Production provider authority remains disabled by default. A product adapter may register one exact repository-owned GitHub workflow as a production dispatch allowlist. A private control record may set `provider_authority.production=true` only when it uses `github_workflow_dispatch` and its exact workflow path matches that adapter allowlist; credential/device/destructive authority remains false. ESC uses this mechanism only for its registered realtime deployment workflow.
+
 Provider STARTED/RESULT evidence is written to the exact owner-authored runner wake issue. A provider PASS is limited to the provider stage actually executed; device receipt, iOS/iPad physical QA, Windows physical QA, Production, release, and other unperformed stages remain separate.
 
 For `eas_workflow_update`, the runner executes from the exact product checkout
