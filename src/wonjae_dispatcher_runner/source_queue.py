@@ -124,7 +124,7 @@ def execution_title(
 
 
 def parse_fields(markdown: str) -> dict[str, str]:
-    return {key: value for key, value in FIELD_PATTERN.findall(markdown)}
+    return dict(FIELD_PATTERN.findall(markdown))
 
 
 def latest_queue_evidence(comments: Sequence[str]) -> QueueEvidence | None:
