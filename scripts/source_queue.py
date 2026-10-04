@@ -16,7 +16,6 @@ from wonjae_dispatcher_runner.source_queue import (
     SourceRegistration,
     completion_matches_source_run,
     completion_source_sha,
-    execution_title,
     latest_queue_evidence,
     parse_execution_title,
     parse_registration_title,
