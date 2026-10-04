@@ -532,6 +532,7 @@ def resolve_control(args: argparse.Namespace) -> int:
             raise RuntimeError("predecessor completion does not authorize requested source")
 
     resolved = dict(raw)
+    resolved["schema_version"] = 1
     resolved["source_base_sha"] = args.source_sha
     resolved["source_base_resolution"] = {
         "mode": authority.mode,
