@@ -7,6 +7,8 @@ import subprocess
 from dataclasses import dataclass
 from typing import Protocol
 
+from .source_queue import parse_execution_title, parse_registration_title
+
 TERMINAL_RESULTS = frozenset({"FAILED", "MANUAL_REQUIRED", "CANCELLED"})
 FINAL_RECOVERY_STATES = frozenset({"FINAL", "FINAL_GUARD"})
 MARKDOWN_FIELD = re.compile(r"^- ([A-Za-z0-9_]+): `([^`]*)`\s*$", re.MULTILINE)
@@ -446,26 +448,53 @@ class GhClient:
     def find_terminal_evidence(
         self, runner_repository: str, wake_title: str
     ) -> tuple[int, str] | None:
-        query = f'repo:{runner_repository} is:issue in:title "{wake_title}"'
+        identity = parse_execution_title(wake_title)
+        if identity is None:
+            return None
+        project, task_id, control_sha, source_sha = identity
+        query = f'repo:{runner_repository} is:issue in:title "{task_id}"'
         raw = self._run(
             ["api", "-X", "GET", "search/issues", "-f", f"q={query}", "-f", "per_page=100"],
             self.runner_token,
         )
         items = json.loads(raw).get("items", [])
-        exact = [item for item in items if item.get("title") == wake_title]
-        if len(exact) != 1:
+        candidates = []
+        for item in items:
+            registration = parse_registration_title(str(item.get("title") or ""))
+            if registration is None:
+                continue
+            if (
+                registration.project == project
+                and registration.task_id == task_id
+                and registration.control_sha == control_sha
+            ):
+                candidates.append(item)
+
+        exact_terminal: list[tuple[int, str]] = []
+        for item in candidates:
+            issue_number = int(item["number"])
+            comments_raw = self._run(
+                [
+                    "api",
+                    f"repos/{runner_repository}/issues/{issue_number}/comments?per_page=100",
+                ],
+                self.runner_token,
+            )
+            comments = json.loads(comments_raw)
+            for comment in reversed(comments):
+                body = str(comment.get("body") or "")
+                if "## Dispatcher v2 terminal evidence" not in body:
+                    continue
+                fields = parse_fields(body)
+                if (
+                    fields.get("project") == project
+                    and fields.get("task_id") == task_id
+                    and fields.get("control_sha") == control_sha
+                    and fields.get("source_sha") == source_sha
+                    and fields.get("result") in TERMINAL_RESULTS
+                ):
+                    exact_terminal.append((issue_number, body))
+                    break
+        if len(exact_terminal) != 1:
             return None
-        issue_number = int(exact[0]["number"])
-        comments_raw = self._run(
-            [
-                "api",
-                f"repos/{runner_repository}/issues/{issue_number}/comments?per_page=100",
-            ],
-            self.runner_token,
-        )
-        comments = json.loads(comments_raw)
-        for comment in reversed(comments):
-            body = str(comment.get("body") or "")
-            if "## Dispatcher v2 terminal evidence" in body:
-                return issue_number, body
-        return None
+        return exact_terminal[0]
