@@ -39,3 +39,22 @@ reason to upgrade or replace the result.
 new source mutation. If exact prior terminal evidence proves the open PR is stale,
 diagnose that residue explicitly but do not silently ignore or auto-close it from
 startup; terminalization/terminal-guard cleanup owns PR closure.
+
+21. Same-project sequential source work uses the GitHub-native persistent source queue.
+Owner-authored source registrations remain durable runner issues; the queue controller, not a
+ChatGPT foreground session, owns waiting and successor activation. Source product workflows
+must not start directly from an issue-open event.
+22. A queued successor may use only control schema v2
+`source_base.mode: predecessor_integrated_sha`, bound to the exact predecessor Task-ID,
+Control SHA, Attempt, and owner wake issue. The resolved source SHA must equal the exact
+predecessor COMPLETED `integrated_sha`; arbitrary current-HEAD resolution is prohibited.
+23. Queue advancement is event-driven from source `workflow_run.completed`. Poll-count,
+elapsed-time, or best-effort advancement is prohibited. Runner-local polling remains allowed
+inside an already running source task only for that task's bounded validation/readback.
+24. Before any queued source mutation, the product workflow must re-read the owner queue
+issue, exact private control record, predecessor terminal evidence when applicable, and exact
+resolved source SHA. The active project branch must still equal that exact source SHA.
+25. FAILED, MANUAL_REQUIRED, CANCELLED, timeout, cleanup residue, or any non-success source
+run never advances a queued successor. Terminal Product PR cleanup and startup concurrency
+remain fail-closed and use the same queue/source identity.
+
