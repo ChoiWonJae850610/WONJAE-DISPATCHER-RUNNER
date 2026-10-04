@@ -17,6 +17,7 @@ from wonjae_dispatcher_runner.source_queue import (
     completion_matches_source_run,
     completion_source_sha,
     latest_queue_evidence,
+    latest_queue_terminal_fields,
     parse_execution_title,
     parse_registration_title,
     project_registrations,
@@ -69,11 +70,7 @@ def issue_comments(issue: Mapping[str, Any]) -> list[str]:
     comments = issue.get("comments")
     if not isinstance(comments, list):
         return []
-    return [
-        str(comment.get("body") or "")
-        for comment in comments
-        if isinstance(comment, dict)
-    ]
+    return [str(comment.get("body") or "") for comment in comments if isinstance(comment, dict)]
 
 
 def list_issues(repository: str, state: str) -> list[dict[str, Any]]:
@@ -302,6 +299,17 @@ def resolve_predecessor_source(
     )
     if not source_sha:
         raise RuntimeError("predecessor COMPLETED evidence is not exact")
+    proof = latest_queue_terminal_fields(comments)
+    if (
+        proof.get("project") != registration.project
+        or proof.get("wake_issue") != str(authority.predecessor_issue)
+        or proof.get("active_writer") != "RELEASED_BY_MERGED_PR"
+        or not str(proof.get("exact_integrated_sha_validation_run", "")).isdigit()
+        or not str(proof.get("product_pr", "")).isdigit()
+        or not str(proof.get("source_run_id", "")).isdigit()
+    ):
+        raise RuntimeError("predecessor validation or writer cleanup proof is missing")
+    verify_source_run(repository, proof["source_run_id"], proof, owner)
     return source_sha, "COMPLETED"
 
 
@@ -316,8 +324,16 @@ def dispatch_issue(
 ) -> None:
     issue_number = int(issue["number"])
     comments = issue_comments(issue)
-    if queue_state(comments) == "DISPATCHED":
+    if queue_state(comments) == "DISPATCHED" or terminal_result(comments):
         return
+    for other in project_registrations(
+        list_issues(repository, "open"), owner=owner_login(issue), project=registration.project
+    ):
+        if int(other["number"]) == issue_number:
+            continue
+        active = issue_view(repository, int(other["number"]))
+        if queue_state(issue_comments(active)) == "DISPATCHED":
+            raise RuntimeError("another exact source writer claim is still active for this project")
 
     dispatched = queue_comment(
         registration,
@@ -326,8 +342,16 @@ def dispatch_issue(
         state="DISPATCHED",
         controller_run_id=controller_run_id,
         source_sha=source_sha,
-        note="runner-owned persistent queue dispatch",
+        note="runner-owned persistent queue dispatch; ambiguous responses retain this claim",
     )
+    if authority.predecessor_issue is not None:
+        predecessor = issue_view(repository, authority.predecessor_issue)
+        proof = latest_queue_terminal_fields(issue_comments(predecessor))
+        dispatched += (
+            f"\n- predecessor_source_run_id: `{proof['source_run_id']}`"
+            f"\n- predecessor_integrated_sha: `{source_sha}`"
+            f"\n- successor_queue_issue: `{issue_number}`"
+        )
     post_comment(repository, issue_number, dispatched)
     try:
         run(
@@ -349,15 +373,15 @@ def dispatch_issue(
             ]
         )
     except Exception:
-        released = queue_comment(
-            registration,
-            authority,
-            issue_number=issue_number,
-            state="QUEUED",
-            controller_run_id=controller_run_id,
-            note="workflow dispatch failed; dispatch claim released for retry",
+        # A network error can follow an accepted POST. Never reset the fence or
+        # submit a second action; inspect the exact existing claim/run instead.
+        post_comment(
+            repository,
+            issue_number,
+            "## Dispatcher v2 queue dispatch transport evidence\n\n"
+            "- dispatch_receipt: `UNCONFIRMED`\n"
+            "- note: persistent DISPATCHED claim retained; no automatic redispatch",
         )
-        post_comment(repository, issue_number, released)
         raise
 
 
@@ -420,9 +444,7 @@ def intake(args: argparse.Namespace) -> int:
             project=registration.project,
         )
         earlier = [
-            item
-            for item in open_registrations
-            if int(item["number"]) < int(issue["number"])
+            item for item in open_registrations if int(item["number"]) < int(issue["number"])
         ]
         if earlier:
             blocking_issue = int(earlier[-1]["number"])
@@ -582,6 +604,33 @@ def record_completed(args: argparse.Namespace) -> int:
     ):
         raise RuntimeError("completed source task has no exact live queue dispatch claim")
 
+    token = os.environ["PRODUCT_GH_TOKEN"]
+    product = os.environ["PRODUCT_REPOSITORY"]
+    pr = gh_json(["gh", "api", f"repos/{product}/pulls/{args.product_pr}"], token=token)
+    if (
+        pr.get("merged") is not True
+        or pr.get("state") != "closed"
+        or pr.get("merge_commit_sha") != args.integrated_sha
+        or pr.get("head", {}).get("sha") != args.head_sha
+        or pr.get("base", {}).get("repo", {}).get("full_name") != product
+    ):
+        raise RuntimeError("exact merged Product PR cleanup readback failed")
+    for run_id, head, event in (
+        (args.head_validation_run, args.head_sha, "pull_request"),
+        (args.validation_run, args.integrated_sha, "push"),
+    ):
+        validation = gh_json(["gh", "api", f"repos/{product}/actions/runs/{run_id}"], token=token)
+        if (
+            validation.get("status") != "completed"
+            or validation.get("conclusion") != "success"
+            or validation.get("head_sha") != head
+            or validation.get("event") != event
+            or str(validation.get("path", "")).split("@", 1)[0]
+            != f".github/workflows/{os.environ['VALIDATION_WORKFLOW_FILE']}"
+            or validation.get("repository", {}).get("full_name") != product
+        ):
+            raise RuntimeError("exact source validation readback failed")
+
     body = "\n".join(
         [
             QUEUE_TERMINAL_HEADING,
@@ -595,6 +644,8 @@ def record_completed(args: argparse.Namespace) -> int:
             "- result: `COMPLETED`",
             f"- source_run_id: `{args.source_run_id}`",
             f"- product_pr: `{args.product_pr}`",
+            f"- exact_pr_head_sha: `{args.head_sha}`",
+            f"- exact_pr_head_validation_run: `{args.head_validation_run}`",
             f"- integrated_sha: `{args.integrated_sha}`",
             f"- exact_integrated_sha_validation_run: `{args.validation_run}`",
             "- active_writer: `RELEASED_BY_MERGED_PR`",
@@ -680,6 +731,57 @@ def completed_issue_for_run(
     return completed
 
 
+def verify_source_run(repository, run_id, proof, owner):
+    """Accept the completed product job during its separate finalizer handoff.
+
+    The overall workflow can still be in_progress because the handoff job itself
+    is running. A failed/cancelled workflow never qualifies. No wait loop is used.
+    """
+    value = gh_json(["gh", "api", f"repos/{repository}/actions/runs/{run_id}"])
+    project = proof["project"]
+    registration = parse_registration_title(
+        f"[PRODUCT-WAKE][DISPATCHER-V2] {project} {proof['task_id']} "
+        f"{proof['control_sha']} {proof['source_sha']}"
+    )
+    if registration is None:
+        raise RuntimeError("invalid predecessor completion identity")
+    if (
+        str(value.get("id")) != str(run_id)
+        or value.get("repository", {}).get("full_name") != repository
+        or value.get("event") != "workflow_dispatch"
+        or value.get("head_branch") != "main"
+        or value.get("path") != f".github/workflows/{registration.workflow_file}"
+        or parse_execution_title(value.get("display_title", ""))
+        != (project, proof["task_id"], proof["control_sha"], proof["source_sha"])
+        or value.get("actor", {}).get("login") not in {owner, "github-actions[bot]"}
+        or (value.get("status") == "completed" and value.get("conclusion") != "success")
+        or value.get("status") not in {"completed", "in_progress"}
+    ):
+        raise RuntimeError("predecessor source run identity or conclusion mismatch")
+    jobs = gh_json(["gh", "api", f"repos/{repository}/actions/runs/{run_id}/jobs?per_page=100"])
+    product_jobs = [
+        job for job in jobs.get("jobs", []) if job.get("name") == f"{project.lower()}-product"
+    ]
+    if (
+        len(product_jobs) != 1
+        or product_jobs[0].get("status") != "completed"
+        or product_jobs[0].get("conclusion") != "success"
+    ):
+        raise RuntimeError("predecessor product writer job has not released successfully")
+
+
+def reconcile(args: argparse.Namespace) -> int:
+    if args.queue_issue_number:
+        args.issue_number = args.queue_issue_number
+        return intake(args)
+    value = gh_json(["gh", "api", f"repos/{args.repository}/actions/runs/{args.source_run_id}"])
+    args.wake_title = value.get("display_title", "")
+    # advance resolves private registration and exact closed terminal proof;
+    # verify_source_run independently checks the real product job and outcome.
+    args.conclusion = "success"
+    return advance(args)
+
+
 def advance(args: argparse.Namespace) -> int:
     if args.conclusion != "success":
         print(json.dumps({"action": "STOPPED_NON_SUCCESS", "conclusion": args.conclusion}))
@@ -723,7 +825,9 @@ def advance(args: argparse.Namespace) -> int:
         expected_project=project,
         require_open=True,
     )
-    if queue_state(issue_comments(candidate)) == "DISPATCHED":
+    if queue_state(issue_comments(candidate)) == "DISPATCHED" or terminal_result(
+        issue_comments(candidate)
+    ):
         print(json.dumps({"action": "NEXT_ALREADY_DISPATCHED", "issue": candidate["number"]}))
         return 0
 
@@ -800,6 +904,8 @@ def parser() -> argparse.ArgumentParser:
     completed_parser.add_argument("--product-pr", required=True)
     completed_parser.add_argument("--integrated-sha", required=True)
     completed_parser.add_argument("--validation-run", required=True)
+    completed_parser.add_argument("--head-sha", required=True)
+    completed_parser.add_argument("--head-validation-run", required=True)
     completed_parser.set_defaults(func=record_completed)
 
     locate_parser = sub.add_parser("locate")
@@ -819,6 +925,15 @@ def parser() -> argparse.ArgumentParser:
     advance_parser.add_argument("--conclusion", required=True)
     advance_parser.add_argument("--controller-run-id", required=True)
     advance_parser.set_defaults(func=advance)
+
+    reconcile_parser = sub.add_parser("reconcile")
+    reconcile_parser.add_argument("--repository", required=True)
+    reconcile_parser.add_argument("--owner", required=True)
+    target = reconcile_parser.add_mutually_exclusive_group(required=True)
+    target.add_argument("--source-run-id")
+    target.add_argument("--queue-issue-number", type=int)
+    reconcile_parser.add_argument("--controller-run-id", required=True)
+    reconcile_parser.set_defaults(func=reconcile)
 
     return root
 
