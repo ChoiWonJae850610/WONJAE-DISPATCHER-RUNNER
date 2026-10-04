@@ -147,13 +147,28 @@ jobs:
           comments = json.loads(Path(os.environ["COMMENTS_JSON"]).read_text(encoding="utf-8"))
           bodies = [item.get("body") or "" for item in comments if isinstance(item, dict)]
 
-          if any("## Dispatcher v2 completion evidence" in body for body in bodies):
+          def fields(body: str) -> dict[str, str]:
+              return dict(re.findall(r"^- ([A-Za-z0-9_]+): \`([^\`]*)\`$", body, re.MULTILINE))
+
+          exact_completed = False
+          for body in reversed(bodies):
+              if "## Dispatcher v2 queue terminal evidence" not in body:
+                  continue
+              values = fields(body)
+              if (
+                  values.get("task_id") == os.environ["TASK_ID"]
+                  and values.get("control_sha") == os.environ["CONTROL_SHA"]
+                  and values.get("source_sha") == os.environ["SOURCE_SHA"]
+                  and values.get("source_run_id") == os.environ["SOURCE_RUN_ID"]
+                  and values.get("result") == "COMPLETED"
+              ):
+                  exact_completed = True
+                  break
+
+          if exact_completed:
               with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as handle:
                   handle.write("GUARD_ACTION=SKIP_COMPLETED\n")
               raise SystemExit(0)
-
-          def fields(body: str) -> dict[str, str]:
-              return dict(re.findall(r"^- ([A-Za-z0-9_]+): \`([^\`]*)\`$", body, re.MULTILINE))
 
           exact_terminal = ""
           for body in reversed(bodies):
