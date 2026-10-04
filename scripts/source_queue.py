@@ -18,6 +18,7 @@ from wonjae_dispatcher_runner.source_queue import (
     completion_source_sha,
     execution_title,
     latest_queue_evidence,
+    parse_execution_title,
     parse_registration_title,
     project_registrations,
     queue_state,
@@ -683,19 +684,10 @@ def advance(args: argparse.Namespace) -> int:
     if args.conclusion != "success":
         print(json.dumps({"action": "STOPPED_NON_SUCCESS", "conclusion": args.conclusion}))
         return 0
-    identity = args.wake_title
-    parts = identity.split()
-    if len(parts) != 6:
+    identity = parse_execution_title(args.wake_title)
+    if identity is None:
         raise RuntimeError("source workflow display title is not exact")
-    prefix, project, task_id, control_sha, source_sha = (
-        " ".join(parts[:2]),
-        parts[2],
-        parts[3],
-        parts[4],
-        parts[5],
-    )
-    if prefix != "[PRODUCT-WAKE][DISPATCHER-V2]":
-        raise RuntimeError("source workflow display title prefix mismatch")
+    project, task_id, control_sha, source_sha = identity
 
     completed = completed_issue_for_run(
         repository=args.repository,
