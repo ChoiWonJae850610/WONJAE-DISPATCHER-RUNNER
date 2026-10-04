@@ -116,6 +116,28 @@ runs to execute independently. No product token is shared across workflows.
 A product is not considered migrated merely because its runner workflow exists;
 DEV-CONTROL routing changes only after that product's exact v2 E2E pilot passes.
 
+## Persistent sequential source queue
+
+Same-project source tasks can be registered as a durable linear queue without keeping a
+ChatGPT/Work session in a status loop. The shared
+`.github/workflows/source-queue-controller.yml` owns queue intake and successor wake-up.
+The controller reacts to owner issue creation and source `workflow_run.completed`; it does
+not sleep or poll for task completion.
+
+The first task keeps the existing schema-v1 exact `source_base_sha` authority. A successor
+that is registered before its predecessor finishes uses control schema v2 with
+`source_base.mode: predecessor_integrated_sha` and binds the exact predecessor Task-ID,
+Control SHA, Attempt, and wake issue. Only the predecessor's exact `COMPLETED` queue
+terminal evidence can resolve that successor source SHA. The product workflow re-verifies
+that authority before mutation and still requires the project branch to equal the resolved
+exact SHA.
+
+A successful source run records queue terminal evidence only after integration and exact
+integrated-SHA validation, closes its wake issue, and then lets the controller dispatch the
+one exact successor. FAILED, MANUAL_REQUIRED, CANCELLED, timeout, cleanup residue, and other
+non-success outcomes do not advance the queue. Product PR cleanup and one-writer concurrency
+remain fail-closed.
+
 ## Provider Action Dispatcher v2
 
 Provider actions are a separate no-source-diff execution class. The shared `.github/workflows/provider-action-core.yml` validates an exact private `tasks-v2/<PROJECT>/<TASK-ID>.json` record with `operation_type: provider_action`, requires the registered active branch to remain at the exact source SHA, rejects concurrent same-product `job/` PRs, and requires a successful exact-SHA product validation before an external provider action starts.

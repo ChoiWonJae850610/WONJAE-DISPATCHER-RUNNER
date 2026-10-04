@@ -1,9 +1,26 @@
 name: MUVEL Dispatcher v2
 
+run-name: ${{ format('[PRODUCT-WAKE][DISPATCHER-V2] MUVEL {0} {1} {2}', inputs.task_id, inputs.control_sha, inputs.source_sha) }}
+
 on:
-  issues:
-    types:
-      - opened
+  workflow_dispatch:
+    inputs:
+      wake_issue_number:
+        description: Exact owner source queue issue number
+        required: true
+        type: string
+      task_id:
+        description: Exact source Task-ID
+        required: true
+        type: string
+      control_sha:
+        description: Exact private control merge SHA
+        required: true
+        type: string
+      source_sha:
+        description: Exact resolved source base SHA
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -12,21 +29,65 @@ permissions:
 jobs:
   muvel-product:
     if: >-
-      github.actor == github.repository_owner &&
-      github.event.issue.user.login == github.repository_owner &&
-      startsWith(
-        github.event.issue.title,
-        '[PRODUCT-WAKE][DISPATCHER-V2] MUVEL '
-      )
+      startsWith(inputs.task_id, 'MUVEL-')
     runs-on: ubuntu-latest
     timeout-minutes: 60
     env:
       CONTROL_REPOSITORY: ${{ vars.CONTROL_REPOSITORY }}
-      WAKE_TITLE: ${{ github.event.issue.title }}
-      ISSUE_NUMBER: ${{ github.event.issue.number }}
+      WAKE_TITLE: ${{ format('[PRODUCT-WAKE][DISPATCHER-V2] MUVEL {0} {1} {2}', inputs.task_id, inputs.control_sha, inputs.source_sha) }}
+      ISSUE_NUMBER: ${{ inputs.wake_issue_number }}
+      TASK_ID: ${{ inputs.task_id }}
+      CONTROL_SHA: ${{ inputs.control_sha }}
+      SOURCE_SHA: ${{ inputs.source_sha }}
       PYTHONUNBUFFERED: "1"
 
     steps:
+      - name: "[00] WAKE · validate activation inputs"
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import os
+          import re
+
+          task_id = os.environ["TASK_ID"]
+          control_sha = os.environ["CONTROL_SHA"]
+          source_sha = os.environ["SOURCE_SHA"]
+          issue_number = os.environ["ISSUE_NUMBER"]
+          if re.fullmatch(r"(MUVEL-[A-Z0-9][A-Z0-9-]*-[0-9]{3})", task_id) is None:
+              raise SystemExit("invalid MUVEL Dispatcher v2 Task-ID")
+          for label, value in (("Control", control_sha), ("Source", source_sha)):
+              if re.fullmatch(r"[0-9a-f]{40}", value) is None:
+                  raise SystemExit(f"{label} SHA is invalid")
+          if re.fullmatch(r"[1-9][0-9]*", issue_number) is None:
+              raise SystemExit("wake issue number is invalid")
+          work_order_relative = f"tasks-v2/MUVEL/{task_id}.json"
+          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as handle:
+              handle.write(f"WORK_ORDER_RELATIVE={work_order_relative}\n")
+          PY
+
+      - name: "[00] QUEUE · verify persistent dispatch claim"
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EXPECTED_WORKFLOW_FILE: muvel-product-v2.yml
+        shell: bash
+        run: |
+          set -euo pipefail
+          issue_json="$(gh issue view "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --json state,author,comments)"
+          echo "$issue_json" | jq -e \
+            --arg owner "$GITHUB_REPOSITORY_OWNER" \
+            '.state == "OPEN" and .author.login == $owner' >/dev/null
+          latest_queue="$(echo "$issue_json" | jq -r \
+            '[.comments[].body | select(contains("## Dispatcher v2 source queue evidence"))] | last // ""')"
+          test -n "$latest_queue" || { echo "::error::Missing persistent queue claim."; exit 1; }
+          grep -F -- "- project: \`MUVEL\`" <<<"$latest_queue" >/dev/null
+          grep -F -- "- task_id: \`$TASK_ID\`" <<<"$latest_queue" >/dev/null
+          grep -F -- "- control_sha: \`$CONTROL_SHA\`" <<<"$latest_queue" >/dev/null
+          grep -F -- "- source_sha: \`$SOURCE_SHA\`" <<<"$latest_queue" >/dev/null
+          grep -F -- "- wake_issue: \`$ISSUE_NUMBER\`" <<<"$latest_queue" >/dev/null
+          grep -F -- '- queue_state: `DISPATCHED`' <<<"$latest_queue" >/dev/null
+          grep -F -- "- workflow_file: \`${EXPECTED_WORKFLOW_FILE}\`" <<<"$latest_queue" >/dev/null
+
       - name: "[00] Security · protected configuration"
         env:
           CODEX_AUTH_JSON: ${{ secrets.CODEX_AUTH_JSON }}
@@ -39,30 +100,6 @@ jobs:
           test -n "$CONTROL_READ_TOKEN" || { echo "::error::CONTROL_READ_TOKEN is missing."; exit 1; }
           test -n "$MUVEL_WRITE_TOKEN" || { echo "::error::MUVEL_WRITE_TOKEN is missing."; exit 1; }
           test -n "$SECRET_ROTATION_TOKEN" || { echo "::error::SECRET_ROTATION_TOKEN is missing."; exit 1; }
-
-      - name: "[01] WAKE · parse trusted identity"
-        run: |
-          python - <<'PY'
-          import os
-          import re
-
-          title = os.environ["WAKE_TITLE"]
-          match = re.fullmatch(
-              r"\[PRODUCT-WAKE\]\[DISPATCHER-V2\] MUVEL "
-              r"(MUVEL-[A-Z0-9][A-Z0-9-]*-[0-9]{3}) "
-              r"([0-9a-f]{40}) ([0-9a-f]{40})",
-              title,
-          )
-          if match is None:
-              raise SystemExit("invalid MUVEL Dispatcher v2 wake title")
-          task_id, control_sha, source_sha = match.groups()
-          work_order_relative = f"tasks-v2/MUVEL/{task_id}.json"
-          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as handle:
-              handle.write(f"TASK_ID={task_id}\n")
-              handle.write(f"CONTROL_SHA={control_sha}\n")
-              handle.write(f"SOURCE_SHA={source_sha}\n")
-              handle.write(f"WORK_ORDER_RELATIVE={work_order_relative}\n")
-          PY
 
       - name: "[01] Runner · trusted code"
         uses: actions/checkout@v6
@@ -78,7 +115,8 @@ jobs:
           echo "CODEX_HOME=$RUNNER_TEMP/codex-home" >> "$GITHUB_ENV"
           echo "CONTROL_CHECKOUT=$GITHUB_WORKSPACE/.pilot/control" >> "$GITHUB_ENV"
           echo "PRODUCT_CHECKOUT=$GITHUB_WORKSPACE/.pilot/product" >> "$GITHUB_ENV"
-          echo "WORK_ORDER_FILE=$GITHUB_WORKSPACE/.pilot/control/$WORK_ORDER_RELATIVE" >> "$GITHUB_ENV"
+          echo "WORK_ORDER_RAW_FILE=$GITHUB_WORKSPACE/.pilot/control/$WORK_ORDER_RELATIVE" >> "$GITHUB_ENV"
+          echo "WORK_ORDER_FILE=$RUNNER_TEMP/resolved-work-order.json" >> "$GITHUB_ENV"
 
       - name: "[02] CONTROL · checkout exact work order"
         uses: actions/checkout@v6
@@ -90,10 +128,22 @@ jobs:
           persist-credentials: false
 
       - name: "[02] CONTROL · validate private work order"
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           actual="$(git -C "$CONTROL_CHECKOUT" rev-parse HEAD)"
           test "$actual" = "$CONTROL_SHA" || { echo "::error::Control SHA mismatch."; exit 1; }
-          test -f "$WORK_ORDER_FILE" || { echo "::error::Private work order is missing."; exit 1; }
+          test -f "$WORK_ORDER_RAW_FILE" || { echo "::error::Private work order is missing."; exit 1; }
+          PYTHONPATH="$GITHUB_WORKSPACE/src" python scripts/source_queue.py resolve-control \
+            --repository "$GITHUB_REPOSITORY" \
+            --owner "$GITHUB_REPOSITORY_OWNER" \
+            --issue-number "$ISSUE_NUMBER" \
+            --project MUVEL \
+            --task-id "$TASK_ID" \
+            --control-sha "$CONTROL_SHA" \
+            --source-sha "$SOURCE_SHA" \
+            --work-order-file "$WORK_ORDER_RAW_FILE" \
+            --output "$WORK_ORDER_FILE"
           python - <<'PY'
           import json
           import os
@@ -435,7 +485,20 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh issue comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY"             --body "PASS: MUVEL Dispatcher v2 integrated with exact-head and exact-integrated-SHA validation."
+          set -euo pipefail
+          PYTHONPATH="$GITHUB_WORKSPACE/src" python scripts/source_queue.py record-completed \
+            --repository "$GITHUB_REPOSITORY" \
+            --owner "$GITHUB_REPOSITORY_OWNER" \
+            --issue-number "$ISSUE_NUMBER" \
+            --project MUVEL \
+            --task-id "$TASK_ID" \
+            --control-sha "$CONTROL_SHA" \
+            --source-sha "$SOURCE_SHA" \
+            --attempt "$ATTEMPT" \
+            --source-run-id "$GITHUB_RUN_ID" \
+            --product-pr "$PILOT_PR_NUMBER" \
+            --integrated-sha "$INTEGRATED_SHA" \
+            --validation-run "$INTEGRATED_RUN_ID"
           gh issue close "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --reason completed
 
       - name: "[10] RESULT · terminal failure evidence"
