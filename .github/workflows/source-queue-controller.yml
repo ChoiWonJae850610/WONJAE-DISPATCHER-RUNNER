@@ -1,0 +1,85 @@
+name: Source Dispatcher Queue Controller
+
+run-name: >-
+  ${{
+    github.event_name == 'issues' &&
+    format('Source queue intake #{0}', github.event.issue.number) ||
+    format('Source queue advance {0}', github.event.workflow_run.id)
+  }}
+
+on:
+  issues:
+    types:
+      - opened
+  workflow_run:
+    workflows:
+      - CLASSMO Dispatcher v2
+      - WAFL Dispatcher v2
+      - ESC Dispatcher v2
+      - MUVEL Dispatcher v2
+    types:
+      - completed
+
+permissions:
+  actions: write
+  contents: read
+  issues: write
+
+jobs:
+  intake:
+    if: >-
+      github.event_name == 'issues' &&
+      github.actor == github.repository_owner &&
+      github.event.issue.user.login == github.repository_owner &&
+      startsWith(github.event.issue.title, '[PRODUCT-WAKE][DISPATCHER-V2] ')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Runner · trusted queue code
+        uses: actions/checkout@v6
+        with:
+          ref: main
+          persist-credentials: false
+
+      - name: Queue · register or dispatch source wake
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          PYTHONPATH="$GITHUB_WORKSPACE/src" python scripts/source_queue.py intake \
+            --repository "$GITHUB_REPOSITORY" \
+            --owner "$GITHUB_REPOSITORY_OWNER" \
+            --issue-number "${{ github.event.issue.number }}" \
+            --controller-run-id "$GITHUB_RUN_ID"
+
+  advance:
+    if: >-
+      github.event_name == 'workflow_run' &&
+      github.event.workflow_run.conclusion == 'success' &&
+      startsWith(
+        github.event.workflow_run.display_title,
+        '[PRODUCT-WAKE][DISPATCHER-V2] '
+      )
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Runner · trusted queue code
+        uses: actions/checkout@v6
+        with:
+          ref: main
+          persist-credentials: false
+
+      - name: Queue · advance only from exact COMPLETED predecessor
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          PYTHONPATH="$GITHUB_WORKSPACE/src" python scripts/source_queue.py advance \
+            --repository "$GITHUB_REPOSITORY" \
+            --owner "$GITHUB_REPOSITORY_OWNER" \
+            --wake-title "${{ github.event.workflow_run.display_title }}" \
+            --source-run-id "${{ github.event.workflow_run.id }}" \
+            --conclusion "${{ github.event.workflow_run.conclusion }}" \
+            --controller-run-id "$GITHUB_RUN_ID"
