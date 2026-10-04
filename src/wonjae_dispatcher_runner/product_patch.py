@@ -109,17 +109,19 @@ def validate_branch_scope(
     repo_path: Path,
     work_order: ProductWorkOrder,
     extra_paths: tuple[str, ...] = (),
+    *,
+    require_required_paths: bool = True,
 ) -> tuple[str, ...]:
-    paths = tuple(
-        dict.fromkeys(
-            (*branch_diff_paths(repo_path, work_order.source_base_sha), *extra_paths)
-        )
-    )
+    # Include the actual worktree against the source base. A union of historical
+    # HEAD paths and repair paths incorrectly accepts a reverted required file.
+    output = _git(repo_path, "diff", "--name-only", work_order.source_base_sha)
+    untracked = _git(repo_path, "ls-files", "--others", "--exclude-standard")
+    paths = tuple(dict.fromkeys((*output.splitlines(), *untracked.splitlines())))
     allowed = set(work_order.allowed_paths)
-    if any(path not in allowed for path in paths):
+    if any(path not in allowed for path in (*paths, *extra_paths)):
         raise ProductPilotError("product branch contains a path outside the work order")
     missing = [path for path in work_order.required_changed_paths if path not in set(paths)]
-    if missing:
+    if require_required_paths and missing:
         raise ProductPilotError("product branch omitted required changed paths")
     return paths
 
@@ -595,6 +597,8 @@ def _repair_prompt(
             "",
             "Allowed changed paths:",
             *[f"- {item}" for item in work_order.allowed_paths],
+            "Required cumulative changed paths (restore any previously reverted path):",
+            *[f"- {item}" for item in work_order.required_changed_paths],
             "",
             "Return a structured edit plan only. Use operation=replace for a small "
             "existing-file change with an exact non-empty old_text snippet copied from "
@@ -625,7 +629,9 @@ def generate_and_apply_product_repair(
     current_head = git_head(repo_path)
     if changed_paths(repo_path):
         raise ProductPilotError("product checkout must be clean before repair")
-    validate_branch_scope(repo_path, work_order)
+    # A later bounded repair may restore a path reverted by an earlier repair.
+    # Required paths are checked on the final cumulative diff before integration.
+    validate_branch_scope(repo_path, work_order, require_required_paths=False)
 
     context = _repair_context(repo_path, work_order)
     config = CodexConfig(
@@ -701,7 +707,7 @@ def generate_and_apply_product_repair(
         work_order,
         require_required_paths=False,
     )
-    validate_branch_scope(repo_path, work_order, applied)
+    validate_branch_scope(repo_path, work_order, applied, require_required_paths=False)
     return work_order, applied
 
 

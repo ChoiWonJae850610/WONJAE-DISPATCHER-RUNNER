@@ -197,19 +197,15 @@ jobs:
           eas update:view "$EAS_UPDATE_GROUP_ID"             --json > "$RUNNER_TEMP/eas-update-view.json"
           python "$GITHUB_WORKSPACE/scripts/provider_action.py" parse-update-view             --input "$RUNNER_TEMP/eas-update-view.json"             --group-id "$EAS_UPDATE_GROUP_ID"             --message "$PROVIDER_MESSAGE"             --runtime-version "$PROVIDER_RUNTIME_VERSION"             --platform "$PROVIDER_PLATFORM"             --github-env "$GITHUB_ENV"
 
-      - name: GitHub provider · read workflow status
+      - name: GitHub provider · reconcile exact run or replay terminal mail cleanup
         if: env.PROVIDER_ACTION == 'github_workflow_dispatch'
         env:
           GH_TOKEN: ${{ secrets.github_provider_token }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          test -n "${GH_TOKEN:-}" || { echo "::error::Missing project-scoped provider GitHub token."; exit 1; }
-          json="$(gh run view "$PROVIDER_RUN_ID" --repo "$PRODUCT_REPOSITORY" --json status,conclusion,headSha)"
-          provider_status="$(echo "$json" | jq -r 'if .status != "completed" then (.status | ascii_upcase) elif .conclusion == "success" then "SUCCESS" elif .conclusion == "cancelled" then "CANCELED" else "FAILURE" end')"
-          provider_head="$(echo "$json" | jq -r .headSha)"
-          test "$provider_head" = "$SOURCE_SHA"
-          echo "PROVIDER_STATUS=$provider_status" >> "$GITHUB_ENV"
+          RUNNER_GH_TOKEN: ${{ github.token }}
+          GMAIL_ENABLED: ${{ inputs.gmail_enabled }}
+          GMAIL_USERNAME: ${{ secrets.gmail_username }}
+          GMAIL_APP_PASSWORD: ${{ secrets.gmail_app_password }}
+        run: python scripts/github_provider_terminal.py --wait-seconds 0
 
       - name: STATUS · record non-terminal state
         if: >-

@@ -23,6 +23,7 @@ on:
         type: string
 
 permissions:
+  actions: read
   contents: read
   issues: write
 
@@ -401,6 +402,9 @@ jobs:
             echo "::notice title=Dispatcher Recovery::repair $repair_attempt pushed at $repaired_head"
           done
 
+      - name: "[08] SCOPE · final cumulative required paths"
+        run: PYTHONPATH="$GITHUB_WORKSPACE/src" python scripts/validate_product_scope.py
+
       - name: "[08] INTEGRATE · merge to active development branch"
         env:
           GH_TOKEN: ${{ secrets.WAFL_WRITE_TOKEN }}
@@ -484,6 +488,7 @@ jobs:
       - name: "[10] RESULT · close wake issue"
         env:
           GH_TOKEN: ${{ github.token }}
+          PRODUCT_GH_TOKEN: ${{ secrets.WAFL_WRITE_TOKEN }}
         run: |
           set -euo pipefail
           PYTHONPATH="$GITHUB_WORKSPACE/src" python scripts/source_queue.py record-completed \
@@ -498,7 +503,9 @@ jobs:
             --source-run-id "$GITHUB_RUN_ID" \
             --product-pr "$PILOT_PR_NUMBER" \
             --integrated-sha "$INTEGRATED_SHA" \
-            --validation-run "$INTEGRATED_RUN_ID"
+            --validation-run "$INTEGRATED_RUN_ID" \
+            --head-sha "$PILOT_HEAD_SHA" \
+            --head-validation-run "$PR_HEAD_RUN_ID"
           gh issue close "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --reason completed
 
       - name: "[10] RESULT · terminal failure evidence"
@@ -611,3 +618,20 @@ jobs:
       - name: "[11] Cleanup · ephemeral credentials"
         if: ${{ always() }}
         run: rm -rf "$CODEX_HOME"
+
+  queue-handoff:
+    needs: wafl-product
+    if: ${{ needs.wafl-product.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    permissions:
+      actions: write
+      contents: read
+    steps:
+      - name: Queue · explicit exact predecessor handoff
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh workflow run source-queue-controller.yml --repo "$GITHUB_REPOSITORY" --ref main \
+            -f source_run_id="$GITHUB_RUN_ID"

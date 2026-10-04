@@ -50,7 +50,7 @@ permissions:
 jobs:
   provider:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
     concurrency:
       group: provider-v2-${{ inputs.project }}
       cancel-in-progress: false
@@ -200,6 +200,13 @@ jobs:
           else
             echo "PROVIDER_GATE=ready" >> "$GITHUB_ENV"
           fi
+
+      - name: GitHub provider · persistent no-redispatch gate
+        if: env.PROVIDER_GATE == 'ready' && env.PROVIDER_ACTION == 'github_workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ secrets.github_provider_token }}
+          RUNNER_GH_TOKEN: ${{ github.token }}
+        run: python scripts/github_provider_terminal.py --check-launch
 
       - name: STARTED · record provider execution
         if: env.PROVIDER_GATE == 'ready'
@@ -360,13 +367,20 @@ jobs:
           gh api --method POST             "repos/$PRODUCT_REPOSITORY/actions/workflows/$PROVIDER_WORKFLOW_FILE/dispatches"             --input "$RUNNER_TEMP/provider-dispatch.json"
           run_id=""
           for _ in $(seq 1 36); do
+            candidates=()
             while read -r candidate; do
               if [[ " $before " != *" $candidate "* ]]; then
-                run_id="$candidate"
-                break
+                candidates+=("$candidate")
               fi
             done < <(gh api               "repos/$PRODUCT_REPOSITORY/actions/workflows/$PROVIDER_WORKFLOW_FILE/runs?head_sha=$SOURCE_SHA&event=workflow_dispatch&per_page=20"               --jq '.workflow_runs | sort_by(.created_at) | reverse | .[].id')
-            [ -n "$run_id" ] && break
+            if [ "${#candidates[@]}" -gt 1 ]; then
+              echo 'Ambiguous provider run capture; no run adopted and no redispatch.' >&2
+              exit 1
+            fi
+            if [ "${#candidates[@]}" -eq 1 ]; then
+              run_id="${candidates[0]}"
+              break
+            fi
             sleep 10
           done
           test -n "$run_id" || { echo "::error::Provider workflow run not found."; exit 1; }
@@ -397,6 +411,17 @@ jobs:
             printf -- '- device/physical: `NOT_RUN`\n'
           } > "$RUNNER_TEMP/provider-queued.md"
           gh issue comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --body-file "$RUNNER_TEMP/provider-queued.md"
+
+      - name: GitHub provider · bounded exact-run terminal reconciliation
+        if: (env.PROVIDER_GATE == 'ready' || env.PROVIDER_GATE == 'reconcile') && env.PROVIDER_ACTION == 'github_workflow_dispatch'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.github_provider_token }}
+          RUNNER_GH_TOKEN: ${{ github.token }}
+          GMAIL_ENABLED: ${{ inputs.gmail_enabled }}
+          GMAIL_USERNAME: ${{ secrets.gmail_username }}
+          GMAIL_APP_PASSWORD: ${{ secrets.gmail_app_password }}
+        run: python scripts/github_provider_terminal.py --wait-seconds 600
 
       - name: RESULT · record provider PASS
         if: env.PROVIDER_GATE == 'ready' && env.PROVIDER_ACTION == 'eas_update'

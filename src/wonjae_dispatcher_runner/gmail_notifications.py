@@ -8,7 +8,9 @@ import ssl
 import time
 from contextlib import contextmanager
 from dataclasses import dataclass
+from email import policy
 from email.message import EmailMessage
+from email.parser import BytesParser
 from typing import Callable, Iterator
 
 HEADER_KEY = "X-WONJAE-Notification-Key"
@@ -163,7 +165,19 @@ class GmailClient:
         raw = payload[0] or b""
         if isinstance(raw, str):
             raw = raw.encode()
-        return tuple(part.decode("ascii") for part in raw.split() if part)
+        candidates = tuple(part.decode("ascii") for part in raw.split() if part)
+        exact = []
+        for uid in candidates:
+            status, entries = client.uid("FETCH", uid, f"(BODY.PEEK[HEADER.FIELDS ({HEADER_KEY})])")
+            if status != "OK":
+                raise GmailNotificationError("notification header readback failed")
+            headers = [entry[1] for entry in entries if isinstance(entry, tuple)]
+            if len(headers) != 1 or not isinstance(headers[0], bytes):
+                raise GmailNotificationError("notification header readback was ambiguous")
+            message = BytesParser(policy=policy.default).parsebytes(headers[0], headersonly=True)
+            if message.get_all(HEADER_KEY) == [key]:
+                exact.append(uid)
+        return tuple(exact)
 
     def _find_in(self, client: imaplib.IMAP4_SSL, mailbox: str, key: str) -> tuple[str, ...]:
         status, _ = client.select(_quote_mailbox(mailbox))
@@ -225,7 +239,8 @@ class GmailClient:
     def trash_notification(self, key: str) -> bool:
         with self._imap() as client:
             boxes = self._mailboxes(client)
-            if self._find_in(client, boxes["trash"], key):
+            if (self._find_in(client, boxes["trash"], key)
+                    and not self._find_in(client, boxes["inbox"], key)):
                 return True
 
             source = boxes["all"]
@@ -245,7 +260,9 @@ class GmailClient:
                     status, _ = client.uid("STORE", uid, "+FLAGS.SILENT", r"(\Deleted)")
                     if status != "OK":
                         raise GmailNotificationError(f"failed to remove source message for {key}")
-                    client.expunge()
+                    status, _ = client.uid("EXPUNGE", uid)
+                    if status != "OK":
+                        raise GmailNotificationError(f"failed to expunge exact message for {key}")
 
             trash_found = bool(self._find_in(client, boxes["trash"], key))
             inbox_found = bool(self._find_in(client, boxes["inbox"], key))

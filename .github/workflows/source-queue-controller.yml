@@ -4,10 +4,20 @@ run-name: >-
   ${{
     github.event_name == 'issues' &&
     format('Source queue intake #{0}', github.event.issue.number) ||
-    format('Source queue advance {0}', github.event.workflow_run.id)
+    format('Source queue advance {0}', inputs.source_run_id || inputs.queue_issue_number || github.event.workflow_run.id)
   }}
 
 on:
+  workflow_dispatch:
+    inputs:
+      source_run_id:
+        description: Exact completed source run to hand off or reconcile
+        required: false
+        type: string
+      queue_issue_number:
+        description: Existing PRODUCT-QUEUE issue to reconcile (mutually exclusive)
+        required: false
+        type: string
   issues:
     types:
       - opened
@@ -96,3 +106,41 @@ jobs:
             --source-run-id "${{ github.event.workflow_run.id }}" \
             --conclusion "${{ github.event.workflow_run.conclusion }}" \
             --controller-run-id "$GITHUB_RUN_ID"
+
+  explicit-advance:
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      github.ref == 'refs/heads/main' &&
+      (github.actor == github.repository_owner || github.actor == 'github-actions[bot]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      CONTROL_REPOSITORY: ${{ vars.CONTROL_REPOSITORY }}
+    steps:
+      - name: Runner · trusted queue code
+        uses: actions/checkout@v6
+        with:
+          ref: main
+          persist-credentials: false
+      - name: Queue · explicit handoff or missed-event reconciliation
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CONTROL_READ_TOKEN: ${{ secrets.CONTROL_READ_TOKEN }}
+          SOURCE_RUN_ID: ${{ inputs.source_run_id }}
+          QUEUE_ISSUE_NUMBER: ${{ inputs.queue_issue_number }}
+        run: |
+          set -euo pipefail
+          if [ -n "$SOURCE_RUN_ID" ] && [ -z "$QUEUE_ISSUE_NUMBER" ]; then
+            [[ "$SOURCE_RUN_ID" =~ ^[1-9][0-9]*$ ]]
+            target=(--source-run-id "$SOURCE_RUN_ID")
+          elif [ -n "$QUEUE_ISSUE_NUMBER" ] && [ -z "$SOURCE_RUN_ID" ]; then
+            [[ "$QUEUE_ISSUE_NUMBER" =~ ^[1-9][0-9]*$ ]]
+            target=(--queue-issue-number "$QUEUE_ISSUE_NUMBER")
+          else
+            echo 'Exactly one existing source run or queue issue is required.' >&2
+            exit 1
+          fi
+          PYTHONPATH="$GITHUB_WORKSPACE/src" python scripts/source_queue.py reconcile \
+            --repository "$GITHUB_REPOSITORY" \
+            --owner "$GITHUB_REPOSITORY_OWNER" \
+            --controller-run-id "$GITHUB_RUN_ID" "${target[@]}"

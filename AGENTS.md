@@ -48,9 +48,13 @@ must not start directly from an issue-open event.
 `source_base.mode: predecessor_integrated_sha`, bound to the exact predecessor Task-ID,
 Control SHA, Attempt, and owner wake issue. The resolved source SHA must equal the exact
 predecessor COMPLETED `integrated_sha`; arbitrary current-HEAD resolution is prohibited.
-23. Queue advancement is event-driven from source `workflow_run.completed`. Poll-count,
-elapsed-time, or best-effort advancement is prohibited. Runner-local polling remains allowed
-inside an already running source task only for that task's bounded validation/readback.
+23. Successful source product jobs explicitly dispatch the queue controller from a separate
+trusted finalizer job after exact COMPLETED, validation, closed merged-PR readback, and writer
+release. `workflow_run.completed` is a fallback. Controller workflow_dispatch reconciliation
+may re-evaluate an existing queue issue or exact source run without new source authority or a
+polling loop. All paths share the persistent DISPATCHED fence; an uncertain POST receipt must
+never release that fence or resubmit. Bind project, predecessor task/attempt/control/wake/run,
+integrated SHA, and successor issue. Runner-local bounded source validation remains allowed.
 24. Before any queued source mutation, the product workflow must re-read the owner queue
 issue, exact private control record, predecessor terminal evidence when applicable, and exact
 resolved source SHA. The active project branch must still equal that exact source SHA.
@@ -58,3 +62,15 @@ resolved source SHA. The active project branch must still equal that exact sourc
 run never advances a queued successor. Terminal Product PR cleanup and startup concurrency
 remain fail-closed and use the same queue/source identity.
 
+26. Only github_workflow_dispatch may wait up to 600 seconds inside the trusted launch
+runner for its captured exact run, checking at 15-second intervals. Every read must match
+repository, workflow, run ID, and source head SHA. Terminal success/failure/action-required
+is persisted once; pending timeout retains QUEUED and Owner status reconciliation. EAS
+workflow/build and other long external queues still hand off immediately without waiting.
+27. A persisted provider terminal is an idempotent status/mail retry checkpoint, never a new
+provider action. Exact Notification-Key readback precedes matching STARTED Trash cleanup;
+verify both Trash presence and Inbox absence. Terminal RESULT stays for Owner review.
+28. Bounded repairs must have real changes only in original allowed_paths. Required task
+paths apply to the final cumulative source-base diff, including worktree changes, rather
+than every repair commit. A later repair may restore an earlier revert. Before integration,
+require the final cumulative required paths even if Actions validation passed.

@@ -121,8 +121,8 @@ DEV-CONTROL routing changes only after that product's exact v2 E2E pilot passes.
 Same-project source tasks can be registered as a durable linear queue without keeping a
 ChatGPT/Work session in a status loop. The shared
 `.github/workflows/source-queue-controller.yml` owns queue intake and successor wake-up.
-The controller reacts to owner issue creation and source `workflow_run.completed`; it does
-not sleep or poll for task completion.
+The controller reacts to owner issue creation, explicit successful-job handoff, and source
+`workflow_run.completed` fallback; it does not sleep or poll for task completion.
 
 The first task keeps the existing schema-v1 exact `source_base_sha` authority. A successor
 that is registered before its predecessor finishes uses control schema v2 with
@@ -133,8 +133,8 @@ that authority before mutation and still requires the project branch to equal th
 exact SHA.
 
 A successful source run records queue terminal evidence only after integration and exact
-integrated-SHA validation, closes its wake issue, and then lets the controller dispatch the
-one exact successor. FAILED, MANUAL_REQUIRED, CANCELLED, timeout, cleanup residue, and other
+integrated-SHA validation, closes its wake issue, and explicitly dispatches the controller from a separate successful-job finalizer.
+The controller dispatches the one exact successor; workflow_run is a fallback. FAILED, MANUAL_REQUIRED, CANCELLED, timeout, cleanup residue, and other
 non-success outcomes do not advance the queue. Product PR cleanup and one-writer concurrency
 remain fail-closed.
 
@@ -163,10 +163,15 @@ app directory's `eas.json`.
 
 ### External provider queues
 
-Long external queues are never held open by the launch runner. EAS Workflow and
-repository-owned GitHub workflow actions capture the provider run ID and write
-`## Dispatcher v2 provider QUEUED evidence` to the exact wake issue, then the
-launch job exits without claiming terminal success.
+EAS Workflow and EAS build queues capture the exact provider run ID, write
+`## Dispatcher v2 provider QUEUED evidence`, and immediately release the launch runner.
+Only `github_workflow_dispatch` additionally checks that captured run every 15 seconds,
+for at most 600 seconds. Repository, workflow ID/path, run ID, and head SHA are checked on
+every read. SUCCESS automatically records PASS/COMPLETED, failure or cancellation records
+FAILED, and action-required/unknown non-success conclusions record MANUAL_REQUIRED. A
+pending timeout keeps QUEUED. Provider reads and runner issue writes use separate credentials;
+no new credential or service is required. The launch job's 25-minute outer timeout includes
+run-ID capture and notification time; it does not make EAS wait.
 
 A later Owner-authored issue comment exactly equal to `[PROVIDER-STATUS]`
 triggers the product's provider-status adapter. It re-reads the historical
@@ -197,3 +202,50 @@ cancelled RESULT only after a higher Attempt STARTED notification is readable.
 Until the two secrets are configured and the feature variable is explicitly enabled,
 existing lifecycle notification observers remain authoritative and product execution is
 unchanged.
+
+## Terminal handoff and recovery
+
+The source controller has three entry points: issue intake, explicit workflow_dispatch, and
+workflow_run fallback. A successful product job re-reads its closed merged Product PR and
+exact head/integrated validation before writing queue COMPLETED. Its separate queue-handoff
+job sends the existing source run ID to the controller using repository GITHUB_TOKEN with
+Actions write permission. The controller checks the actual completed product job, exact
+private predecessor binding, validation proof, writer release, and integrated SHA. An
+already-completed predecessor resolves at successor intake without waiting for an event.
+
+For a missed event, the repository Owner may run Source Dispatcher Queue Controller on main
+with exactly one of `source_run_id` or `queue_issue_number`. This reuses existing authority.
+It does not revive cancelled issues or release an already DISPATCHED claim. Explicit handoff,
+workflow_run, and reconciliation are serialized by the same controller concurrency group.
+The persistent successor claim includes the full predecessor identity and is written before
+POST. An ambiguous dispatch response leaves the fence in place for exact inspection instead
+of retrying a possibly accepted action. This is fail-closed at-most-once submission.
+
+The provider-status fallback reuses the shared exact GitHub terminal reconciler. A terminal
+checkpoint avoids duplicate issue evidence and close, while Notification-Key readback makes
+mail retries idempotent and retries STARTED cleanup without moving the RESULT. Gmail header
+search candidates are verified by exact header value; cleanup checks Trash and Inbox even
+when a copy already existed in Trash. UID-only expunge cannot delete other marked messages.
+
+Bounded source repair uses cumulative base-to-worktree scope, permits a later repair to
+restore a required file reverted by an earlier repair, and gates integration on the final
+required paths. No product authority, production workflow allowlist, credential mutation,
+device action, or KDN scope is added by these infrastructure changes.
+
+Synthetic E2E regressions in `test_source_queue_controller_regression.py` exercise A -> B
+explicit handoff, overlapping fallback, immediate intake, missed-event reconciliation,
+non-success/cleanup/mismatched identity rejection, and ambiguous POST fencing without a
+real product dispatch. `test_github_provider_terminal.py` covers fast terminal outcomes,
+identity mismatch, timeout/status fallback, launch deduplication, and exact Gmail lifecycle.
+`test_repair_two_attempts.py` executes initial FAIL -> repair 1 FAIL -> repair 2 PASS in real
+local Git repositories, including recovery from a required-file revert. These tests prove
+controller logic; they do not claim a new production deployment or live Gmail delivery.
+
+GitHub event semantics: workflow_dispatch/repository_dispatch explicitly triggered with
+GITHUB_TOKEN can create runs; workflow_run additionally depends on default-branch workflow
+registration and has chain-depth limits. The incident's missing workflow_run controller run
+was observed in Actions history; GitHub's internal delivery decision is not exposed by the
+repository API. The old code had no independent success handoff. The new route removes that
+single dependency instead of assuming a particular undocumented suppression cause.
+See GitHub's [triggering documentation](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/trigger-a-workflow)
+and [workflow_run reference](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#workflow_run).
