@@ -62,19 +62,49 @@ def write_env(path: str | Path, values: dict[str, str]) -> None:
             handle.write(f"{key}={value}\n")
 
 
-def validate_authority(record: dict[str, Any], project: str, action: str) -> None:
+def validate_authority(
+    record: dict[str, Any],
+    project: str,
+    action: str,
+    production_workflow_file: str,
+) -> None:
     authority = record.get("provider_authority")
     if not isinstance(authority, dict):
         fail("provider_authority must be an object")
-    for key in ("production", "credential_mutation", "device_mutation", "destructive"):
+
+    for key in ("credential_mutation", "device_mutation", "destructive"):
         if authority.get(key) is not False:
             fail(f"provider_authority.{key} must be false for provider v2")
+
+    production = authority.get("production")
+    if not isinstance(production, bool):
+        fail("provider_authority.production must be boolean")
+
     expected_new_build = project == "CLASSMO" and action == "eas_build"
     if authority.get("new_build") is not expected_new_build:
         fail(
             "provider_authority.new_build must be true only for the registered "
             "CLASSMO eas_build action"
         )
+
+    if not production:
+        return
+
+    if action != "github_workflow_dispatch":
+        fail("production provider authority is allowed only for GitHub workflow dispatch")
+    if not production_workflow_file:
+        fail("production provider workflow is not registered for this product")
+
+    provider_action = record.get("provider_action")
+    if not isinstance(provider_action, dict):
+        fail("provider_action must be an object")
+    workflow_file = safe_rel(
+        require_string(provider_action, "workflow_file"),
+        "workflow_file",
+    )
+    registered = safe_rel(production_workflow_file, "production_workflow_file")
+    if workflow_file != registered:
+        fail("production provider workflow does not match the registered allowlist")
 
 
 def prepare(args: argparse.Namespace) -> None:
@@ -119,7 +149,7 @@ def prepare(args: argparse.Namespace) -> None:
     kind = require_string(action, "action")
     if kind not in ALLOWED_ACTIONS:
         fail("unsupported provider action")
-    validate_authority(record, args.project, kind)
+    validate_authority(record, args.project, kind, args.production_workflow_file)
 
     validation_path = require_string(record, "validation_workflow_path")
     if not validation_path.startswith(".github/workflows/"):
@@ -492,6 +522,7 @@ def main() -> None:
     p.add_argument("--control-sha", required=True)
     p.add_argument("--source-sha", required=True)
     p.add_argument("--github-env", required=True)
+    p.add_argument("--production-workflow-file", default="")
     p.set_defaults(func=prepare)
 
     p = sub.add_parser("check-ota")
