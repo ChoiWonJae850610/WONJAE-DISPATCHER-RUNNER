@@ -25,15 +25,24 @@ permissions:
   contents: read
   issues: write
 
+concurrency:
+  group: source-dispatcher-queue-controller
+  cancel-in-progress: false
+
 jobs:
   intake:
     if: >-
       github.event_name == 'issues' &&
       github.actor == github.repository_owner &&
       github.event.issue.user.login == github.repository_owner &&
-      startsWith(github.event.issue.title, '[PRODUCT-WAKE][DISPATCHER-V2] ')
+      (
+        startsWith(github.event.issue.title, '[PRODUCT-WAKE][DISPATCHER-V2] ') ||
+        startsWith(github.event.issue.title, '[PRODUCT-QUEUE][DISPATCHER-V2] ')
+      )
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    env:
+      CONTROL_REPOSITORY: ${{ vars.CONTROL_REPOSITORY }}
 
     steps:
       - name: Runner · trusted queue code
@@ -45,6 +54,7 @@ jobs:
       - name: Queue · register or dispatch source wake
         env:
           GH_TOKEN: ${{ github.token }}
+          CONTROL_READ_TOKEN: ${{ secrets.CONTROL_READ_TOKEN }}
         run: |
           set -euo pipefail
           PYTHONPATH="$GITHUB_WORKSPACE/src" python scripts/source_queue.py intake \
@@ -63,6 +73,8 @@ jobs:
       )
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    env:
+      CONTROL_REPOSITORY: ${{ vars.CONTROL_REPOSITORY }}
 
     steps:
       - name: Runner · trusted queue code
@@ -74,6 +86,7 @@ jobs:
       - name: Queue · advance only from exact COMPLETED predecessor
         env:
           GH_TOKEN: ${{ github.token }}
+          CONTROL_READ_TOKEN: ${{ secrets.CONTROL_READ_TOKEN }}
         run: |
           set -euo pipefail
           PYTHONPATH="$GITHUB_WORKSPACE/src" python scripts/source_queue.py advance \
