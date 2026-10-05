@@ -141,6 +141,14 @@ def select() -> int:
         if index == 6:
             raise SourceTerminalError("exact source run is not terminal; no mutation authorized")
         time.sleep(5)  # Only the trusted handoff finalizer, bounded to 30 seconds.
+    if name == "workflow_run" and (
+        run.get("event") != "workflow_dispatch" or run.get("conclusion") == "skipped"
+    ):
+        # Historical issue-triggered/skipped adapters did not establish a source
+        # writer. Ignore this event with no writes; explicit reconciliation still
+        # has to pass every existing authority check.
+        print("SOURCE_FINALIZER_NOT_APPLICABLE=non_source_or_skipped_run")
+        return 0
     parsed = parse_execution_title(str(run.get("display_title") or ""))
     if parsed is None:
         raise SourceTerminalError("source run has no exact execution title")

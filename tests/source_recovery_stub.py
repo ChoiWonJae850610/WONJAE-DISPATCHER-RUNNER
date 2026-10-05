@@ -107,6 +107,36 @@ def python(args):
         cp.time.sleep = lambda seconds: clock.__setitem__(0, clock[0] + seconds)
         cli.checkpoint("--prepare-repair" in args)
         return
+    if name == "source_validation.py":
+        from wonjae_dispatcher_runner import source_validation as validation
+
+        spec = importlib.util.spec_from_file_location("synthetic_validation", args[0])
+        cli = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(cli)
+        clock = [0]
+        validation.time.monotonic = lambda: clock[0]
+        validation.time.sleep = lambda seconds: clock.__setitem__(0, clock[0] + seconds)
+
+        def read(number, **kwargs):
+            state = load()
+            item = state["runs"][str(number)]
+            states = state.get("validation_states", [])
+            status = states.pop(0) if states else "completed"
+            state["validation_reads"] = state.get("validation_reads", 0) + 1
+            save(state)
+            return {
+                "id": number,
+                "repository": {"full_name": os.environ["PRODUCT_REPOSITORY"]},
+                "head_repository": {"full_name": os.environ["PRODUCT_REPOSITORY"]},
+                "path": ".github/workflows/" + os.environ["VALIDATION_WORKFLOW_FILE"],
+                "head_sha": "f" * 40 if state.get("wrong_validation_head") else item["head"],
+                "event": "push" if "integrated" in state else "pull_request",
+                "status": status,
+                "conclusion": item["conclusion"] if status == "completed" else None,
+            }
+
+        cli.read_run = read
+        raise SystemExit(cli.main(args[1:]))
     if name == "validate_product_scope.py":
         from wonjae_dispatcher_runner.product_patch import load_work_order, validate_branch_scope
 

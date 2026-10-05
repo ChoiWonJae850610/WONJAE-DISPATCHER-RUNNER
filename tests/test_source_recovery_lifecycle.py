@@ -64,6 +64,12 @@ def test_actual_validation_failure_never_fabricates_completion(tmp_path, gate):
     )
 
 
+@pytest.mark.parametrize("workflow", WORKFLOWS)
+@pytest.mark.parametrize("gate", ["pending_then_pass", "cancelled", "wrong_validation_head"])
+def test_observation_is_not_a_source_failure_and_consumes_no_repair(tmp_path, workflow, gate):
+    run_lifecycle(tmp_path, workflow, ["cancelled"] if gate == "cancelled" else ["success"], gate)
+
+
 def run_lifecycle(tmp_path, workflow, conclusions, gate=""):
     product, remote, binary = (tmp_path / name for name in ("product", "remote.git", "bin"))
     product.mkdir()
@@ -125,7 +131,11 @@ def run_lifecycle(tmp_path, workflow, conclusions, gate=""):
                 "runs": {},
                 "validation_heads": [],
                 "conclusions": conclusions,
-                "integrated_conclusion": "failure" if gate else "success",
+                "integrated_conclusion": "failure" if gate == "integrated_failure" else "success",
+                "validation_states": (
+                    ["queued", "in_progress"] if gate == "pending_then_pass" else []
+                ),
+                "wrong_validation_head": gate == "wrong_validation_head",
             }
         )
     )
@@ -188,6 +198,16 @@ def run_lifecycle(tmp_path, workflow, conclusions, gate=""):
             capture_output=True,
             timeout=90,
         )
+        if gate in {"cancelled", "wrong_validation_head"} and phase == phases[0]:
+            assert result.returncode != 0
+            final = json.loads(state.read_text())
+            assert final["repairs"] == 0 and "merged_head" not in final
+            evidence = env_file.read_text()
+            if gate == "cancelled":
+                assert "SOURCE_TERMINAL_RESULT=CANCELLED" in evidence
+            else:
+                assert "SOURCE_VALIDATION_IDENTITY_MISMATCH" in evidence
+            return
         if gate == "repairs_exhausted" and phase == phases[0]:
             assert result.returncode != 0
             final = json.loads(state.read_text())
@@ -200,6 +220,8 @@ def run_lifecycle(tmp_path, workflow, conclusions, gate=""):
         env.update(dict(line.split("=", 1) for line in env_file.read_text().splitlines()))
     final = json.loads(state.read_text())
     assert final["repairs"] == len(conclusions) - 1
+    if gate == "pending_then_pass":
+        assert final["validation_reads"] == 4  # Three PR reads plus integrated PASS.
     assert len(set(final["validation_heads"])) == len(conclusions)
     assert final["validation_heads"][-1] == final["merged_head"] == env["PILOT_HEAD_SHA"]
     comments = [c for c in final["issue"]["comments"] if CHECKPOINT_HEADING in c["body"]]

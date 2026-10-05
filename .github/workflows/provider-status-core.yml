@@ -287,6 +287,11 @@ jobs:
             echo '## Dispatcher v2 provider completion evidence'
             echo
             printf -- '- task_id: `%s`\n' "$TASK_ID"
+            printf -- '- attempt: `%s`\n' "$ATTEMPT"
+            printf -- '- revision: `%s`\n' "$REVISION"
+            printf -- '- control_sha: `%s`\n' "$CONTROL_SHA"
+            printf -- '- source_sha: `%s`\n' "$SOURCE_SHA"
+            printf -- '- action: `%s`\n' "$PROVIDER_ACTION"
             printf -- '- provider_run_id: `%s`\n' "$PROVIDER_RUN_ID"
             printf -- '- provider_status: `%s`\n' "$PROVIDER_STATUS"
             printf -- '- result: `FAILED`\n'
@@ -325,6 +330,11 @@ jobs:
             echo '## Dispatcher v2 provider completion evidence'
             echo
             printf -- '- task_id: `%s`\n' "$TASK_ID"
+            printf -- '- attempt: `%s`\n' "$ATTEMPT"
+            printf -- '- revision: `%s`\n' "$REVISION"
+            printf -- '- control_sha: `%s`\n' "$CONTROL_SHA"
+            printf -- '- source_sha: `%s`\n' "$SOURCE_SHA"
+            printf -- '- action: `%s`\n' "$PROVIDER_ACTION"
             printf -- '- provider_run_id: `%s`\n' "$PROVIDER_RUN_ID"
             printf -- '- provider_status: `ACTION_REQUIRED`\n'
             printf -- '- result: `MANUAL_REQUIRED`\n'

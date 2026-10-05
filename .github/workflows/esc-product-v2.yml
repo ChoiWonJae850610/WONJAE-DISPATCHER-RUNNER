@@ -360,8 +360,8 @@ jobs:
               sleep 10
             done
             test -n "$VALIDATION_RUN_ID" || { echo "::error::Exact PR-head validation run not found."; return 1; }
-            gh run watch "$VALIDATION_RUN_ID" --repo "$PRODUCT_REPOSITORY" || true
-            VALIDATION_CONCLUSION="$(gh run view "$VALIDATION_RUN_ID" --repo "$PRODUCT_REPOSITORY" --json conclusion,headSha --jq '.conclusion + " " + .headSha')"
+            VALIDATION_CONCLUSION="$(python "$GITHUB_WORKSPACE/scripts/source_validation.py" \
+              --run-id "$VALIDATION_RUN_ID" --head-sha "$head" --event pull_request)"
           }
 
           while true; do
@@ -443,8 +443,8 @@ jobs:
           done
           test -n "$run_id" || { echo "::error::Integrated-SHA validation run not found."; exit 1; }
           echo "INTEGRATED_RUN_ID=$run_id" >> "$GITHUB_ENV"
-          gh run watch "$run_id" --repo "$PRODUCT_REPOSITORY" --exit-status
-          conclusion="$(gh run view "$run_id" --repo "$PRODUCT_REPOSITORY" --json conclusion,headSha --jq '.conclusion + " " + .headSha')"
+          conclusion="$(python "$GITHUB_WORKSPACE/scripts/source_validation.py" \
+            --run-id "$run_id" --head-sha "$INTEGRATED_SHA" --event push)"
           test "$conclusion" = "success $INTEGRATED_SHA" || {
             echo "::error::Exact integrated-SHA validation did not succeed."
             exit 1
@@ -552,6 +552,9 @@ jobs:
             printf -- '- recovery_state: `FINAL`\n'
             if [ -n "${SOURCE_CHECKPOINT_EVIDENCE:-}" ]; then
               printf -- '- repair_checkpoint_evidence: `%s`\n' "$SOURCE_CHECKPOINT_EVIDENCE"
+            fi
+            if [ -n "${SOURCE_VALIDATION_EVIDENCE:-}" ]; then
+              printf -- '- source_validation_evidence: `%s`\n' "$SOURCE_VALIDATION_EVIDENCE"
             fi
             printf -- '- runtime/device/physical: `NOT_INFERRED`\n'
           } > "$terminal_file"
