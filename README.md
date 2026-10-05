@@ -357,3 +357,23 @@ Regression coverage: test_readonly_plan_recovery.py, test_source_validation.py,
 test_source_recovery_lifecycle.py, test_source_terminal_cli.py, test_provider_guard.py
 and test_product_path_boundaries.py. Tests use synthetic Git/SDK/Actions/provider
 transport and actual workflow shell snippets; they do not run product tasks.
+
+
+## Direct Worker transition
+
+The repository also contains a smaller Direct Worker route for registered products that
+have migrated away from Dispatcher v2 source intake. It is intentionally independent of
+tasks-v2 control records, wake issues, persistent source queues and Gmail lifecycle mail.
+
+`.github/workflows/direct-worker.yml` currently exposes CLASSMO, ESC and MUVEL. Each
+project keeps a dedicated write credential and the reusable core receives only the selected
+project's token. The workflow reads the current DEV-CONTROL registry, checks out the selected
+product, runs Codex in a network-disabled workspace-write sandbox with a scrubbed environment,
+then lets trusted workflow code publish the branch/PR. A successful exact PR-head validation
+is merged to the registered active development branch and followed by exact integrated-SHA
+validation. A failed validation leaves the PR open for the `retry` command.
+
+Direct Worker remains source-only. Provider/Production/deployment/payment/credential/signing/
+device/physical/destructive actions remain separate gates. WAFL is deliberately not exposed
+while its pre-existing Dispatcher v2 task is still active. Historical Dispatcher workflows
+and evidence are retained during migration.

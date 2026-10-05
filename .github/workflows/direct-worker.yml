@@ -1,0 +1,64 @@
+name: Direct Worker
+
+run-name: Direct Worker ${{ inputs.project }} ${{ inputs.command }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      project:
+        description: Registered project
+        required: true
+        type: choice
+        options:
+          - CLASSMO
+          - ESC
+          - MUVEL
+      command:
+        description: Direct Worker action
+        required: true
+        default: next
+        type: choice
+        options:
+          - next
+          - retry
+          - resume
+
+permissions:
+  contents: read
+
+jobs:
+  classmo:
+    if: ${{ inputs.project == 'CLASSMO' }}
+    uses: ./.github/workflows/direct-worker-core.yml
+    with:
+      project: CLASSMO
+      command: ${{ inputs.command }}
+    secrets:
+      product_write_token: ${{ secrets.CLASSMO_WRITE_TOKEN }}
+      control_read_token: ${{ secrets.CONTROL_READ_TOKEN }}
+      codex_auth_json: ${{ secrets.CODEX_AUTH_JSON }}
+      secret_rotation_token: ${{ secrets.SECRET_ROTATION_TOKEN }}
+
+  esc:
+    if: ${{ inputs.project == 'ESC' }}
+    uses: ./.github/workflows/direct-worker-core.yml
+    with:
+      project: ESC
+      command: ${{ inputs.command }}
+    secrets:
+      product_write_token: ${{ secrets.ESC_WRITE_TOKEN }}
+      control_read_token: ${{ secrets.CONTROL_READ_TOKEN }}
+      codex_auth_json: ${{ secrets.CODEX_AUTH_JSON }}
+      secret_rotation_token: ${{ secrets.SECRET_ROTATION_TOKEN }}
+
+  muvel:
+    if: ${{ inputs.project == 'MUVEL' }}
+    uses: ./.github/workflows/direct-worker-core.yml
+    with:
+      project: MUVEL
+      command: ${{ inputs.command }}
+    secrets:
+      product_write_token: ${{ secrets.MUVEL_WRITE_TOKEN }}
+      control_read_token: ${{ secrets.CONTROL_READ_TOKEN }}
+      codex_auth_json: ${{ secrets.CODEX_AUTH_JSON }}
+      secret_rotation_token: ${{ secrets.SECRET_ROTATION_TOKEN }}
