@@ -133,5 +133,7 @@ def test_non_success_handoff_and_checkpoint_are_common_and_budget_unchanged() ->
         assert "max_repairs=2" in text
         assert "timeout-minutes: 60" in text
     guard = Path(".github/workflows/product-terminal-guard.yml").read_text(encoding="utf-8")
-    assert "group: source-terminal-finalizer" in guard
-    assert "cancel-in-progress: false" in guard
+    assert "concurrency:" not in guard
+    core = Path(".github/workflows/source-terminal-core.yml").read_text(encoding="utf-8")
+    assert "group: source-terminal-${{ inputs.project }}-${{ inputs.source_run_id }}" in core
+    assert "cancel-in-progress: false" in core

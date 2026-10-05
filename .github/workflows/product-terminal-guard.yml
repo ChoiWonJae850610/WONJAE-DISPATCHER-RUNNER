@@ -28,10 +28,6 @@ permissions:
   contents: read
   issues: write
 
-concurrency:
-  group: source-terminal-finalizer
-  cancel-in-progress: false
-
 jobs:
   context:
     if: >-
