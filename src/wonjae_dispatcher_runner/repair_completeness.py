@@ -33,6 +33,7 @@ class RepairCompletenessError(RuntimeError):
 class RepairEvidence:
     missing_paths: tuple[str, ...]
     checksum_manifests: tuple[str, ...]
+    unscoped_missing_paths: bool = False
 
 
 def _safe_path(path: str) -> bool:
@@ -66,6 +67,7 @@ def collect_repair_evidence(failure: str, allowed_paths: tuple[str, ...]) -> Rep
     allowed = set(allowed_paths)
     missing: set[str] = set()
     manifests: set[str] = set()
+    unscoped_missing_paths = False
     in_missing_list = False
     for raw in failure[-MAX_FAILURE_CHARS:].splitlines():
         line = _TIMESTAMP.sub("", _ANSI.sub("", raw)).strip()
@@ -85,6 +87,8 @@ def collect_repair_evidence(failure: str, allowed_paths: tuple[str, ...]) -> Rep
                 ):
                     raise RepairCompletenessError("invalid structured repair evidence paths")
                 destination.update(value for value in values if value in allowed)
+                if any(value not in allowed for value in values):
+                    unscoped_missing_paths = True
             in_missing_list = False
             continue
         header = _MISSING_HEADER.match(line)
@@ -96,6 +100,12 @@ def collect_repair_evidence(failure: str, allowed_paths: tuple[str, ...]) -> Rep
                 value.strip(" `'") for value in remainder.split(",")
                 if value.strip(" `'") in allowed
             )
+            if any(
+                _safe_path(value.strip(" `'")) and re.fullmatch(r"[\w./-]+", value.strip(" `'"))
+                and value.strip(" `'") not in allowed
+                for value in remainder.split(",") if value.strip()
+            ):
+                unscoped_missing_paths = True
             in_missing_list = bool(header)
         elif in_missing_list:
             value = line.removeprefix("- ").strip(" `'")
@@ -103,6 +113,8 @@ def collect_repair_evidence(failure: str, allowed_paths: tuple[str, ...]) -> Rep
                 missing.add(value)
             elif not _safe_path(value) or not re.fullmatch(r"[\w./-]+", value):
                 in_missing_list = False
+            else:
+                unscoped_missing_paths = True
         if (
             "Migration checksum manifest must contain exactly the canonical migration set." in line
             or line.startswith((
@@ -113,7 +125,7 @@ def collect_repair_evidence(failure: str, allowed_paths: tuple[str, ...]) -> Rep
             )
         ):
             manifests.update(path for path in allowed if Path(path).name == "SHA256SUMS")
-    return RepairEvidence(tuple(sorted(missing)), tuple(sorted(manifests)))
+    return RepairEvidence(tuple(sorted(missing)), tuple(sorted(manifests)), unscoped_missing_paths)
 
 
 def _checksum_errors(repo: Path, manifest: str, proposed: dict[str, str | None]) -> list[str]:
@@ -195,7 +207,8 @@ def check_repair_completeness(
         baseline_missing = any(not _read(repo, path, {}) for path in evidence.missing_paths)
         baseline_checksum = any(_checksum_errors(repo, path, {})
                                 for path in evidence.checksum_manifests)
-        if not has_source_evidence or baseline_missing or baseline_checksum:
+        if (not has_source_evidence or baseline_missing or baseline_checksum
+                or evidence.unscoped_missing_paths):
             raise RepairCompletenessError(
                 "Validator edit lacks repository-verifiable defect evidence. Fix source/test/doc/"
                 "manifest obligations; changing validator diagnostics is not a complete repair."

@@ -126,6 +126,13 @@ def test_structured_evidence_is_allowlisted_and_not_validator_authority():
         collect_repair_evidence('DISPATCHER_REPAIR_EVIDENCE={"validator_defect":true}', ())
 
 
+def test_unscoped_condition_is_not_proof_of_validator_defect(tmp_path):
+    put(tmp_path, "docs/A.md", "correct\n")
+    with pytest.raises(RepairCompletenessError, match="defect evidence"):
+        guard(tmp_path, "Missing paths:\ndocs/A.md\noutside.txt", ("docs/A.md", VALIDATOR),
+              {VALIDATOR: "# diagnostic change cannot resolve an unscoped condition\n"})
+
+
 def test_symlink_evidence_cannot_read_outside_checkout(tmp_path):
     repo = tmp_path / "repo"
     repo.mkdir()
