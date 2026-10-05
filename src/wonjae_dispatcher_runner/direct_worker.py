@@ -15,6 +15,7 @@ from .repair_timeout import RepairPlanTimeout, repair_plan_deadline
 RUNNER_REPOSITORY = "ChoiWonJae850610/WONJAE-DISPATCHER-RUNNER"
 RUNNER_WORKFLOW = ".github/workflows/direct-worker.yml"
 ALLOWED_COMMANDS = {"next", "retry", "resume"}
+HANDOFF_ACTION_TYPES = {"SOURCE_READY", "MANUAL_QA", "PROVIDER_GATE", "DECISION_REQUIRED", "NONE"}
 PROTECTED_SOURCE_PATHS = {"AGENTS.md", "PROJECT_RULES.md", ".gitmodules"}
 PROTECTED_SOURCE_PREFIXES = (".github/",)
 
@@ -22,6 +23,22 @@ PROTECTED_SOURCE_PREFIXES = (".github/",)
 
 class DirectWorkerError(RuntimeError):
     """Raised when a Direct Worker request violates the registered contract."""
+
+
+@dataclass(frozen=True)
+class DirectWorkerHandoff:
+    project: str
+    updated_at: str
+    repository: str
+    branch: str
+    current_head: str
+    source_validation_result: str
+    source_validation_run_id: int
+    next_action_type: str
+    next_action_title: str
+    source_task_id: str | None
+    owner_action: str | None
+    source_scope: tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -36,6 +53,8 @@ class DirectWorkerRoute:
     validation_workflow_name: str
     runner_repository: str
     runner_workflow: str
+    handoff_path: str | None
+    handoff: DirectWorkerHandoff | None
 
 
 @dataclass(frozen=True)
@@ -134,6 +153,109 @@ def git_metadata_snapshot(repo_path: Path) -> str:
     return digest.hexdigest()
 
 
+def _load_execution_handoff(
+    registry_path: Path,
+    handoff_path: str,
+    project: str,
+    repository: str,
+    branch: str,
+) -> DirectWorkerHandoff:
+    _safe_relative(handoff_path, "handoff")
+    path = registry_path.parent / handoff_path
+    try:
+        payload = yaml.safe_load(path.read_text(encoding="utf-8"))
+    except FileNotFoundError as exc:
+        raise DirectWorkerError("registered execution handoff is missing") from exc
+    except yaml.YAMLError as exc:
+        raise DirectWorkerError("execution handoff YAML is invalid") from exc
+    if not isinstance(payload, dict):
+        raise DirectWorkerError("execution handoff must be a mapping")
+    if payload.get("schema_version") != 1:
+        raise DirectWorkerError("execution handoff schema_version must be 1")
+    if payload.get("project") != project:
+        raise DirectWorkerError("execution handoff project mismatch")
+    if payload.get("repository") != repository:
+        raise DirectWorkerError("execution handoff repository mismatch")
+    if payload.get("current_branch") != branch:
+        raise DirectWorkerError("execution handoff branch mismatch")
+
+    current_head = payload.get("current_head")
+    if not isinstance(current_head, str) or len(current_head) != 40 or any(
+        ch not in "0123456789abcdef" for ch in current_head
+    ):
+        raise DirectWorkerError("execution handoff current_head is invalid")
+    updated_at = payload.get("updated_at")
+    if not isinstance(updated_at, str) or "T" not in updated_at:
+        raise DirectWorkerError("execution handoff updated_at is invalid")
+
+    source_validation = payload.get("source_validation")
+    if not isinstance(source_validation, dict):
+        raise DirectWorkerError("execution handoff source_validation is missing")
+    validation_result = source_validation.get("result")
+    validation_run_id = source_validation.get("run_id")
+    if validation_result != "PASS":
+        raise DirectWorkerError("execution handoff requires PASS source validation")
+    if not isinstance(validation_run_id, int) or validation_run_id < 1:
+        raise DirectWorkerError("execution handoff validation run_id is invalid")
+
+    next_action = payload.get("next_action")
+    if not isinstance(next_action, dict):
+        raise DirectWorkerError("execution handoff next_action is missing")
+    action_type = next_action.get("type")
+    action_title = next_action.get("title")
+    if action_type not in HANDOFF_ACTION_TYPES:
+        raise DirectWorkerError("execution handoff next_action type is invalid")
+    if not isinstance(action_title, str) or not action_title.strip():
+        raise DirectWorkerError("execution handoff next_action title is invalid")
+
+    source_task_id = next_action.get("source_task_id")
+    if source_task_id is not None and (
+        not isinstance(source_task_id, str) or not source_task_id.strip()
+    ):
+        raise DirectWorkerError("execution handoff source_task_id is invalid")
+    owner_action = next_action.get("owner_action")
+    if owner_action is not None and (
+        not isinstance(owner_action, str) or not owner_action.strip()
+    ):
+        raise DirectWorkerError("execution handoff owner_action is invalid")
+    source_scope = next_action.get("source_scope", [])
+    if not isinstance(source_scope, list) or not all(
+        isinstance(item, str) and item.strip() for item in source_scope
+    ):
+        raise DirectWorkerError("execution handoff source_scope is invalid")
+    if action_type == "SOURCE_READY" and not source_scope:
+        raise DirectWorkerError("SOURCE_READY handoff requires source_scope")
+
+    return DirectWorkerHandoff(
+        project=project,
+        updated_at=updated_at,
+        repository=repository,
+        branch=branch,
+        current_head=current_head,
+        source_validation_result=validation_result,
+        source_validation_run_id=validation_run_id,
+        next_action_type=action_type,
+        next_action_title=action_title.strip(),
+        source_task_id=source_task_id.strip() if isinstance(source_task_id, str) else None,
+        owner_action=owner_action.strip() if isinstance(owner_action, str) else None,
+        source_scope=tuple(item.strip() for item in source_scope),
+    )
+
+
+def require_next_source_ready(route: DirectWorkerRoute, starting_sha: str) -> None:
+    handoff = route.handoff
+    if handoff is None:
+        return
+    if handoff.current_head != starting_sha:
+        raise DirectWorkerError(
+            "execution handoff is stale for the current product HEAD; reconcile it first"
+        )
+    if handoff.next_action_type != "SOURCE_READY":
+        raise DirectWorkerError(
+            f"next source work is blocked by execution handoff: {handoff.next_action_type}"
+        )
+
+
 def load_direct_worker_route(registry_path: Path, project: str) -> DirectWorkerRoute:
     if project == "KDN":
         raise DirectWorkerError("KDN is excluded from Direct Worker")
@@ -187,6 +309,19 @@ def load_direct_worker_route(registry_path: Path, project: str) -> DirectWorkerR
     for relative in (startup_entry, project_rules, *canonical_docs):
         _safe_relative(relative, "registry")
 
+    handoff_path = execution.get("handoff_path")
+    handoff = None
+    if handoff_path is not None:
+        if not isinstance(handoff_path, str) or not handoff_path.strip():
+            raise DirectWorkerError("registry handoff_path is invalid")
+        handoff = _load_execution_handoff(
+            registry_path,
+            handoff_path,
+            project,
+            repository,
+            branch,
+        )
+
     return DirectWorkerRoute(
         project=project,
         repository=repository,
@@ -198,6 +333,8 @@ def load_direct_worker_route(registry_path: Path, project: str) -> DirectWorkerR
         validation_workflow_name=workflow_name,
         runner_repository=execution["runner_repository"],
         runner_workflow=execution["runner_workflow"],
+        handoff_path=handoff_path,
+        handoff=handoff,
     )
 
 
@@ -209,14 +346,23 @@ def _prompt(
 ) -> str:
     docs = "\n".join(f"- {path}" for path in route.canonical_docs)
     failure = validation_failure[-80_000:] if validation_failure else "(none)"
-    retry_note = (
+    handoff = route.handoff
+    if command == "next" and handoff is not None:
+        scope = "\n".join(f"- {item}" for item in handoff.source_scope)
+        retry_note = (
+            f"Execute exactly the SOURCE_READY handoff task: {handoff.next_action_title}\n"
+            f"Source task ID: {handoff.source_task_id or '(none)'}\n"
+            f"Authorized source scope:\n{scope}"
+        )
+    else:
+        retry_note = (
         "This is a retry/resume of the one existing Direct Worker PR. Preserve correct prior work "
         "and fix the current task in place."
         if command in {"retry", "resume"}
         else
         "Select the smallest complete already-decided next SOURCE task from the current canonical "
         "repository documents."
-    )
+        )
     return f"""You are the single source-writing Direct Worker for {route.project}.
 
 The Owner has authorized command: {command}.
@@ -291,6 +437,8 @@ def run_direct_worker(
     if command not in ALLOWED_COMMANDS:
         raise DirectWorkerError("unsupported Direct Worker command")
     starting_sha = git_head(repo_path)
+    if command == "next":
+        require_next_source_ready(route, starting_sha)
     if changed_paths(repo_path):
         raise DirectWorkerError("product checkout must be clean before Direct Worker")
     git_metadata = git_metadata_snapshot(repo_path)
