@@ -105,3 +105,29 @@ matching STARTED and verify Trash present / Inbox absent. Preserve partial-clean
 Retries must not duplicate comments, mail or close mutations. Never downgrade source
 completion after a successful product job. KDN, source/provider/device writes, integration,
 new attempts and ChatGPT foreground polling remain outside finalizer authority.
+
+
+## Direct Worker
+
+Direct Worker is a separate source-writing route from Dispatcher v2.
+
+- Only projects whose current DEV-CONTROL registry sets `execution.mode: direct_worker`
+  may use it. WAFL remains on its current legacy Dispatcher lifecycle until its
+  in-flight task is terminal and the registry is changed separately.
+- One Direct Worker source writer may run per project. Different registered projects
+  may run in parallel.
+- The worker re-reads current DEV-CONTROL routing and the product's own startup entry,
+  project rules, canonical documents, source and exact-SHA validation. It does not use
+  a tasks-v2 control record, wake/queue issue, Gmail lifecycle or chat history as
+  execution authority.
+- Codex runs with `Sandbox.workspace_write`, `ApprovalMode.deny_all`, network disabled,
+  a scrubbed shell environment and no product/provider GitHub token in the Codex process.
+  It may edit only the ephemeral product checkout. It must not commit, push or merge.
+- The trusted workflow owns Git branch/PR publication, exact PR-head validation, exact-head
+  merge to the registered active development branch and integrated-SHA validation.
+- Production/provider/deployment/payment/credential/signing/device/physical/destructive
+  actions are outside Direct Worker source authority. A real gate is reported as
+  MANUAL_REQUIRED and source progress is preserved when applicable.
+- Failed PR-head validation keeps the same Direct Worker PR open for `retry`; it is not
+  terminal-cleaned merely to start a new attempt.
+- KDN is excluded.
