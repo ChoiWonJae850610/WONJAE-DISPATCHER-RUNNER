@@ -15,6 +15,9 @@ from .repair_timeout import RepairPlanTimeout, repair_plan_deadline
 RUNNER_REPOSITORY = "ChoiWonJae850610/WONJAE-DISPATCHER-RUNNER"
 RUNNER_WORKFLOW = ".github/workflows/direct-worker.yml"
 ALLOWED_COMMANDS = {"next", "retry", "resume"}
+PROTECTED_SOURCE_PATHS = {"AGENTS.md", "PROJECT_RULES.md", ".gitmodules"}
+PROTECTED_SOURCE_PREFIXES = (".github/",)
+
 
 
 class DirectWorkerError(RuntimeError):
@@ -93,6 +96,14 @@ def changed_paths(repo_path: Path) -> tuple[str, ...]:
             raise DirectWorkerError("worktree path escapes the product repository")
         if target.is_symlink():
             raise DirectWorkerError("Direct Worker may not mutate a symlink path")
+    protected = [
+        path
+        for path in paths
+        if path in PROTECTED_SOURCE_PATHS
+        or any(path.startswith(prefix) for prefix in PROTECTED_SOURCE_PREFIXES)
+    ]
+    if protected:
+        raise DirectWorkerError("Direct Worker attempted to change a protected source path")
     return paths
 
 
