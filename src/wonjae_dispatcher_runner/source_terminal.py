@@ -7,6 +7,11 @@ from typing import Any
 
 from .gmail_notifications import Notification
 from .guards import require_sha
+from .source_checkpoint import (
+    CHECKPOINT_HEADING,
+    SourceCheckpointError,
+    terminal_repair_head,
+)
 from .source_pr_lifecycle import (
     SourceIdentity,
     parse_fields,
@@ -15,7 +20,6 @@ from .source_pr_lifecycle import (
 )
 from .source_queue import WORKFLOW_FILES, parse_execution_title, parse_registration_title
 
-CHECKPOINT_HEADING = "## Dispatcher v2 source run identity"
 TERMINAL_HEADING = "## Dispatcher v2 terminal evidence"
 NON_SUCCESS = frozenset({
     "failure", "cancelled", "timed_out", "action_required", "neutral", "stale", "startup_failure"
@@ -122,6 +126,8 @@ def reconcile_source_terminal(
                    in {"github-actions", "github-actions[bot]"}
                    and parse_fields(str(comment.get("body") or "")).get("runner_run_id")
                    == identity.runner_run_id]
+    if len(checkpoints) > 1:
+        raise SourceTerminalError("duplicate source run checkpoints")
     checkpoint = checkpoints[-1] if checkpoints else {}
     if checkpoint:
         expected = {**binding, "wake_issue": str(request.wake_issue),
@@ -136,6 +142,10 @@ def reconcile_source_terminal(
             raise SourceTerminalError("Owner reconciliation differs from trusted checkpoint")
     elif checkpoint:
         pr_number, head = int(checkpoint["product_pr"]), checkpoint["last_pr_head"]
+        try:
+            head = terminal_repair_head(client, identity, checkpoint, str(revision))
+        except SourceCheckpointError as exc:
+            raise SourceTerminalError(str(exc)) from exc
     elif terminal and previous.get("product_pr"):
         pr_number, head = int(previous["product_pr"]), previous.get("last_pr_head", "")
     else:
@@ -159,9 +169,14 @@ def reconcile_source_terminal(
                        "attempt": str(identity.attempt), "revision": str(revision),
                        "control_sha": identity.control_sha, "source_base_sha": identity.source_sha,
                        "repository": identity.repository, "target_branch": identity.target_branch}
+        permitted_heads = {head}
+        if checkpoint.get("pending_repair_head") and head == checkpoint["pending_repair_head"]:
+            permitted_heads.add(checkpoint["last_pr_head"])
         if (int(pr.get("number") or 0) != pr_number
                 or any(metadata.get(key) != value for key, value in expected_pr.items())
-                or pr.get("headRefOid") != head or pr.get("headRefName") != identity.expected_branch
+                or pr.get("headRefOid") not in permitted_heads
+                or pr.get("headRefName") != identity.expected_branch
+                or (pr.get("headRepository") or {}).get("nameWithOwner") != identity.repository
                 or pr.get("baseRefName") != identity.target_branch or pr.get("mergedAt")):
             raise SourceTerminalError("exact Product PR metadata/head/branch/unmerged mismatch")
 

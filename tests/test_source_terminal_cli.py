@@ -50,7 +50,7 @@ def test_checkpoint_is_updated_after_repair_head_without_duplicate_comment(tmp_p
     cli.checkpoint()
     second = [c for c in github.issue["comments"] if CHECKPOINT_HEADING in c["body"]]
     assert len(second) == 1 and new_head in second[0]["body"]
-    assert github.mutations == ["add_comment", "update_comment"]
+    assert github.mutations == ["add_comment", "update_comment", "update_comment"]
 
 
 def test_wrong_pr_cannot_be_checkpointed(tmp_path, monkeypatch):

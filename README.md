@@ -305,3 +305,27 @@ matching STARTED and verify Trash present / Inbox absent. Preserve partial-clean
 Retries must not duplicate comments, mail or close mutations. Never downgrade source
 completion after a successful product job. KDN, source/provider/device writes, integration,
 new attempts and ChatGPT foreground polling remain outside finalizer authority.
+
+
+
+### Complete repair and bounded publication readback
+
+Known aggregate missing-file diagnostics, including `gh run view --log-failed`
+job/step/timestamp formatting, are checked on the virtual final tree before writes.
+Unsafe, ambiguous or out-of-scope explicit paths fail closed. Partial plans use the
+existing same-repair replacement limit; committed repairs still have a maximum of two.
+
+All four source workflows call the shared checkpoint helper. Before push, it persists
+one exact local direct-child publication intent on the same identity comment. After
+push, it checks remote parent history and OPEN/unmerged PR identity, waiting only for
+the known prior head to become the exact repaired SHA (5-second spacing, 90-second
+bound). It updates/readbacks that same comment and PR before fresh exact-head validation.
+Timeout reports expected/observed heads; every other identity mismatch fails immediately.
+Actual terminal cancellation uses the recorded intent and verified branch for exact PR
+cleanup, never validation or merge. Active repair is not terminal authority. Integration
+still requires PR-head PASS and integrated-SHA PASS. No KDN or product retry is involved.
+
+Regression coverage includes `test_repair_completeness.py`, `test_source_checkpoint.py`
+and `test_source_recovery_lifecycle.py`. The latter executes the actual four workflow
+shells with real local Git commits/push/merge and simulated Actions/PR transport.
+These synthetic proofs do not claim live product/runtime/device completion.

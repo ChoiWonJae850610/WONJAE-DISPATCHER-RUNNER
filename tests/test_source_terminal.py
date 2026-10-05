@@ -103,6 +103,7 @@ class GitHub:
             "headRefName": f"job/{TASK}-a2",
             "baseRefName": "cloud-dev-v1",
             "body": markdown("## Dispatcher v2 metadata", metadata),
+            "headRepository": {"nameWithOwner": "owner/CLASSMO"},
         }
         self.mutations = []
         self.close_error = False
@@ -120,9 +121,15 @@ class GitHub:
     def get_issue(self, number):
         return deepcopy(self.issue)
 
-    def get_pr(self, repository, number):
+    def get_pr(self, repository, number, **kwargs):
         assert repository == "owner/CLASSMO"
         return deepcopy(self.pr)
+
+    def get_product_commit(self, repository, sha):
+        return {"sha": sha, "parents": [{"sha": HEAD}]}
+
+    def get_product_branch_head(self, repository, branch):
+        return self.pr["headRefOid"]
 
     def close_pr(self, repository, number):
         assert number == 7
