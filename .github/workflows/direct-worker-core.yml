@@ -229,7 +229,23 @@ jobs:
           echo "::error::Direct Worker reached a real manual gate."
           exit 1
 
-      - name: Commit and push Direct Worker changes
+      - name: Commit Direct Worker changes
+        if: ${{ steps.codex.outputs.changed_count != '0' }}
+        run: |
+          set -euo pipefail
+          cd "$GITHUB_WORKSPACE/_product"
+          test "$(git rev-parse "$START_HEAD")" = "$START_HEAD"
+          git diff --check
+          git diff --cached --check
+          git config user.name "WONJAE Direct Worker"
+          git config user.email "direct-worker@users.noreply.github.com"
+          git add --all
+          git -c core.hooksPath=/dev/null commit \
+            -m "[DIRECT][${{ inputs.project }}] ${{ inputs.command }} via SANJINWORKS"
+          DIRECT_HEAD="$(git rev-parse HEAD)"
+          echo "DIRECT_HEAD=$DIRECT_HEAD" >> "$GITHUB_ENV"
+
+      - name: Push Direct Worker branch
         if: ${{ steps.codex.outputs.changed_count != '0' }}
         env:
           GH_TOKEN: ${{ secrets.product_write_token }}
@@ -237,16 +253,9 @@ jobs:
         run: |
           set -euo pipefail
           cd "$GITHUB_WORKSPACE/_product"
-          test "$(git rev-parse "$START_HEAD")" = "$START_HEAD"
-          git diff --check
-          git config user.name "WONJAE Direct Worker"
-          git config user.email "direct-worker@users.noreply.github.com"
-          git add --all
-          git commit -m "[DIRECT][${{ inputs.project }}] ${{ inputs.command }} via SANJINWORKS"
-          DIRECT_HEAD="$(git rev-parse HEAD)"
-          echo "DIRECT_HEAD=$DIRECT_HEAD" >> "$GITHUB_ENV"
+          git remote set-url origin "https://github.com/$PRODUCT_REPOSITORY.git"
           gh auth setup-git
-          git push origin "HEAD:refs/heads/$DIRECT_BRANCH"
+          git -c core.hooksPath=/dev/null push origin "HEAD:refs/heads/$DIRECT_BRANCH"
 
       - name: Create or read Direct Worker PR
         if: ${{ steps.codex.outputs.changed_count != '0' }}
