@@ -315,6 +315,12 @@ jobs:
           echo "PILOT_PR_NUMBER=$pr_number" >> "$GITHUB_ENV"
           python scripts/actions_progress.py STARTED PASS --sha "$PILOT_HEAD_SHA" --pr "$pr_number"
 
+      - name: "[06] STARTED · persist exact source run checkpoint"
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PRODUCT_GH_TOKEN: ${{ secrets.ESC_WRITE_TOKEN }}
+        run: PYTHONPATH="$GITHUB_WORKSPACE/src" python scripts/source_terminal.py checkpoint
+
       - name: "[06] NOTIFY · GitHub-native STARTED"
         if: ${{ vars.WONJAE_NATIVE_GMAIL_ENABLED == 'true' }}
         continue-on-error: true
@@ -396,6 +402,9 @@ jobs:
             echo "PILOT_HEAD_SHA=$repaired_head" >> "$GITHUB_ENV"
             gh auth setup-git
             git push origin "HEAD:refs/heads/$PRODUCT_BRANCH"
+            PILOT_HEAD_SHA="$repaired_head" PRODUCT_GH_TOKEN="$GH_TOKEN" \
+              GH_TOKEN="${{ github.token }}" PYTHONPATH="$GITHUB_WORKSPACE/src" \
+              python "$GITHUB_WORKSPACE/scripts/source_terminal.py" checkpoint
             cd "$GITHUB_WORKSPACE"
 
             GH_TOKEN="$SECRET_ROTATION_TOKEN" gh secret set CODEX_AUTH_JSON --repo "$GITHUB_REPOSITORY" < "$CODEX_HOME/auth.json"
@@ -618,6 +627,23 @@ jobs:
       - name: "[11] Cleanup · ephemeral credentials"
         if: ${{ always() }}
         run: rm -rf "$CODEX_HOME"
+
+  terminal-handoff:
+    needs: esc-product
+    if: ${{ always() && needs.esc-product.result != 'success' && needs.esc-product.result != 'skipped' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    permissions:
+      actions: write
+      contents: read
+    steps:
+      - name: Terminal · explicit exact non-success handoff
+        env:
+          GH_TOKEN: ${{ github.token }}
+          WAKE_ISSUE: ${{ inputs.wake_issue_number }}
+        run: |
+          gh workflow run product-terminal-guard.yml --repo "$GITHUB_REPOSITORY" --ref main \
+            -f source_run_id="$GITHUB_RUN_ID" -f wake_issue_number="$WAKE_ISSUE"
 
   queue-handoff:
     needs: esc-product

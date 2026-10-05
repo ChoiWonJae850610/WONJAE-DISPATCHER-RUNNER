@@ -43,11 +43,14 @@ def test_queue_controller_is_event_driven_and_has_no_poll_loop() -> None:
 def test_terminal_guard_resolves_queue_issue_and_exact_source_authority() -> None:
     text = Path(".github/workflows/product-terminal-guard.yml").read_text(encoding="utf-8")
 
-    assert "source_queue.py locate" in text
-    assert "source_queue.py resolve-control" in text
-    assert "--allow-closed" in text
-    assert 'test "$record_source" = "$SOURCE_SHA"' in text
-    assert "source_pr_lifecycle.py" in text
+    script = Path("scripts/source_terminal.py").read_text(encoding="utf-8")
+    core = Path("src/wonjae_dispatcher_runner/source_terminal.py").read_text(encoding="utf-8")
+    assert "source_terminal.py select" in text
+    assert "queue.locate_issue(args)" in script
+    assert "queue.resolve_control(" in script
+    assert "allow_closed=True" in script
+    assert '"source_base_sha": source' in core
+    assert "terminalize_exact_pr" in core
 
 
 def test_source_validation_polling_remains_inside_runner_only() -> None:
@@ -61,3 +64,4 @@ def test_source_validation_polling_remains_inside_runner_only() -> None:
     )
     assert "gh run watch" not in controller
     assert "sleep " not in controller
+

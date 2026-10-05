@@ -388,6 +388,7 @@ class GhClient:
             text=True,
             capture_output=True,
             env=env,
+            timeout=45,
         )
         return completed.stdout
 

@@ -1,6 +1,7 @@
 import hashlib
 import json
 import subprocess
+import time
 from types import SimpleNamespace
 
 import pytest
@@ -11,6 +12,7 @@ from wonjae_dispatcher_runner.repair_completeness import (
     check_repair_completeness,
     collect_repair_evidence,
 )
+from wonjae_dispatcher_runner.repair_timeout import repair_plan_deadline
 
 MIGRATION = "db/migrations/002_feature.sql"
 MANIFEST = "db/migrations/SHA256SUMS"
@@ -164,7 +166,10 @@ def test_unchanged_crlf_sql_uses_actual_bytes_in_manifest(tmp_path):
     guard(tmp_path, CHECKSUM_FAILURE, (MIGRATION, MANIFEST), {MANIFEST: exact})
 
 
-@pytest.mark.parametrize("repair_case", ["aggregate", "checksum", "exhausted"])
+@pytest.mark.parametrize("repair_case", [
+    "aggregate", "checksum", "exhausted", "timeout_then_complete",
+    "timeout_exhausted", "incomplete_timeout_exhausted",
+])
 def test_partial_plan_regeneration_stays_same_repair_without_commit(
     tmp_path, monkeypatch, repair_case
 ):
@@ -192,7 +197,7 @@ def test_partial_plan_regeneration_stays_same_repair_without_commit(
     work = tmp_path / "work.json"
     paths = ((MIGRATION, MANIFEST) if repair_case == "checksum"
              else ("docs/A.md", "src/B.py", "tests/C.py"))
-    complete_replacement = repair_case != "exhausted"
+    complete_replacement = repair_case in {"aggregate", "checksum", "timeout_then_complete"}
     work.write_text(json.dumps({
         "schema_version": 1, "task_id": "CLASSMO-REPAIR-001", "project": "CLASSMO",
         "repository": "owner/product", "target_branch": "main", "source_base_sha": base,
@@ -203,6 +208,8 @@ def test_partial_plan_regeneration_stays_same_repair_without_commit(
         "exclusions": ["No provider work"], "completion_conditions": ["Validation PASS"],
     }))
     prompts = []
+    closed_sessions = []
+    monkeypatch.setattr(patch, "repair_plan_deadline", lambda: repair_plan_deadline(0.2))
 
     class Codex:
         def __init__(self, **kwargs):
@@ -212,7 +219,7 @@ def test_partial_plan_regeneration_stays_same_repair_without_commit(
             return self
 
         def __exit__(self, *args):
-            pass
+            closed_sessions.append(self)
 
         def account(self, **kwargs):
             return SimpleNamespace(account=object())
@@ -228,6 +235,11 @@ def test_partial_plan_regeneration_stays_same_repair_without_commit(
             if repair_case == "checksum":
                 assert (repo / MANIFEST).read_text() == ""
             prompts.append(prompt)
+            if (repair_case in {"timeout_then_complete", "timeout_exhausted"}
+                    and (len(prompts) == 1 or not complete_replacement)):
+                time.sleep(1)  # Interrupted by a real wall-clock signal, not a mocked exception.
+            if repair_case == "incomplete_timeout_exhausted" and len(prompts) > 1:
+                time.sleep(1)
             selected = paths if complete_replacement and len(prompts) == 2 else paths[:1]
             if repair_case == "checksum" and len(prompts) == 2:
                 assert json.dumps(SQL) in prompt  # The fresh thread receives exact prior SQL.
@@ -253,7 +265,7 @@ def test_partial_plan_regeneration_stays_same_repair_without_commit(
         assert "smallest COMPLETE repair" in prompts[0]
         assert "required.txt" in patch.validate_branch_scope(repo, patch.load_work_order(work))
     else:
-        with pytest.raises(patch.ProductPilotError, match="Incomplete repair"):
+        with pytest.raises(patch.ProductPilotError, match="regeneration exhausted before commit"):
             patch.generate_and_apply_product_repair(
                 repo, work, "a" * 40, tmp_path / "auth", failure
             )
@@ -263,3 +275,8 @@ def test_partial_plan_regeneration_stays_same_repair_without_commit(
     # consumes one of its two repair commits only after this function succeeds.
     assert git("rev-parse", "HEAD") == head
     assert git("rev-list", "--count", "HEAD") == "2"
+    assert len(closed_sessions) == len(prompts)
+    if complete_replacement:
+        git("add", ".")
+        git("commit", "-qm", "one complete validation repair")
+        assert git("rev-list", "--count", "HEAD") == "3"

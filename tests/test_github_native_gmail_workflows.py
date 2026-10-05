@@ -33,8 +33,10 @@ def test_source_terminal_guard_has_idempotent_native_gmail_fallback() -> None:
     assert "CONTROL_READ_TOKEN" in text
     assert "GMAIL_USERNAME" in text
     assert "GMAIL_APP_PASSWORD" in text
-    assert "gmail_notify.py" in text
-    assert "reconcile terminal notification" in text
+    assert "source-terminal-core.yml" in text
+    core = Path("src/wonjae_dispatcher_runner/source_terminal.py").read_text()
+    assert "notifications.deliver(Notification(" in core
+    assert 'notification_result="DELIVERED"' in core
 
 
 def test_provider_reusable_workflows_accept_gmail_credentials() -> None:
@@ -73,3 +75,4 @@ def test_gmail_smoke_is_manual_and_has_no_product_mutation() -> None:
     assert "--cleanup-only" in text
     assert "git push" not in text
     assert "gh pr" not in text
+
