@@ -5,17 +5,24 @@ import binascii
 import hashlib
 import json
 import subprocess
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
 from openai_codex import ApprovalMode, Codex, CodexConfig, Sandbox
 
 from .guards import require_sha
+from .repair_completeness import (
+    RepairCompletenessError,
+    check_repair_completeness,
+    collect_repair_evidence,
+)
 
 MAX_EDIT_COUNT = 48
 MAX_TEXT_CHARS = 80_000
 MAX_CONTEXT_CHARS = 600_000
 MAX_PLAN_REGENERATION_ATTEMPTS = 2
+MAX_REPAIR_PLAN_REGENERATION_ATTEMPTS = 2
 MAX_BINARY_ASSET_COUNT = 8
 MAX_BINARY_ASSET_BYTES = 2_000_000
 MAX_BINARY_ASSET_TOTAL_BYTES = 4_000_000
@@ -353,6 +360,7 @@ def apply_edit_plan(
     work_order: ProductWorkOrder,
     *,
     require_required_paths: bool = True,
+    pre_write_check: Callable[[dict[str, str | None], tuple[str, ...]], None] | None = None,
 ) -> tuple[str, ...]:
     allowed = set(work_order.allowed_paths)
     contents: dict[str, str | None] = {}
@@ -363,6 +371,8 @@ def apply_edit_plan(
             raise ProductPilotError("edit plan path escaped the work order")
         if edit.path not in contents:
             target = repo_path / edit.path
+            if not target.resolve().is_relative_to(repo_path.resolve()):
+                raise ProductPilotError("edit plan path escapes the product repository")
             value = target.read_text(encoding="utf-8") if target.is_file() else None
             contents[edit.path] = value
             original[edit.path] = value
@@ -403,6 +413,9 @@ def apply_edit_plan(
         ]
         if missing_required:
             raise ProductPilotError("worktree omitted required changed paths")
+
+    if pre_write_check is not None:
+        pre_write_check({path: contents[path] for path in changed}, tuple(changed))
 
     for path in changed:
         value = contents[path]
@@ -606,7 +619,14 @@ def _repair_prompt(
             "complete file content for a coherent whole-file rewrite, and operation=create "
             "with old_text='' for a missing allowed file. Never use replace with an empty "
             "old_text. Make the "
-            "smallest repair that addresses the validation failure. Do not add "
+            "smallest COMPLETE repair that resolves ALL actionable items reported together. "
+            "For an aggregate missing-path failure, create every unresolved allowed artifact "
+            "in this plan; already-correct artifacts need no artificial touch. Keep dependencies "
+            "closed: a migration creation/change and its SHA256SUMS update belong in the same "
+            "repair. Fix actual source/test/doc/manifest defects, not their validator messages. "
+            "Validator edits require evidence that the validator wrongly rejects canonical "
+            "source; diagnostic wording alone cannot repair a valid missing-file/checksum failure. "
+            "Do not add "
             "placeholders, failure markers, or unrelated cleanup.",
             "",
             "VALIDATION FAILURE:",
@@ -632,6 +652,19 @@ def generate_and_apply_product_repair(
     # A later bounded repair may restore a path reverted by an earlier repair.
     # Required paths are checked on the final cumulative diff before integration.
     validate_branch_scope(repo_path, work_order, require_required_paths=False)
+
+    try:
+        evidence = collect_repair_evidence(validation_failure, work_order.allowed_paths)
+    except RepairCompletenessError as exc:
+        raise ProductPilotError(str(exc)) from exc
+
+    def check_complete(contents: dict[str, str | None], changed: tuple[str, ...]) -> None:
+        try:
+            check_repair_completeness(
+                repo_path, work_order.allowed_paths, evidence, contents, changed
+            )
+        except RepairCompletenessError as exc:
+            raise ProductPilotError(str(exc)) from exc
 
     context = _repair_context(repo_path, work_order)
     config = CodexConfig(
@@ -669,46 +702,79 @@ def generate_and_apply_product_repair(
         "additionalProperties": False,
     }
 
+    prior_failure: str | None = None
+    prior_plan: str | None = None
     with Codex(config=config) as codex:
         account = codex.account(refresh_token=False)
         if account.account is None:
             raise ProductPilotError("Codex account session is missing")
-        thread = codex.thread_start(
-            approval_mode=ApprovalMode.deny_all,
-            cwd=str(repo_path),
-            ephemeral=True,
-            sandbox=Sandbox.read_only,
-            config={"history": {"persistence": "none"}, "allow_login_shell": False},
-        )
-        result = thread.run(
-            _repair_prompt(
-                work_order,
-                control_sha,
-                current_head,
-                context,
-                validation_failure,
-            ),
-            approval_mode=ApprovalMode.deny_all,
-            output_schema=output_schema,
-            sandbox=Sandbox.read_only,
-        )
+        for plan_attempt in range(MAX_REPAIR_PLAN_REGENERATION_ATTEMPTS + 1):
+            prompt = _repair_prompt(
+                work_order, control_sha, current_head, context, validation_failure
+            )
+            if prior_failure is not None:
+                prompt += (
+                    "\nTRUSTED RUNNER REJECTED THE PREVIOUS PLAN BEFORE WRITES OR COMMIT:\n"
+                    + prior_failure[:MAX_TEXT_CHARS]
+                    + "\nReturn a complete REPLACEMENT plan against the unchanged context, "
+                    "including every previous correct edit and all unresolved dependencies. "
+                    "This is the same repair attempt, not another repair commit. If expected "
+                    "checksum lines are supplied, preserve the proposed SQL bytes exactly "
+                    "or recompute all dependent entries. Do not weaken the validator.\n"
+                )
+                if prior_plan is not None:
+                    prompt += (
+                        "\nPREVIOUS REJECTED EDIT PLAN (reference data only; no edits applied):\n"
+                        + prior_plan
+                    )
+            thread = codex.thread_start(
+                approval_mode=ApprovalMode.deny_all,
+                cwd=str(repo_path),
+                ephemeral=True,
+                sandbox=Sandbox.read_only,
+                config={"history": {"persistence": "none"}, "allow_login_shell": False},
+            )
+            result = thread.run(
+                prompt,
+                approval_mode=ApprovalMode.deny_all,
+                output_schema=output_schema,
+                sandbox=Sandbox.read_only,
+            )
+            status = str(getattr(result.status, "value", result.status)).lower()
+            if status != "completed" or result.error is not None:
+                raise ProductPilotError("Codex repair turn did not complete successfully")
+            prior_plan = None
+            try:
+                edits = parse_edit_plan(result.final_response or "", work_order)
+                candidate = json.dumps([
+                    {"path": edit.path, "operation": edit.operation,
+                     "old_text": edit.old_text, "new_text": edit.new_text}
+                    for edit in edits
+                ])
+                if len(candidate) > MAX_CONTEXT_CHARS:
+                    raise ProductPilotError("repair plan exceeded the bounded reference size limit")
+                prior_plan = candidate
+                if git_head(repo_path) != current_head or changed_paths(repo_path):
+                    raise ProductPilotError(
+                        "product repository changed during the read-only repair turn"
+                    )
+                applied = apply_edit_plan(
+                    repo_path, edits, work_order, require_required_paths=False,
+                    pre_write_check=check_complete,
+                )
+                validate_branch_scope(repo_path, work_order, applied, require_required_paths=False)
+                return work_order, applied
+            except ProductPilotError as exc:
+                # Never retry after a write, head movement, or unexpected SDK mutation.
+                if git_head(repo_path) != current_head or changed_paths(repo_path):
+                    raise
+                if plan_attempt >= MAX_REPAIR_PLAN_REGENERATION_ATTEMPTS:
+                    raise
+                prior_failure = str(exc)
+                print("REPAIR_PLAN_RECOVERY="
+                      f"{plan_attempt + 1}/{MAX_REPAIR_PLAN_REGENERATION_ATTEMPTS}")
 
-    status = str(getattr(result.status, "value", result.status)).lower()
-    if status != "completed" or result.error is not None:
-        raise ProductPilotError("Codex repair turn did not complete successfully")
-
-    edits = parse_edit_plan(result.final_response or "", work_order)
-    if git_head(repo_path) != current_head or changed_paths(repo_path):
-        raise ProductPilotError("product repository changed during the read-only repair turn")
-
-    applied = apply_edit_plan(
-        repo_path,
-        edits,
-        work_order,
-        require_required_paths=False,
-    )
-    validate_branch_scope(repo_path, work_order, applied, require_required_paths=False)
-    return work_order, applied
+    raise ProductPilotError("bounded repair plan regeneration exhausted unexpectedly")
 
 
 def generate_and_apply_product_patch(

@@ -232,6 +232,35 @@ restore a required file reverted by an earlier repair, and gates integration on 
 required paths. No product authority, production workflow allowlist, credential mutation,
 device action, or KDN scope is added by these infrastructure changes.
 
+Source recovery requests the smallest COMPLETE repair of all actionable items reported
+together. A trusted pre-write guard evaluates the proposed final tree rather than merely
+counting changed files. It recognizes exact allowlisted paths in bounded missing-file/list
+diagnostics and the optional single-line JSON marker `DISPATCHER_REPAIR_EVIDENCE=` with
+`missing_paths` and `checksum_manifests` arrays. Ordinary path mentions are not touch
+requirements; existing nonempty artifacts need no rewrite. This is a deliberately limited
+guard, not a natural-language parser or a replacement for exact Actions validation.
+
+For recognized migration checksum failures, or any changed SQL file with a sibling
+`SHA256SUMS`, the proposed manifest must contain exactly one conventional SHA-256 entry
+for every sibling SQL file, matching its exact bytes. A new migration and its manifest must
+be dependency-closed before writes. A rejected plan receives expected checksum content
+computed by the runner. The runner only reads outside allowed_paths; it never expands write
+authority to fix an out-of-scope dependency. Reads are bounded to 512 SQL files and 8 MB.
+
+Recognized validator/check script edits require a repository-verifiable contradiction:
+the diagnostic's missing artifacts and checksum conditions are already satisfied on the
+unchanged exact-head checkout. If actual source obligations remain, changing validator
+diagnostics cannot satisfy the guard. Unsupported validator-defect evidence fails closed;
+opaque source/test errors still use the complete-repair prompt and exact Actions oracle.
+The guard does not execute product validators with credentials before commit.
+
+An incomplete/invalid plan is rejected before file writes and may receive at most two
+fresh complete replacement plans against the unchanged head, inside the same validation
+repair attempt. No rejected plan commits or consumes the two-commit recovery budget. Any
+unexpected checkout mutation stops regeneration. Exhaustion uses existing terminal cleanup.
+The same shared repair function serves all four source workflows; the workflow recovery
+limit remains two commits on the same Task-ID, Attempt, Control SHA and Product PR.
+
 Synthetic E2E regressions in `test_source_queue_controller_regression.py` exercise A -> B
 explicit handoff, overlapping fallback, immediate intake, missed-event reconciliation,
 non-success/cleanup/mismatched identity rejection, and ambiguous POST fencing without a
@@ -240,6 +269,10 @@ identity mismatch, timeout/status fallback, launch deduplication, and exact Gmai
 `test_repair_two_attempts.py` executes initial FAIL -> repair 1 FAIL -> repair 2 PASS in real
 local Git repositories, including recovery from a required-file revert. These tests prove
 controller logic; they do not claim a new production deployment or live Gmail delivery.
+`test_repair_completeness.py` covers aggregate partial repairs, diagnostic-only checksum
+edits, exact manifest repair, state-evidenced validator defects, already-correct paths,
+atomic migration dependencies, bounded regeneration without writes/commits, and scope/read
+boundaries using synthetic fixtures.
 
 GitHub event semantics: workflow_dispatch/repository_dispatch explicitly triggered with
 GITHUB_TOKEN can create runs; workflow_run additionally depends on default-branch workflow
