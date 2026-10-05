@@ -10,6 +10,7 @@ from wonjae_dispatcher_runner.direct_worker import (
     changed_paths,
     git_metadata_snapshot,
     load_direct_worker_route,
+    require_next_source_ready,
 )
 
 
@@ -51,6 +52,53 @@ projects:
         + "\n",
         encoding="utf-8",
     )
+    return path
+
+
+def registry_with_handoff(
+    tmp_path: Path,
+    action_type: str,
+    current_head: str,
+) -> Path:
+    handoffs = tmp_path / "handoffs"
+    handoffs.mkdir()
+    (handoffs / "ESC.yaml").write_text(
+        f"""
+schema_version: 1
+project: ESC
+updated_at: "2026-10-06T08:38:00+09:00"
+repository: ChoiWonJae850610/ESC
+current_branch: cloud-dev-v1
+current_head: {current_head}
+source_validation:
+  result: PASS
+  workflow: Validate ESC
+  run_id: 123
+last_completed_source:
+  id: ESC-OLD
+  title: Old task
+  pr: 1
+  integrated_sha: {current_head}
+  validation_run_id: 123
+next_action:
+  type: {action_type}
+  title: Current handoff task
+  source_task_id: ESC-NEXT
+  owner_action: null
+  source_scope:
+    - Make the bounded source change.
+""".strip()
+        + "\n",
+        encoding="utf-8",
+    )
+    path = registry(tmp_path)
+    content = path.read_text(encoding="utf-8")
+    content = content.replace(
+        "      runner_workflow: .github/workflows/direct-worker.yml\n",
+        "      runner_workflow: .github/workflows/direct-worker.yml\n"
+        "      handoff_path: handoffs/ESC.yaml\n",
+    )
+    path.write_text(content, encoding="utf-8")
     return path
 
 
@@ -117,3 +165,24 @@ def test_changed_paths_rejects_protected_authority_files(tmp_path):
     (repo / "AGENTS.md").write_text("changed\n", encoding="utf-8")
     with pytest.raises(DirectWorkerError, match="protected source path"):
         changed_paths(repo)
+
+
+def test_handoff_gates_next_source_work(tmp_path):
+    sha = "a" * 40
+    route = load_direct_worker_route(
+        registry_with_handoff(tmp_path, "SOURCE_READY", sha),
+        "ESC",
+    )
+    assert route.handoff is not None
+    assert route.handoff.next_action_title == "Current handoff task"
+    require_next_source_ready(route, sha)
+
+    with pytest.raises(DirectWorkerError, match="stale"):
+        require_next_source_ready(route, "b" * 40)
+
+    blocked = load_direct_worker_route(
+        registry_with_handoff(tmp_path / "manual", "MANUAL_QA", sha),
+        "ESC",
+    )
+    with pytest.raises(DirectWorkerError, match="MANUAL_QA"):
+        require_next_source_ready(blocked, sha)
