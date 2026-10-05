@@ -8,6 +8,7 @@ import pytest
 
 from wonjae_dispatcher_runner import product_patch as patch
 from wonjae_dispatcher_runner.repair_completeness import (
+    MAX_FAILURE_CHARS,
     RepairCompletenessError,
     check_repair_completeness,
     collect_repair_evidence,
@@ -123,9 +124,15 @@ def test_explicit_unsafe_ambiguous_or_unscoped_item_fails_closed(tmp_path, path)
               {"docs/A.md": "partial\n"})
 
 
-def test_failure_log_cannot_silently_drop_aggregate_header():
-    with pytest.raises(RepairCompletenessError, match="do not truncate"):
-        collect_repair_evidence("Missing paths: docs/A.md\n" + "x" * 80_000, ("docs/A.md",))
+def test_large_failure_log_is_fully_scanned_without_silently_dropping_aggregate():
+    failure = "Missing paths: docs/A.md\n" + ("validation noise\n" * 30_000)
+    assert len(failure) > 400_000
+    assert collect_repair_evidence(failure, ("docs/A.md",)).missing_paths == ("docs/A.md",)
+
+
+def test_failure_log_above_hard_transport_bound_fails_closed():
+    with pytest.raises(RepairCompletenessError, match="bounded read limit"):
+        collect_repair_evidence("x" * (MAX_FAILURE_CHARS + 1), ())
 
 
 def test_exact_allowed_path_with_spaces_is_unambiguous(tmp_path):
