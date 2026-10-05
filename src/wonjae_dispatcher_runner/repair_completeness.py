@@ -14,9 +14,11 @@ MAX_CHECKSUM_BYTES = 8_000_000
 EVIDENCE_PREFIX = "DISPATCHER_REPAIR_EVIDENCE="
 _ANSI = re.compile(r"\x1b\[[0-9;]*m")
 _TIMESTAMP = re.compile(r"^\ufeff?\d{4}-\d\d-\d\dT\S+\s+")
+_GH_LOG_PREFIX = re.compile(r"^\ufeff?[^\t\r\n]{1,500}\t[^\t\r\n]{1,500}\t(?=\d{4}-\d\d-\d\dT)")
 _MISSING_HEADER = re.compile(
     r"^(?:Error:\s*)?(?:[\w .-]+ )?missing (?:mandatory )?"
-    r"(?:source )?(?:artifacts|files|paths):\s*", re.IGNORECASE
+    r"(?:source )?(?:artifacts|files|paths):\s*",
+    re.IGNORECASE,
 )
 _MISSING_SINGLE = re.compile(
     r"^(?:Error:\s*)?(?:missing(?: (?:file|path|artifact))?\s*[: ]|"
@@ -38,7 +40,12 @@ class RepairEvidence:
 
 def _safe_path(path: str) -> bool:
     value = Path(path)
-    return bool(path) and not value.is_absolute() and ".." not in value.parts
+    return (
+        bool(re.fullmatch(r"[\w./-]+", path))
+        and not value.is_absolute()
+        and ".." not in value.parts
+        and value.as_posix() == path
+    )
 
 
 def _read(repo: Path, path: str, proposed: dict[str, str | None]) -> bytes | None:
@@ -69,21 +76,30 @@ def collect_repair_evidence(failure: str, allowed_paths: tuple[str, ...]) -> Rep
     manifests: set[str] = set()
     unscoped_missing_paths = False
     in_missing_list = False
-    for raw in failure[-MAX_FAILURE_CHARS:].splitlines():
-        line = _TIMESTAMP.sub("", _ANSI.sub("", raw)).strip()
+    if len(failure) > MAX_FAILURE_CHARS:
+        raise RepairCompletenessError(
+            "validation evidence exceeds bounded read limit; do not truncate"
+        )
+    for raw in failure.splitlines():
+        # gh run view --log-failed adds job and step TAB columns before the
+        # timestamp. Strip only that known transport format, never arbitrary prose.
+        line = _TIMESTAMP.sub("", _GH_LOG_PREFIX.sub("", _ANSI.sub("", raw))).strip()
         if line.startswith(EVIDENCE_PREFIX):
             try:
-                evidence = json.loads(line[len(EVIDENCE_PREFIX):])
+                evidence = json.loads(line[len(EVIDENCE_PREFIX) :])
             except (ValueError, TypeError) as exc:
                 raise RepairCompletenessError("invalid structured repair evidence") from exc
             if not isinstance(evidence, dict) or set(evidence) - {
-                "missing_paths", "checksum_manifests"
+                "missing_paths",
+                "checksum_manifests",
             }:
                 raise RepairCompletenessError("unsupported structured repair evidence")
             for key, destination in (("missing_paths", missing), ("checksum_manifests", manifests)):
                 values = evidence.get(key, [])
-                if not isinstance(values, list) or len(values) > MAX_SQL_FILES or any(
-                    not isinstance(value, str) or not _safe_path(value) for value in values
+                if (
+                    not isinstance(values, list)
+                    or len(values) > MAX_SQL_FILES
+                    or any(not isinstance(value, str) or not _safe_path(value) for value in values)
                 ):
                     raise RepairCompletenessError("invalid structured repair evidence paths")
                 destination.update(value for value in values if value in allowed)
@@ -94,37 +110,47 @@ def collect_repair_evidence(failure: str, allowed_paths: tuple[str, ...]) -> Rep
         header = _MISSING_HEADER.match(line)
         single = _MISSING_SINGLE.match(line)
         if header or single:
-            remainder = line[(header or single).end():]
+            remainder = line[(header or single).end() :]
             # Inline comma-separated exact paths; do not tokenize unrestricted prose.
-            missing.update(
-                value.strip(" `'") for value in remainder.split(",")
-                if value.strip(" `'") in allowed
-            )
-            if any(
-                _safe_path(value.strip(" `'")) and re.fullmatch(r"[\w./-]+", value.strip(" `'"))
-                and value.strip(" `'") not in allowed
-                for value in remainder.split(",") if value.strip()
-            ):
-                unscoped_missing_paths = True
+            for item in remainder.split(","):
+                value = item.strip().strip("`'\"")
+                if not value:
+                    if remainder.strip():
+                        raise RepairCompletenessError(
+                            "ambiguous empty item in explicit missing paths"
+                        )
+                    continue
+                if not _safe_path(value) or value not in allowed:
+                    raise RepairCompletenessError(
+                        "explicit missing path is unsafe, ambiguous or outside allowed_paths"
+                    )
+                missing.add(value)
             in_missing_list = bool(header)
         elif in_missing_list:
-            value = line.removeprefix("- ").strip(" `'")
+            value = line.removeprefix("- ").strip(" `'\"")
             if value in allowed:
                 missing.add(value)
-            elif not _safe_path(value) or not re.fullmatch(r"[\w./-]+", value):
+            elif not line or line.startswith(("at ", "Node.js ", "##[", "Error:")):
                 in_missing_list = False
             else:
-                unscoped_missing_paths = True
+                raise RepairCompletenessError(
+                    "explicit missing path is unsafe, ambiguous or outside allowed_paths"
+                )
         if (
             "Migration checksum manifest must contain exactly the canonical migration set." in line
-            or line.startswith((
-                "Error: Migration checksum mismatch:", "Migration checksum mismatch:"
-            ))
+            or line.startswith(
+                ("Error: Migration checksum mismatch:", "Migration checksum mismatch:")
+            )
             or re.fullmatch(
                 r"(?:Error: )?[Mm]igration [\w./-]+ checksum missing(?: from manifest)?\.?", line
             )
         ):
-            manifests.update(path for path in allowed if Path(path).name == "SHA256SUMS")
+            scoped_manifests = {path for path in allowed if Path(path).name == "SHA256SUMS"}
+            if not scoped_manifests:
+                raise RepairCompletenessError("checksum obligation has no allowed manifest")
+            manifests.update(scoped_manifests)
+    if unscoped_missing_paths:
+        raise RepairCompletenessError("explicit missing path is outside allowed_paths")
     return RepairEvidence(tuple(sorted(missing)), tuple(sorted(manifests)), unscoped_missing_paths)
 
 
@@ -134,8 +160,13 @@ def _checksum_errors(repo: Path, manifest: str, proposed: dict[str, str | None])
     if not target.resolve().is_relative_to(repo.resolve()):
         raise RepairCompletenessError("checksum directory escapes the repository")
     names = {path.name for path in target.glob("*.sql") if path.is_file()}
-    names.update(Path(path).name for path in proposed if Path(path).parent == directory
-                 and Path(path).suffix == ".sql" and proposed[path] is not None)
+    names.update(
+        Path(path).name
+        for path in proposed
+        if Path(path).parent == directory
+        and Path(path).suffix == ".sql"
+        and proposed[path] is not None
+    )
     if len(names) > MAX_SQL_FILES:
         raise RepairCompletenessError("checksum directory exceeds the bounded file limit")
     expected: dict[str, str] = {}
@@ -164,8 +195,9 @@ def _checksum_errors(repo: Path, manifest: str, proposed: dict[str, str | None])
     if content is not None and not malformed and actual == expected:
         return []
     required = "\n".join(f"{digest}  {name}" for name, digest in expected.items())
-    return [f"{manifest} must match the complete SQL set and exact bytes. "
-            f"Expected content:\n{required}"]
+    return [
+        f"{manifest} must match the complete SQL set and exact bytes. Expected content:\n{required}"
+    ]
 
 
 def check_repair_completeness(
@@ -187,16 +219,21 @@ def check_repair_completeness(
                 manifests.add(sibling)
     # Existing files in a missing list need no artificial touch. Still ensure the
     # proposed final tree retains every reported artifact.
-    problems = [f"missing artifact: {path}" for path in evidence.missing_paths
-                if not _read(repo, path, proposed)]
+    problems = [
+        f"missing artifact: {path}"
+        for path in evidence.missing_paths
+        if not _read(repo, path, proposed)
+    ]
     for manifest in sorted(manifests):
         problems.extend(_checksum_errors(repo, manifest, proposed))
     if problems:
-        raise RepairCompletenessError("Incomplete repair; resolve ALL obligations:\n"
-                                      + "\n".join(problems))
+        raise RepairCompletenessError(
+            "Incomplete repair; resolve ALL obligations:\n" + "\n".join(problems)
+        )
 
     validators = [
-        path for path in changed
+        path
+        for path in changed
         if Path(path).suffix in {".py", ".js", ".mjs", ".ts", ".sh"}
         and re.match(r"(?:validate|validator|check)[-_.]", Path(path).name)
     ]
@@ -205,10 +242,15 @@ def check_repair_completeness(
         # or checksum diagnostic is already false on the unchanged checkout.
         has_source_evidence = bool(evidence.missing_paths or evidence.checksum_manifests)
         baseline_missing = any(not _read(repo, path, {}) for path in evidence.missing_paths)
-        baseline_checksum = any(_checksum_errors(repo, path, {})
-                                for path in evidence.checksum_manifests)
-        if (not has_source_evidence or baseline_missing or baseline_checksum
-                or evidence.unscoped_missing_paths):
+        baseline_checksum = any(
+            _checksum_errors(repo, path, {}) for path in evidence.checksum_manifests
+        )
+        if (
+            not has_source_evidence
+            or baseline_missing
+            or baseline_checksum
+            or evidence.unscoped_missing_paths
+        ):
             raise RepairCompletenessError(
                 "Validator edit lacks repository-verifiable defect evidence. Fix source/test/doc/"
                 "manifest obligations; changing validator diagnostics is not a complete repair."

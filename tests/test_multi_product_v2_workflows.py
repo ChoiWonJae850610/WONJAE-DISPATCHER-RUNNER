@@ -105,7 +105,7 @@ def test_source_terminal_guard_closes_only_exact_product_pr() -> None:
     for project in ("CLASSMO", "WAFL", "ESC", "MUVEL"):
         assert f"product_token: ${{{{ secrets.{project}_WRITE_TOKEN }}}}" in workflow
     assert "terminalize_exact_pr(client, identity, body, result, pr_number)" in core
-    assert 'pr.get("headRefOid") != head' in core
+    assert 'pr.get("headRefOid") not in permitted_heads' in core
     assert 'metadata.get(key) != value' in core
     assert 'pr.get("mergedAt")' in core
     assert "product_pr_cleanup" in core
@@ -137,3 +137,4 @@ def test_non_success_handoff_and_checkpoint_are_common_and_budget_unchanged() ->
     core = Path(".github/workflows/source-terminal-core.yml").read_text(encoding="utf-8")
     assert "group: source-terminal-${{ inputs.project }}-${{ inputs.source_run_id }}" in core
     assert "cancel-in-progress: false" in core
+

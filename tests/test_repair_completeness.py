@@ -95,6 +95,39 @@ def test_e_already_correct_path_requires_no_touch(tmp_path):
     assert (tmp_path / allowed[0]).read_text() == "correct\n"
 
 
+@pytest.mark.parametrize("format", ["comma", "bullet", "plain", "structured"])
+def test_real_log_failed_transport_preserves_entire_aggregate(tmp_path, format):
+    paths = ("docs/A.md", "db/migrations/002_feature.sql", "tests/C.sql", "tests/D.sql")
+    if format == "structured":
+        lines = ["DISPATCHER_REPAIR_EVIDENCE=" + json.dumps({"missing_paths": list(paths)})]
+    else:
+        header = "Error: Migration 002 missing mandatory source artifacts:"
+        lines = [header + " " + ", ".join(paths)] if format == "comma" else [header] + [
+            ("- " if format == "bullet" else "") + path for path in paths
+        ]
+    failure = "\n".join(
+        "Typecheck, domain tests and export\tValidate repository\t"
+        "2026-10-05T07:00:04.2800978Z " + line for line in lines
+    )
+    assert set(collect_repair_evidence(failure, paths).missing_paths) == set(paths)
+    with pytest.raises(RepairCompletenessError, match="tests/C.sql"):
+        guard(tmp_path, failure, paths, {paths[0]: "doc only\n"})
+    guard(tmp_path, failure, paths, dict.fromkeys(paths, "complete\n"))
+
+
+@pytest.mark.parametrize("path", ["outside.txt", "../private.txt", "/private.txt",
+                                  "docs/*.md", "docs/A.md or docs/B.md"])
+def test_explicit_unsafe_ambiguous_or_unscoped_item_fails_closed(tmp_path, path):
+    with pytest.raises(RepairCompletenessError, match="unsafe, ambiguous or outside"):
+        guard(tmp_path, f"Missing paths: docs/A.md, {path}", ("docs/A.md",),
+              {"docs/A.md": "partial\n"})
+
+
+def test_failure_log_cannot_silently_drop_aggregate_header():
+    with pytest.raises(RepairCompletenessError, match="do not truncate"):
+        collect_repair_evidence("Missing paths: docs/A.md\n" + "x" * 80_000, ("docs/A.md",))
+
+
 def test_new_migration_requires_dependency_closed_manifest_even_before_checksum_failure(tmp_path):
     put(tmp_path, MANIFEST, "")
     failure = f"Missing file: {MIGRATION}"
@@ -123,14 +156,15 @@ def test_bounded_evidence_ignores_path_mentions_and_accepts_timestamped_missing_
 
 def test_structured_evidence_is_allowlisted_and_not_validator_authority():
     failure = 'DISPATCHER_REPAIR_EVIDENCE={"missing_paths":["docs/A.md","outside.txt"]}'
-    assert collect_repair_evidence(failure, ("docs/A.md",)).missing_paths == ("docs/A.md",)
+    with pytest.raises(RepairCompletenessError, match="outside allowed_paths"):
+        collect_repair_evidence(failure, ("docs/A.md",))
     with pytest.raises(RepairCompletenessError, match="unsupported"):
         collect_repair_evidence('DISPATCHER_REPAIR_EVIDENCE={"validator_defect":true}', ())
 
 
 def test_unscoped_condition_is_not_proof_of_validator_defect(tmp_path):
     put(tmp_path, "docs/A.md", "correct\n")
-    with pytest.raises(RepairCompletenessError, match="defect evidence"):
+    with pytest.raises(RepairCompletenessError, match="outside allowed_paths"):
         guard(tmp_path, "Missing paths:\ndocs/A.md\noutside.txt", ("docs/A.md", VALIDATOR),
               {VALIDATOR: "# diagnostic change cannot resolve an unscoped condition\n"})
 
@@ -167,7 +201,7 @@ def test_unchanged_crlf_sql_uses_actual_bytes_in_manifest(tmp_path):
 
 
 @pytest.mark.parametrize("repair_case", [
-    "aggregate", "checksum", "exhausted", "timeout_then_complete",
+    "aggregate", "aggregate_log_failed", "checksum", "exhausted", "timeout_then_complete",
     "timeout_exhausted", "incomplete_timeout_exhausted",
 ])
 def test_partial_plan_regeneration_stays_same_repair_without_commit(
@@ -197,7 +231,9 @@ def test_partial_plan_regeneration_stays_same_repair_without_commit(
     work = tmp_path / "work.json"
     paths = ((MIGRATION, MANIFEST) if repair_case == "checksum"
              else ("docs/A.md", "src/B.py", "tests/C.py"))
-    complete_replacement = repair_case in {"aggregate", "checksum", "timeout_then_complete"}
+    complete_replacement = repair_case in {
+        "aggregate", "aggregate_log_failed", "checksum", "timeout_then_complete"
+    }
     work.write_text(json.dumps({
         "schema_version": 1, "task_id": "CLASSMO-REPAIR-001", "project": "CLASSMO",
         "repository": "owner/product", "target_branch": "main", "source_base_sha": base,
@@ -255,6 +291,9 @@ def test_partial_plan_regeneration_stays_same_repair_without_commit(
     monkeypatch.setattr(patch, "Codex", Codex)
     failure = (f"Missing file: {MIGRATION}" if repair_case == "checksum"
                else "Missing paths:\n" + "\n".join(paths))
+    if repair_case == "aggregate_log_failed":
+        failure = ("Typecheck and export\tValidate repository\t2026-10-05T00:00:00.000Z "
+                   "Error: Feature missing mandatory source artifacts: " + ", ".join(paths))
     if complete_replacement:
         _, changed = patch.generate_and_apply_product_repair(
             repo, work, "a" * 40, tmp_path / "auth", failure

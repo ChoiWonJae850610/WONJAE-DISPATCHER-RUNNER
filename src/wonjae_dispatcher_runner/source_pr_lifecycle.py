@@ -379,7 +379,7 @@ class GhClient:
         self.runner_token = runner_token or product_token
 
     @staticmethod
-    def _run(args: list[str], token: str) -> str:
+    def _run(args: list[str], token: str, timeout_seconds: float = 45) -> str:
         env = os.environ.copy()
         env["GH_TOKEN"] = token
         completed = subprocess.run(
@@ -388,11 +388,13 @@ class GhClient:
             text=True,
             capture_output=True,
             env=env,
-            timeout=45,
+            timeout=timeout_seconds,
         )
         return completed.stdout
 
-    def get_pr(self, repository: str, number: int) -> dict[str, object]:
+    def get_pr(
+        self, repository: str, number: int, *, timeout_seconds: float = 45,
+    ) -> dict[str, object]:
         raw = self._run(
             [
                 "pr",
@@ -401,11 +403,21 @@ class GhClient:
                 "--repo",
                 repository,
                 "--json",
-                "number,url,state,isDraft,mergedAt,baseRefName,headRefName,headRefOid,body",
+                "number,url,state,isDraft,mergedAt,baseRefName,headRefName,headRefOid,body,headRepository",
             ],
             self.product_token,
+            timeout_seconds,
         )
         return json.loads(raw)
+
+    def get_product_commit(self, repository: str, sha: str) -> dict[str, object]:
+        return json.loads(self._run(["api", f"repos/{repository}/git/commits/{sha}"],
+                                    self.product_token))
+
+    def get_product_branch_head(self, repository: str, branch: str) -> str:
+        value = json.loads(self._run(["api", f"repos/{repository}/git/ref/heads/{branch}"],
+                                    self.product_token))
+        return str((value.get("object") or {}).get("sha") or "")
 
     def list_open_job_prs(
         self, repository: str, target_branch: str

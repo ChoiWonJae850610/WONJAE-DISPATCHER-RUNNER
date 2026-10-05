@@ -400,6 +400,9 @@ jobs:
             git commit -m "[$TASK_ID] Repair validation attempt $repair_attempt"
             repaired_head="$(git rev-parse HEAD)"
             echo "PILOT_HEAD_SHA=$repaired_head" >> "$GITHUB_ENV"
+            PILOT_HEAD_SHA="$repaired_head" PRODUCT_GH_TOKEN="$GH_TOKEN" \
+              GH_TOKEN="${{ github.token }}" PYTHONPATH="$GITHUB_WORKSPACE/src" \
+              python "$GITHUB_WORKSPACE/scripts/source_terminal.py" checkpoint --prepare-repair
             gh auth setup-git
             git push origin "HEAD:refs/heads/$PRODUCT_BRANCH"
             PILOT_HEAD_SHA="$repaired_head" PRODUCT_GH_TOKEN="$GH_TOKEN" \
@@ -547,6 +550,9 @@ jobs:
             printf -- '- runner_conclusion: `failure`\n'
             printf -- '- result: `%s`\n' "$terminal_status"
             printf -- '- recovery_state: `FINAL`\n'
+            if [ -n "${SOURCE_CHECKPOINT_EVIDENCE:-}" ]; then
+              printf -- '- repair_checkpoint_evidence: `%s`\n' "$SOURCE_CHECKPOINT_EVIDENCE"
+            fi
             printf -- '- runtime/device/physical: `NOT_INFERRED`\n'
           } > "$terminal_file"
 
@@ -661,3 +667,4 @@ jobs:
         run: |
           gh workflow run source-queue-controller.yml --repo "$GITHUB_REPOSITORY" --ref main \
             -f source_run_id="$GITHUB_RUN_ID"
+
