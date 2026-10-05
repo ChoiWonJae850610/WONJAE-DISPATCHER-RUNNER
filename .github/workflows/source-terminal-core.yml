@@ -46,6 +46,9 @@ jobs:
   finalize:
     runs-on: ubuntu-latest
     timeout-minutes: 8
+    concurrency:
+      group: source-terminal-${{ inputs.project }}-${{ inputs.source_run_id }}
+      cancel-in-progress: false
     steps:
       - name: Runner · trusted terminal code
         uses: actions/checkout@v6
