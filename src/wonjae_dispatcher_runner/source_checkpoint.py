@@ -289,6 +289,27 @@ def terminal_repair_head(
     """Called only after terminal run AND product-job authority is established."""
     old, pending = checkpoint["last_pr_head"], checkpoint.get("pending_repair_head", "")
     if not pending:
+        previous = checkpoint.get("previous_pr_head", "")
+        if not previous:
+            return old
+        if checkpoint.get("checkpoint_state") != "READY" or checkpoint.get(
+            "repair_commits"
+        ) not in {"1", "2"}:
+            raise SourceCheckpointError("invalid published repair checkpoint state")
+        # A cancellation can follow the comment update while another PR API
+        # replica still shows the prior head. Only terminal closure is authorized
+        # by the same persisted, direct-child head on the exact remote job branch.
+        if client.get_product_branch_head(identity.repository, identity.expected_branch) != old:
+            raise SourceCheckpointError("published repair branch differs from trusted checkpoint")
+        verify_repair_commit(client, identity, previous, old)
+        pr = client.get_pr(identity.repository, int(checkpoint["product_pr"]))
+        verify_pr(pr, identity, int(checkpoint["product_pr"]), revision, terminal=True)
+        if pr.get("headRefOid") not in {previous, old} or metadata_digest(pr) != checkpoint.get(
+            "metadata_sha256"
+        ):
+            raise SourceCheckpointError(
+                "terminal published PR differs from trusted repair checkpoint"
+            )
         return old
     if checkpoint.get("checkpoint_state") != "PUBLISHING_REPAIR" or checkpoint.get(
         "repair_commits", "0"

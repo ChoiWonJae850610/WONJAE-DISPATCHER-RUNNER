@@ -135,6 +135,10 @@ def reconcile_source_terminal(
                     "runner_workflow_path": path, "runner_head_sha": str(run["head_sha"])}
         if any(checkpoint.get(key) != value for key, value in expected.items()):
             raise SourceTerminalError("source run checkpoint mismatch")
+        optional_identity = {"product_job_branch": identity.expected_branch,
+                             "product_head_repository": identity.repository}
+        if any(checkpoint.get(key, value) != value for key, value in optional_identity.items()):
+            raise SourceTerminalError("source checkpoint job branch/head repository mismatch")
     if request.owner_reconciliation:
         pr_number, head = request.product_pr, request.last_head
         if checkpoint and (checkpoint.get("product_pr") != str(pr_number)
@@ -142,10 +146,6 @@ def reconcile_source_terminal(
             raise SourceTerminalError("Owner reconciliation differs from trusted checkpoint")
     elif checkpoint:
         pr_number, head = int(checkpoint["product_pr"]), checkpoint["last_pr_head"]
-        try:
-            head = terminal_repair_head(client, identity, checkpoint, str(revision))
-        except SourceCheckpointError as exc:
-            raise SourceTerminalError(str(exc)) from exc
     elif terminal and previous.get("product_pr"):
         pr_number, head = int(previous["product_pr"]), previous.get("last_pr_head", "")
     else:
@@ -158,6 +158,11 @@ def reconcile_source_terminal(
             raise SourceTerminalError("started source lacks an exact Product PR checkpoint")
     if request.product_pr is not None and request.product_pr != pr_number:
         raise SourceTerminalError("explicit Product PR mismatch")
+    if checkpoint and pr_number is not None:
+        try:
+            head = terminal_repair_head(client, identity, checkpoint, str(revision))
+        except SourceCheckpointError as exc:
+            raise SourceTerminalError(str(exc)) from exc
     if request.last_head and request.last_head != head:
         raise SourceTerminalError("explicit PR head mismatch")
 
@@ -172,6 +177,8 @@ def reconcile_source_terminal(
         permitted_heads = {head}
         if checkpoint.get("pending_repair_head") and head == checkpoint["pending_repair_head"]:
             permitted_heads.add(checkpoint["last_pr_head"])
+        elif checkpoint.get("checkpoint_state") == "READY" and checkpoint.get("previous_pr_head"):
+            permitted_heads.add(checkpoint["previous_pr_head"])
         if (int(pr.get("number") or 0) != pr_number
                 or any(metadata.get(key) != value for key, value in expected_pr.items())
                 or pr.get("headRefOid") not in permitted_heads

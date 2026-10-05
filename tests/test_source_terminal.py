@@ -257,6 +257,8 @@ def test_existing_inline_terminal_is_reconciled_without_duplicate_evidence_or_ma
         "merged",
         "queue",
         "checkpoint",
+        "checkpoint_branch",
+        "checkpoint_head_repository",
         "product_job_success",
         "untrusted_checkpoint",
     ],
@@ -290,6 +292,9 @@ def test_identity_mismatch_refuses_all_mutation(mismatch):
         github.issue["comments"][1]["body"] = github.issue["comments"][1]["body"].replace(
             RUNNER_HEAD, "e" * 40
         )
+    elif mismatch in {"checkpoint_branch", "checkpoint_head_repository"}:
+        key = "product_job_branch" if mismatch == "checkpoint_branch" else "product_head_repository"
+        github.issue["comments"][1]["body"] += f"\n- {key}: `owner/unrelated`"
     elif mismatch == "product_job_success":
         github.jobs[0]["conclusion"] = "success"
     else:
