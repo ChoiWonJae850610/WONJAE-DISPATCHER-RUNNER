@@ -102,3 +102,18 @@ def test_git_metadata_snapshot_detects_protected_mutation(tmp_path):
     before = git_metadata_snapshot(repo)
     git(repo, "config", "core.autocrlf", "false")
     assert git_metadata_snapshot(repo) != before
+
+
+def test_changed_paths_rejects_protected_authority_files(tmp_path):
+    repo = tmp_path / "repo-protected"
+    repo.mkdir()
+    git(repo, "init")
+    git(repo, "config", "user.email", "worker@example.invalid")
+    git(repo, "config", "user.name", "Direct Worker Test")
+    (repo / "AGENTS.md").write_text("rules\n", encoding="utf-8")
+    git(repo, "add", "AGENTS.md")
+    git(repo, "commit", "-m", "base")
+
+    (repo / "AGENTS.md").write_text("changed\n", encoding="utf-8")
+    with pytest.raises(DirectWorkerError, match="protected source path"):
+        changed_paths(repo)
