@@ -1,10 +1,11 @@
 import importlib.util
 import json
+from argparse import Namespace
 from copy import deepcopy
 from pathlib import Path
 
 import pytest
-from test_source_terminal import CONTROL, HEAD, OWNER, REPOSITORY, GitHub
+from test_source_terminal import CONTROL, HEAD, OWNER, REPOSITORY, GitHub, Mail, reconcile
 
 from wonjae_dispatcher_runner.source_terminal import CHECKPOINT_HEADING, SourceTerminalError
 
@@ -100,3 +101,31 @@ def test_non_owner_command_is_rejected_before_read_or_mutation(tmp_path, monkeyp
     with pytest.raises(SourceTerminalError, match="Owner-authored"):
         cli.select()
     assert github.mutations == []
+
+
+def test_cli_replays_already_closed_wake_without_duplicate_mutations(tmp_path, monkeypatch):
+    github, mail = GitHub(), Mail()
+    reconcile(github, mail)
+    setup_environment(tmp_path, monkeypatch, github)
+    for key in ("GMAIL_ENABLED", "GMAIL_USERNAME", "GMAIL_APP_PASSWORD"):
+        monkeypatch.setenv(key, "true")
+    monkeypatch.setattr(cli, "GmailClient", lambda *args: mail)
+    monkeypatch.setattr(cli.queue, "read_control_for_registration", lambda *args: github.record)
+
+    def resolve(args):
+        assert args.allow_closed is True
+        Path(args.output).write_text(json.dumps(github.record))
+
+    monkeypatch.setattr(cli.queue, "resolve_control", resolve)
+    before = list(github.mutations)
+    args = Namespace(
+        project="CLASSMO",
+        source_run_id=101,
+        wake_issue_number=11,
+        product_pr=None,
+        last_head="",
+        owner_reconciliation=False,
+    )
+    assert cli.finalize(args) == 0
+    assert github.mutations == before
+    assert len(mail.sent) == 1

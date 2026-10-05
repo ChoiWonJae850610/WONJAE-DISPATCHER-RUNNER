@@ -207,7 +207,9 @@ def finalize(args: argparse.Namespace) -> int:
         raise SourceTerminalError("finalizer project/run mismatch")
     project, task, control, source = parsed
     issue = client.get_issue(args.wake_issue_number)
-    registration = queue.require_owner_registration(issue, owner=owner, expected_project=project)
+    registration = queue.require_owner_registration(
+        issue, owner=owner, expected_project=project, require_open=False
+    )
     record = queue.read_control_for_registration(registration)
     with tempfile.TemporaryDirectory(
         prefix="source-terminal-", dir=os.environ.get("RUNNER_TEMP")
