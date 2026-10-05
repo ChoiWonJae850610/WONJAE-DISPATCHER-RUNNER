@@ -169,14 +169,18 @@ def test_e_only_old_head_lag_is_retryable(published, mismatch):
     assert clock.waits == [] and github.mutations == before
 
 
-@pytest.mark.parametrize("boundary", ["before_push", "after_push", "after_readback"])
+@pytest.mark.parametrize(
+    "boundary", ["before_push", "after_push", "after_readback", "after_readback_stale"]
+)
 def test_g_active_transition_not_terminal_but_real_cancel_cleans_exact_pr(published, boundary):
     github, identity, _, heads, _, _ = published
     fields = transition(published)
     if boundary == "before_push":
         github.pr["headRefOid"] = github.remote_head = heads[0]
-    elif boundary == "after_readback":
+    elif boundary.startswith("after_readback"):
         cp.refresh_checkpoint(github, identity, fields)
+        if boundary == "after_readback_stale":
+            github.pr["headRefOid"] = heads[0]
     github.run["status"] = github.jobs[0]["status"] = "in_progress"
     before = list(github.mutations)
     with pytest.raises(SourceTerminalError, match="status"):
