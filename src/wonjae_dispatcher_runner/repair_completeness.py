@@ -8,8 +8,7 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
-MAX_FAILURE_CHARS = 80_000
-MAX_SQL_FILES = 512
+# Full failed-step logs can repeat assertion payloads far beyond the model prompt budget.\n# Scan the complete trusted transport payload up to this hard bound so explicit repair\n# obligations are never silently lost; product_patch separately bounds the Codex prompt.\nMAX_FAILURE_CHARS = 2_000_000\nMAX_SQL_FILES = 512
 MAX_CHECKSUM_BYTES = 8_000_000
 EVIDENCE_PREFIX = "DISPATCHER_REPAIR_EVIDENCE="
 _ANSI = re.compile(r"\x1b\[[0-9;]*m")
