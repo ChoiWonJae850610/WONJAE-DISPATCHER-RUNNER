@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import subprocess
@@ -68,8 +69,20 @@ def _safe_relative(path: str, label: str) -> None:
 
 def changed_paths(repo_path: Path) -> tuple[str, ...]:
     tracked = _git(repo_path, "diff", "--name-only", "-z", "--")
+    staged = _git(repo_path, "diff", "--cached", "--name-only", "-z", "--")
     untracked = _git(repo_path, "ls-files", "--others", "--exclude-standard", "-z")
-    paths = tuple(dict.fromkeys(filter(None, (*tracked.split("\x00"), *untracked.split("\x00")))))
+    paths = tuple(
+        dict.fromkeys(
+            filter(
+                None,
+                (
+                    *tracked.split("\x00"),
+                    *staged.split("\x00"),
+                    *untracked.split("\x00"),
+                ),
+            )
+        )
+    )
     root = repo_path.resolve()
     for relative in paths:
         _safe_relative(relative, "worktree")
@@ -81,6 +94,33 @@ def changed_paths(repo_path: Path) -> tuple[str, ...]:
         if target.is_symlink():
             raise DirectWorkerError("Direct Worker may not mutate a symlink path")
     return paths
+
+
+def git_metadata_snapshot(repo_path: Path) -> str:
+    git_dir = repo_path / ".git"
+    if not git_dir.is_dir():
+        raise DirectWorkerError("Direct Worker requires a normal Git checkout")
+
+    watched = [git_dir / "config", git_dir / "HEAD"]
+    head_text = (git_dir / "HEAD").read_text(encoding="utf-8").strip()
+    if head_text.startswith("ref: "):
+        relative_ref = head_text.removeprefix("ref: ").strip()
+        _safe_relative(relative_ref, "git ref")
+        watched.append(git_dir / relative_ref)
+
+    hooks_dir = git_dir / "hooks"
+    if hooks_dir.is_dir():
+        watched.extend(sorted(path for path in hooks_dir.rglob("*") if path.is_file()))
+
+    digest = hashlib.sha256()
+    for path in watched:
+        relative = path.relative_to(git_dir).as_posix()
+        digest.update(relative.encode("utf-8"))
+        digest.update(b"\x00")
+        if path.is_file():
+            digest.update(path.read_bytes())
+        digest.update(b"\x00")
+    return digest.hexdigest()
 
 
 def load_direct_worker_route(registry_path: Path, project: str) -> DirectWorkerRoute:
@@ -242,6 +282,7 @@ def run_direct_worker(
     starting_sha = git_head(repo_path)
     if changed_paths(repo_path):
         raise DirectWorkerError("product checkout must be clean before Direct Worker")
+    git_metadata = git_metadata_snapshot(repo_path)
 
     safe_path = os.environ.get("PATH", "/usr/local/bin:/usr/bin:/bin")
     safe_home = os.environ.get("HOME", str(Path.home()))
@@ -330,6 +371,8 @@ def run_direct_worker(
     status_value = str(getattr(result.status, "value", result.status)).lower()
     if status_value != "completed" or result.error is not None:
         raise DirectWorkerError("Direct Worker Codex turn did not complete")
+    if git_metadata_snapshot(repo_path) != git_metadata:
+        raise DirectWorkerError("Codex modified protected Git metadata")
     if git_head(repo_path) != starting_sha:
         raise DirectWorkerError(
             "Codex changed Git history; Direct Worker requires trusted Git writes"
