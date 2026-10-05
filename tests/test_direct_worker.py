@@ -8,6 +8,7 @@ import pytest
 from wonjae_dispatcher_runner.direct_worker import (
     DirectWorkerError,
     changed_paths,
+    git_metadata_snapshot,
     load_direct_worker_route,
 )
 
@@ -78,6 +79,7 @@ def test_changed_paths_reads_real_worktree_and_rejects_symlink(tmp_path):
     git(repo, "commit", "-m", "base")
     (repo / "a.txt").write_text("b\n", encoding="utf-8")
     (repo / "new.txt").write_text("n\n", encoding="utf-8")
+    git(repo, "add", "a.txt")
     assert set(changed_paths(repo)) == {"a.txt", "new.txt"}
 
     outside = tmp_path / "outside.txt"
@@ -85,3 +87,18 @@ def test_changed_paths_reads_real_worktree_and_rejects_symlink(tmp_path):
     (repo / "link.txt").symlink_to(outside)
     with pytest.raises(DirectWorkerError, match="symlink|escapes"):
         changed_paths(repo)
+
+
+def test_git_metadata_snapshot_detects_protected_mutation(tmp_path):
+    repo = tmp_path / "repo-meta"
+    repo.mkdir()
+    git(repo, "init")
+    git(repo, "config", "user.email", "worker@example.invalid")
+    git(repo, "config", "user.name", "Direct Worker Test")
+    (repo / "a.txt").write_text("a\n", encoding="utf-8")
+    git(repo, "add", "a.txt")
+    git(repo, "commit", "-m", "base")
+
+    before = git_metadata_snapshot(repo)
+    git(repo, "config", "core.autocrlf", "false")
+    assert git_metadata_snapshot(repo) != before
