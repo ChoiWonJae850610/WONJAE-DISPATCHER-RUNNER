@@ -74,3 +74,11 @@ verify both Trash presence and Inbox absence. Terminal RESULT stays for Owner re
 paths apply to the final cumulative source-base diff, including worktree changes, rather
 than every repair commit. A later repair may restore an earlier revert. Before integration,
 require the final cumulative required paths even if Actions validation passed.
+29. Source repair must be the smallest COMPLETE repair of all actionable items reported
+together, with dependencies closed. Before writing, reject plans that leave explicit
+allowlisted missing artifacts or SQL/SHA256SUMS obligations unresolved. Recognized validator
+edits require repository-verifiable evidence that its reported source condition is already
+false; changing diagnostics alone is not a source repair. Use at most two replacement plan
+generations inside the same repair attempt against the unchanged checkout. These rejected
+plans consume no repair commit. Keep the existing maximum of two repair commits, exact
+head/integrated validation, scope/security boundaries, terminal cleanup, and KDN exclusion.
