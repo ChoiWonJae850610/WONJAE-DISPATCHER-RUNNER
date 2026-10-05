@@ -61,7 +61,7 @@ def registry_with_handoff(
     current_head: str,
 ) -> Path:
     handoffs = tmp_path / "handoffs"
-    handoffs.mkdir()
+    handoffs.mkdir(parents=True)
     (handoffs / "ESC.yaml").write_text(
         f"""
 schema_version: 1
