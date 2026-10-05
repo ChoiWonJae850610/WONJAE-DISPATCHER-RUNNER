@@ -329,3 +329,31 @@ Regression coverage includes `test_repair_completeness.py`, `test_source_checkpo
 and `test_source_recovery_lifecycle.py`. The latter executes the actual four workflow
 shells with real local Git commits/push/merge and simulated Actions/PR transport.
 These synthetic proofs do not claim live product/runtime/device completion.
+
+### Source execution reliability
+
+Initial and repair planning use fresh read-only SDK sessions with 480-second turn
+deadlines. Narrowly recognized model-capacity/transport errors share the existing
+two replacement candidates with invalid/incomplete plans; a clean exact HEAD is
+required before every candidate. Transient errors back off 10/20 seconds. Authentication,
+usage limits and unknown failures stop; committed repair maximum remains two.
+
+The four source workflows share an Actions REST observer. Only an exact completed
+failure authorizes repair. Pending runs wait within the unchanged 60-minute job;
+cancelled/timed-out/manual/unknown results and identity/read failures stop without
+repair. Exact run/repository/head-repository/workflow/event/SHA checks apply to every
+read. Recognized GET-only transport/429/5xx failures have a 90-second consecutive
+recovery window; no annotation reads or mutating dispatch retries are added.
+
+Automatic terminal fallback ignores skipped/non-source events. Provider fallback
+paginates exact Owner issues and trusted bot comments, binds lifecycle identity and
+lets terminal completion supersede historical QUEUED for existing idempotent mail.
+FAILED/manual provider status comments carry full identity. No live provider or mail
+operation is part of the regression tests. Git paths are NUL-delimited; required
+reads and text/binary writes reject symlink aliases and escapes, with batch binary
+target preflight. Original scope, exact validation, queue fencing and KDN exclusion remain.
+
+Regression coverage: test_readonly_plan_recovery.py, test_source_validation.py,
+test_source_recovery_lifecycle.py, test_source_terminal_cli.py, test_provider_guard.py
+and test_product_path_boundaries.py. Tests use synthetic Git/SDK/Actions/provider
+transport and actual workflow shell snippets; they do not run product tasks.

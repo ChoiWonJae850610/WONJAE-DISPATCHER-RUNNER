@@ -129,3 +129,29 @@ def test_cli_replays_already_closed_wake_without_duplicate_mutations(tmp_path, m
     assert cli.finalize(args) == 0
     assert github.mutations == before
     assert len(mail.sent) == 1
+
+
+@pytest.mark.parametrize("event_type,conclusion", [
+    ("issues", "skipped"), ("issues", "failure"), ("workflow_dispatch", "skipped"),
+])
+def test_non_source_event_has_no_terminal_authority_and_no_spurious_failure(
+    tmp_path, monkeypatch, event_type, conclusion,
+):
+    github = GitHub()
+    github.run.update(event=event_type, conclusion=conclusion,
+                      display_title="historical non-source adapter")
+    event, output = setup_environment(tmp_path, monkeypatch, github)
+    monkeypatch.setenv("GITHUB_EVENT_NAME", "workflow_run")
+    event.write_text(json.dumps({"workflow_run": {"id": 101}}))
+    assert cli.select() == 0
+    assert not output.exists()
+    assert github.mutations == []
+
+
+def test_guard_filters_automatic_non_source_events_without_reducing_terminal_set():
+    text = Path(".github/workflows/product-terminal-guard.yml").read_text()
+    assert "github.event.workflow_run.event == 'workflow_dispatch'" in text
+    assert "github.event.workflow_run.conclusion != 'success'" not in text
+    for status in ("failure", "cancelled", "timed_out", "action_required",
+                   "neutral", "stale", "startup_failure"):
+        assert f"github.event.workflow_run.conclusion == '{status}'" in text

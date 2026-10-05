@@ -76,51 +76,37 @@ jobs:
           set -euo pipefail
           issues_json="$RUNNER_TEMP/provider-issues.json"
           comments_json="$RUNNER_TEMP/provider-comments.json"
-          gh api "repos/$GITHUB_REPOSITORY/issues?state=all&per_page=100&sort=created&direction=desc" > "$issues_json"
-          issue_number="$(jq -r --arg title "$WAKE_TITLE" '[.[] | select(.pull_request == null and .title == $title)] | first | .number // empty' "$issues_json")"
-          test -n "$issue_number" || { echo "::error::Exact provider wake issue was not found."; exit 1; }
-          echo "ISSUE_NUMBER=$issue_number" >> "$GITHUB_ENV"
-          gh api "repos/$GITHUB_REPOSITORY/issues/$issue_number/comments?per_page=100" > "$comments_json"
-          COMMENTS_JSON="$comments_json" python - <<'PY'
+          gh api --paginate --slurp \
+            "repos/$GITHUB_REPOSITORY/issues?state=all&per_page=100&sort=created&direction=desc" > "$issues_json"
+          issue_number="$(PYTHONPATH="$GITHUB_WORKSPACE/src" ISSUES_JSON="$issues_json" python - <<'PY'
           import json
           import os
-          import re
           from pathlib import Path
+          from wonjae_dispatcher_runner.provider_guard import exact_provider_wake
 
-          comments = json.loads(Path(os.environ["COMMENTS_JSON"]).read_text(encoding="utf-8"))
-          bodies = [item.get("body") or "" for item in comments if isinstance(item, dict)]
-          terminal_body = next(
-              (
-                  body
-                  for body in reversed(bodies)
-                  if "## Dispatcher v2 provider completion evidence" in body
-              ),
-              "",
+          pages = json.loads(Path(os.environ["ISSUES_JSON"]).read_text())
+          issue = exact_provider_wake(
+              [item for page in pages for item in page],
+              title=os.environ["WAKE_TITLE"], owner=os.environ["GITHUB_REPOSITORY_OWNER"],
           )
-          terminal = bool(terminal_body)
-          queued = any("## Dispatcher v2 provider QUEUED evidence" in body for body in bodies)
-          started_body = next(
-              (body for body in reversed(bodies) if "## Dispatcher v2 provider STARTED evidence" in body),
-              "",
+          print(issue["number"])
+          PY
+          )"
+          echo "ISSUE_NUMBER=$issue_number" >> "$GITHUB_ENV"
+          gh api --paginate --slurp \
+            "repos/$GITHUB_REPOSITORY/issues/$issue_number/comments?per_page=100" > "$comments_json"
+          PYTHONPATH="$GITHUB_WORKSPACE/src" COMMENTS_JSON="$comments_json" python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          from wonjae_dispatcher_runner.provider_guard import provider_lifecycle
+
+          pages = json.loads(Path(os.environ["COMMENTS_JSON"]).read_text())
+          values = provider_lifecycle(
+              [item for page in pages for item in page],
+              task_id=os.environ["TASK_ID"], control_sha=os.environ["CONTROL_SHA"],
+              source_sha=os.environ["SOURCE_SHA"],
           )
-          values = {
-              "PROVIDER_TERMINAL_EXISTS": "true" if terminal else "false",
-              "PROVIDER_QUEUED_EXISTS": "true" if queued else "false",
-              "PROVIDER_STARTED_EXISTS": "true" if started_body else "false",
-          }
-          if terminal_body:
-              result_match = re.search(r"- result: `([^`]+)`", terminal_body)
-              if result_match:
-                  values["PROVIDER_TERMINAL_RESULT"] = result_match.group(1)
-          if started_body:
-              for key, pattern in {
-                  "ATTEMPT": r"- attempt: `([^\`]+)`",
-                  "REVISION": r"- revision: `([^\`]+)`",
-                  "PROVIDER_ACTION": r"- action: `([^\`]+)`",
-              }.items():
-                  match = re.search(pattern, started_body)
-                  if match:
-                      values[key] = match.group(1)
           with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as handle:
               for key, value in values.items():
                   handle.write(f"{key}={value}\n")

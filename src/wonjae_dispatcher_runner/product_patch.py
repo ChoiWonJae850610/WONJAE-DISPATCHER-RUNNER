@@ -8,6 +8,7 @@ import subprocess
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+from time import sleep
 
 from openai_codex import ApprovalMode, Codex, CodexConfig, Sandbox
 
@@ -38,6 +39,14 @@ PROHIBITED_FAILURE_MARKERS = (
 
 class ProductPilotError(RuntimeError):
     """Raised when a product pilot violates its bounded work order."""
+
+
+class CodexPlanTransientError(RuntimeError):
+    """A narrowly recognized read-only SDK failure, before any trusted writes."""
+
+
+class CodexPlanSessionError(RuntimeError):
+    """Missing authentication is a gate, not a regeneratable edit plan."""
 
 
 @dataclass(frozen=True)
@@ -90,13 +99,13 @@ def git_head(repo_path: Path) -> str:
 
 
 def changed_paths(repo_path: Path) -> list[str]:
-    output = _git(repo_path, "status", "--porcelain=v1", "--untracked-files=all")
+    output = _git(repo_path, "status", "--porcelain=v1", "--untracked-files=all", "-z")
     paths: list[str] = []
-    for line in output.splitlines():
+    for line in filter(None, output.split("\x00")):
         if len(line) < 4:
             raise ProductPilotError("unexpected git status entry")
         path = line[3:]
-        if " -> " in path:
+        if any(code in line[:2] for code in "RC"):
             raise ProductPilotError("renames are not allowed in the product pilot")
         paths.append(path)
     return paths
@@ -104,8 +113,8 @@ def changed_paths(repo_path: Path) -> list[str]:
 
 def branch_diff_paths(repo_path: Path, base_sha: str) -> tuple[str, ...]:
     base = require_sha(base_sha)
-    output = _git(repo_path, "diff", "--name-only", f"{base}...HEAD")
-    paths = tuple(line.strip() for line in output.splitlines() if line.strip())
+    output = _git(repo_path, "diff", "--name-only", "-z", f"{base}...HEAD")
+    paths = tuple(filter(None, output.split("\x00")))
     for relative in paths:
         value = Path(relative)
         if value.is_absolute() or ".." in value.parts:
@@ -122,9 +131,9 @@ def validate_branch_scope(
 ) -> tuple[str, ...]:
     # Include the actual worktree against the source base. A union of historical
     # HEAD paths and repair paths incorrectly accepts a reverted required file.
-    output = _git(repo_path, "diff", "--name-only", work_order.source_base_sha)
-    untracked = _git(repo_path, "ls-files", "--others", "--exclude-standard")
-    paths = tuple(dict.fromkeys((*output.splitlines(), *untracked.splitlines())))
+    output = _git(repo_path, "diff", "--name-only", "-z", work_order.source_base_sha)
+    untracked = _git(repo_path, "ls-files", "--others", "--exclude-standard", "-z")
+    paths = tuple(dict.fromkeys(filter(None, (*output.split("\x00"), *untracked.split("\x00")))))
     allowed = set(work_order.allowed_paths)
     if any(path not in allowed for path in (*paths, *extra_paths)):
         raise ProductPilotError("product branch contains a path outside the work order")
@@ -155,6 +164,17 @@ def _validate_relative_paths(paths: tuple[str, ...], label: str) -> None:
         path_value = Path(relative)
         if path_value.is_absolute() or ".." in path_value.parts:
             raise ProductPilotError(f"{label} contains an unsafe path")
+
+
+def _product_path(repo_path: Path, relative: str) -> Path:
+    target = repo_path / relative
+    root = repo_path.resolve()
+    resolved = target.resolve()
+    if not resolved.is_relative_to(root):
+        raise ProductPilotError("product path escapes the product repository")
+    if resolved.relative_to(root).as_posix() != Path(relative).as_posix():
+        raise ProductPilotError("product path aliases another repository path through a symlink")
+    return target
 
 
 def _binary_assets(
@@ -371,9 +391,7 @@ def apply_edit_plan(
         if edit.path not in allowed:
             raise ProductPilotError("edit plan path escaped the work order")
         if edit.path not in contents:
-            target = repo_path / edit.path
-            if not target.resolve().is_relative_to(repo_path.resolve()):
-                raise ProductPilotError("edit plan path escapes the product repository")
+            target = _product_path(repo_path, edit.path)
             value = target.read_text(encoding="utf-8") if target.is_file() else None
             contents[edit.path] = value
             original[edit.path] = value
@@ -437,9 +455,11 @@ def apply_binary_assets(
     repo_path: Path,
     work_order: ProductWorkOrder,
 ) -> tuple[str, ...]:
+    # Validate every asset before the first write, including existing parent/file
+    # symlinks. Binary writes retain the same scope boundary as text writes.
+    targets = [_product_path(repo_path, asset.path) for asset in work_order.binary_assets]
     written: list[str] = []
-    for asset in work_order.binary_assets:
-        target = repo_path / asset.path
+    for asset, target in zip(work_order.binary_assets, targets, strict=True):
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(asset.content)
         if hashlib.sha256(target.read_bytes()).hexdigest() != asset.sha256:
@@ -452,7 +472,7 @@ def _required_context(repo_path: Path, work_order: ProductWorkOrder) -> str:
     chunks: list[str] = []
     total = 0
     for relative in work_order.required_reads:
-        path = repo_path / relative
+        path = _product_path(repo_path, relative)
         if not path.is_file():
             raise ProductPilotError(f"required product read is missing: {relative}")
         content = path.read_text(encoding="utf-8")
@@ -548,7 +568,7 @@ def _repair_context(repo_path: Path, work_order: ProductWorkOrder) -> str:
     chunks: list[str] = []
     total = 0
     for relative in paths:
-        path = repo_path / relative
+        path = _product_path(repo_path, relative)
         if relative in binary_paths:
             content = "<BINARY ASSET; trusted runner-owned, not text-editable>"
         elif not path.is_file():
@@ -639,6 +659,44 @@ def _repair_prompt(
     )
 
 
+def _run_readonly_plan(config, repo_path, prompt, output_schema):
+    # One fresh, bounded SDK session per candidate. The same task/scope/model is
+    # retained; retrying read-only planning must never become a new product run.
+    try:
+        with repair_plan_deadline(), Codex(config=config) as codex:
+            account = codex.account(refresh_token=False)
+            if account.account is None:
+                raise CodexPlanSessionError("Codex account session is missing")
+            thread = codex.thread_start(
+                approval_mode=ApprovalMode.deny_all,
+                cwd=str(repo_path),
+                ephemeral=True,
+                sandbox=Sandbox.read_only,
+                config={"history": {"persistence": "none"}, "allow_login_shell": False},
+            )
+            result = thread.run(
+                prompt,
+                approval_mode=ApprovalMode.deny_all,
+                output_schema=output_schema,
+                sandbox=Sandbox.read_only,
+            )
+    except (TimeoutError, ConnectionResetError) as exc:
+        raise CodexPlanTransientError("CODEX_PLAN_TRANSPORT_TIMEOUT_OR_RESET") from exc
+    except RuntimeError as exc:
+        # The pinned SDK raises RuntimeError(turn.error.message), without exposing
+        # its structured error code. Match only the exact observed capacity error;
+        # authentication, usage limits, unsupported models and unknown errors stop.
+        if type(exc) is RuntimeError and str(exc).strip() == (
+            "Selected model is at capacity. Please try a different model."
+        ):
+            raise CodexPlanTransientError("CODEX_PLAN_MODEL_CAPACITY") from exc
+        raise
+    status = str(getattr(result.status, "value", result.status)).lower()
+    if status != "completed" or result.error is not None:
+        raise ProductPilotError("Codex source plan turn did not complete successfully")
+    return result
+
+
 def generate_and_apply_product_repair(
     repo_path: Path,
     work_order_path: Path,
@@ -706,6 +764,8 @@ def generate_and_apply_product_repair(
     prior_failure: str | None = None
     prior_plan: str | None = None
     for plan_attempt in range(MAX_REPAIR_PLAN_REGENERATION_ATTEMPTS + 1):
+        if git_head(repo_path) != current_head or changed_paths(repo_path):
+            raise ProductPilotError("repair checkout changed before read-only planning")
         prompt = _repair_prompt(
             work_order, control_sha, current_head, context, validation_failure
         )
@@ -725,29 +785,7 @@ def generate_and_apply_product_repair(
                     + prior_plan
                 )
         try:
-            # A fresh SDK/app-server per plan prevents a timed-out turn from continuing
-            # behind its replacement. The pinned SDK's close terminates its subprocess
-            # and uses a two-second kill fallback plus bounded reader-thread joins.
-            with repair_plan_deadline(), Codex(config=config) as codex:
-                account = codex.account(refresh_token=False)
-                if account.account is None:
-                    raise ProductPilotError("Codex account session is missing")
-                thread = codex.thread_start(
-                    approval_mode=ApprovalMode.deny_all,
-                    cwd=str(repo_path),
-                    ephemeral=True,
-                    sandbox=Sandbox.read_only,
-                    config={"history": {"persistence": "none"}, "allow_login_shell": False},
-                )
-                result = thread.run(
-                    prompt,
-                    approval_mode=ApprovalMode.deny_all,
-                    output_schema=output_schema,
-                    sandbox=Sandbox.read_only,
-                )
-            status = str(getattr(result.status, "value", result.status)).lower()
-            if status != "completed" or result.error is not None:
-                raise ProductPilotError("Codex repair turn did not complete successfully")
+            result = _run_readonly_plan(config, repo_path, prompt, output_schema)
             prior_plan = None
             edits = parse_edit_plan(result.final_response or "", work_order)
             candidate = json.dumps([
@@ -768,7 +806,7 @@ def generate_and_apply_product_repair(
             )
             validate_branch_scope(repo_path, work_order, applied, require_required_paths=False)
             return work_order, applied
-        except (ProductPilotError, RepairPlanTimeout) as exc:
+        except (ProductPilotError, RepairPlanTimeout, CodexPlanTransientError) as exc:
             if git_head(repo_path) != current_head or changed_paths(repo_path):
                 raise ProductPilotError("repair failed with unexpected checkout mutation") from exc
             if plan_attempt >= MAX_REPAIR_PLAN_REGENERATION_ATTEMPTS:
@@ -776,6 +814,10 @@ def generate_and_apply_product_repair(
                     f"bounded repair plan regeneration exhausted before commit: {exc}"
                 ) from exc
             prior_failure = str(exc)
+            if isinstance(exc, CodexPlanTransientError):
+                prior_plan = None
+                print(f"CODEX_PLAN_RECOVERY_REASON={exc}")
+                sleep(10 * (plan_attempt + 1))
             print("REPAIR_PLAN_RECOVERY="
                   f"{plan_attempt + 1}/{MAX_REPAIR_PLAN_REGENERATION_ATTEMPTS}")
     raise ProductPilotError("bounded repair plan regeneration exhausted unexpectedly")
@@ -834,80 +876,48 @@ def generate_and_apply_product_patch(
     }
 
     prior_failure: str | None = None
-    with Codex(config=config) as codex:
-        account = codex.account(refresh_token=False)
-        if account.account is None:
-            raise ProductPilotError("Codex account session is missing")
-
-        for plan_attempt in range(MAX_PLAN_REGENERATION_ATTEMPTS + 1):
-            prompt = _bounded_prompt(work_order, control_sha, context)
-            if prior_failure is not None:
-                prompt = _prestarted_recovery_prompt(
-                    prompt,
-                    prior_failure,
-                    plan_attempt,
+    for plan_attempt in range(MAX_PLAN_REGENERATION_ATTEMPTS + 1):
+        if git_head(repo_path) != work_order.source_base_sha or changed_paths(repo_path):
+            raise ProductPilotError("product checkout changed before read-only planning")
+        prompt = _bounded_prompt(work_order, control_sha, context)
+        if prior_failure is not None:
+            prompt = _prestarted_recovery_prompt(prompt, prior_failure, plan_attempt)
+        try:
+            result = _run_readonly_plan(config, repo_path, prompt, output_schema)
+            edits = parse_edit_plan(result.final_response or "", work_order)
+            if git_head(repo_path) != work_order.source_base_sha or changed_paths(repo_path):
+                raise ProductPilotError(
+                    "product repository changed during the read-only Codex turn"
                 )
-            thread = codex.thread_start(
-                approval_mode=ApprovalMode.deny_all,
-                cwd=str(repo_path),
-                ephemeral=True,
-                sandbox=Sandbox.read_only,
-                config={
-                    "history": {"persistence": "none"},
-                    "allow_login_shell": False,
-                },
+            apply_edit_plan(
+                repo_path, edits, work_order,
+                require_required_paths=not bool(work_order.binary_assets),
             )
-            result = thread.run(
-                prompt,
-                approval_mode=ApprovalMode.deny_all,
-                output_schema=output_schema,
-                sandbox=Sandbox.read_only,
-            )
-
-            status = str(getattr(result.status, "value", result.status)).lower()
-            if status != "completed" or result.error is not None:
-                raise ProductPilotError("Codex product turn did not complete successfully")
-
-            try:
-                edits = parse_edit_plan(result.final_response or "", work_order)
-                if (
-                    git_head(repo_path) != work_order.source_base_sha
-                    or changed_paths(repo_path)
-                ):
-                    raise ProductPilotError(
-                        "product repository changed during the read-only Codex turn"
-                    )
-                apply_edit_plan(
-                    repo_path,
-                    edits,
-                    work_order,
-                    require_required_paths=not bool(work_order.binary_assets),
-                )
-                binary_written = apply_binary_assets(repo_path, work_order)
-                actual = tuple(changed_paths(repo_path))
-                if any(path not in set(work_order.allowed_paths) for path in actual):
-                    raise ProductPilotError("worktree contains a path outside the work order")
-                missing_required = [
-                    path for path in work_order.required_changed_paths if path not in set(actual)
-                ]
-                if missing_required:
-                    raise ProductPilotError("worktree omitted required changed paths")
-                if not set(binary_written).issubset(set(actual)):
-                    raise ProductPilotError("binary asset write did not appear in the worktree")
-                return work_order, actual
-            except ProductPilotError as exc:
-                if (
-                    git_head(repo_path) != work_order.source_base_sha
-                    or changed_paths(repo_path)
-                ):
-                    raise
-                if plan_attempt >= MAX_PLAN_REGENERATION_ATTEMPTS:
-                    raise
-                prior_failure = str(exc)
-                print(
-                    "PRODUCT_PLAN_RECOVERY="
-                    f"{plan_attempt + 1}/{MAX_PLAN_REGENERATION_ATTEMPTS}:"
-                    f"{prior_failure}"
-                )
+            binary_written = apply_binary_assets(repo_path, work_order)
+            actual = tuple(changed_paths(repo_path))
+            if any(path not in set(work_order.allowed_paths) for path in actual):
+                raise ProductPilotError("worktree contains a path outside the work order")
+            missing_required = [
+                path for path in work_order.required_changed_paths if path not in set(actual)
+            ]
+            if missing_required:
+                raise ProductPilotError("worktree omitted required changed paths")
+            if not set(binary_written).issubset(set(actual)):
+                raise ProductPilotError("binary asset write did not appear in the worktree")
+            return work_order, actual
+        except (ProductPilotError, RepairPlanTimeout, CodexPlanTransientError) as exc:
+            if git_head(repo_path) != work_order.source_base_sha or changed_paths(repo_path):
+                raise ProductPilotError(
+                    "product planning failed with unexpected checkout mutation"
+                ) from exc
+            if plan_attempt >= MAX_PLAN_REGENERATION_ATTEMPTS:
+                raise ProductPilotError(
+                    f"bounded pre-STARTED plan recovery exhausted before writes: {exc}"
+                ) from exc
+            prior_failure = str(exc)
+            print(f"PRODUCT_PLAN_RECOVERY={plan_attempt + 1}/{MAX_PLAN_REGENERATION_ATTEMPTS}")
+            if isinstance(exc, CodexPlanTransientError):
+                print(f"CODEX_PLAN_RECOVERY_REASON={exc}")
+                sleep(10 * (plan_attempt + 1))
 
     raise ProductPilotError("bounded pre-STARTED plan recovery exhausted unexpectedly")

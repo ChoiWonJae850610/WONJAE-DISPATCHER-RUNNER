@@ -56,7 +56,8 @@ def test_terminal_guard_resolves_queue_issue_and_exact_source_authority() -> Non
 def test_source_validation_polling_remains_inside_runner_only() -> None:
     for path in PRODUCT_WORKFLOWS.values():
         text = Path(path).read_text(encoding="utf-8")
-        assert "gh run watch" in text
+        assert "scripts/source_validation.py" in text
+        assert "gh run watch" not in text
         assert "sleep 10" in text
 
     controller = Path(".github/workflows/source-queue-controller.yml").read_text(
@@ -64,4 +65,3 @@ def test_source_validation_polling_remains_inside_runner_only() -> None:
     )
     assert "gh run watch" not in controller
     assert "sleep " not in controller
-
