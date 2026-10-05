@@ -157,9 +157,9 @@ def test_unchanged_crlf_sql_uses_actual_bytes_in_manifest(tmp_path):
     guard(tmp_path, CHECKSUM_FAILURE, (MIGRATION, MANIFEST), {MANIFEST: exact})
 
 
-@pytest.mark.parametrize("complete_replacement", [True, False])
+@pytest.mark.parametrize("repair_case", ["aggregate", "checksum", "exhausted"])
 def test_partial_plan_regeneration_stays_same_repair_without_commit(
-    tmp_path, monkeypatch, complete_replacement
+    tmp_path, monkeypatch, repair_case
 ):
     repo = tmp_path / "product"
     repo.mkdir()
@@ -173,6 +173,8 @@ def test_partial_plan_regeneration_stays_same_repair_without_commit(
     git("config", "user.email", "synthetic@example.invalid")
     put(repo, "AGENTS.md", "synthetic scope\n")
     put(repo, "required.txt", "base\n")
+    if repair_case == "checksum":
+        put(repo, MANIFEST, "")
     git("add", ".")
     git("commit", "-qm", "source base")
     base = git("rev-parse", "HEAD")
@@ -181,7 +183,9 @@ def test_partial_plan_regeneration_stays_same_repair_without_commit(
     git("commit", "-qm", "initial task")
     head = git("rev-parse", "HEAD")
     work = tmp_path / "work.json"
-    paths = ("docs/A.md", "src/B.py", "tests/C.py")
+    paths = ((MIGRATION, MANIFEST) if repair_case == "checksum"
+             else ("docs/A.md", "src/B.py", "tests/C.py"))
+    complete_replacement = repair_case != "exhausted"
     work.write_text(json.dumps({
         "schema_version": 1, "task_id": "CLASSMO-REPAIR-001", "project": "CLASSMO",
         "repository": "owner/product", "target_branch": "main", "source_base_sha": base,
@@ -213,24 +217,32 @@ def test_partial_plan_regeneration_stays_same_repair_without_commit(
         def run(self, prompt, **kwargs):
             assert git("rev-parse", "HEAD") == head
             assert git("status", "--porcelain") == ""
-            assert not any((repo / path).exists() for path in paths)
+            assert not any((repo / path).exists() for path in paths if path != MANIFEST)
+            if repair_case == "checksum":
+                assert (repo / MANIFEST).read_text() == ""
             prompts.append(prompt)
             selected = paths if complete_replacement and len(prompts) == 2 else paths[:1]
+            if repair_case == "checksum" and len(prompts) == 2:
+                assert json.dumps(SQL) in prompt  # The fresh thread receives exact prior SQL.
+                assert CHECKSUM.strip() in prompt  # Trusted checksum for those proposed bytes.
             return SimpleNamespace(status="completed", error=None, final_response=json.dumps({
-                "edits": [{"path": path, "operation": "create", "old_text": "",
-                           "new_text": "complete\n"} for path in selected],
+                "edits": [{"path": path, "operation": "write" if path == MANIFEST else "create",
+                           "old_text": "", "new_text": SQL if path == MIGRATION
+                           else CHECKSUM if path == MANIFEST else "complete\n"}
+                          for path in selected],
                 "summary": "synthetic artifacts",
             }))
 
     monkeypatch.setattr(patch, "Codex", Codex)
-    failure = "Missing paths:\n" + "\n".join(paths)
+    failure = (f"Missing file: {MIGRATION}" if repair_case == "checksum"
+               else "Missing paths:\n" + "\n".join(paths))
     if complete_replacement:
         _, changed = patch.generate_and_apply_product_repair(
             repo, work, "a" * 40, tmp_path / "auth", failure
         )
         assert set(changed) == set(paths)
         assert len(prompts) == 2
-        assert "src/B.py" in prompts[1] and "complete REPLACEMENT" in prompts[1]
+        assert paths[-1] in prompts[1] and "complete REPLACEMENT" in prompts[1]
         assert "smallest COMPLETE repair" in prompts[0]
         assert "required.txt" in patch.validate_branch_scope(repo, patch.load_work_order(work))
     else:

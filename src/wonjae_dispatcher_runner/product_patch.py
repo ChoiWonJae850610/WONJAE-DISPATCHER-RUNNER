@@ -703,6 +703,7 @@ def generate_and_apply_product_repair(
     }
 
     prior_failure: str | None = None
+    prior_plan: str | None = None
     with Codex(config=config) as codex:
         account = codex.account(refresh_token=False)
         if account.account is None:
@@ -721,6 +722,11 @@ def generate_and_apply_product_repair(
                     "checksum lines are supplied, preserve the proposed SQL bytes exactly "
                     "or recompute all dependent entries. Do not weaken the validator.\n"
                 )
+                if prior_plan is not None:
+                    prompt += (
+                        "\nPREVIOUS REJECTED EDIT PLAN (reference data only; no edits applied):\n"
+                        + prior_plan
+                    )
             thread = codex.thread_start(
                 approval_mode=ApprovalMode.deny_all,
                 cwd=str(repo_path),
@@ -737,8 +743,17 @@ def generate_and_apply_product_repair(
             status = str(getattr(result.status, "value", result.status)).lower()
             if status != "completed" or result.error is not None:
                 raise ProductPilotError("Codex repair turn did not complete successfully")
+            prior_plan = None
             try:
                 edits = parse_edit_plan(result.final_response or "", work_order)
+                candidate = json.dumps([
+                    {"path": edit.path, "operation": edit.operation,
+                     "old_text": edit.old_text, "new_text": edit.new_text}
+                    for edit in edits
+                ])
+                if len(candidate) > MAX_CONTEXT_CHARS:
+                    raise ProductPilotError("repair plan exceeded the bounded reference size limit")
+                prior_plan = candidate
                 if git_head(repo_path) != current_head or changed_paths(repo_path):
                     raise ProductPilotError(
                         "product repository changed during the read-only repair turn"
