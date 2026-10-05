@@ -17,6 +17,7 @@ from .repair_completeness import (
     check_repair_completeness,
     collect_repair_evidence,
 )
+from .repair_timeout import RepairPlanTimeout, repair_plan_deadline
 
 MAX_EDIT_COUNT = 48
 MAX_TEXT_CHARS = 80_000
@@ -704,76 +705,79 @@ def generate_and_apply_product_repair(
 
     prior_failure: str | None = None
     prior_plan: str | None = None
-    with Codex(config=config) as codex:
-        account = codex.account(refresh_token=False)
-        if account.account is None:
-            raise ProductPilotError("Codex account session is missing")
-        for plan_attempt in range(MAX_REPAIR_PLAN_REGENERATION_ATTEMPTS + 1):
-            prompt = _repair_prompt(
-                work_order, control_sha, current_head, context, validation_failure
+    for plan_attempt in range(MAX_REPAIR_PLAN_REGENERATION_ATTEMPTS + 1):
+        prompt = _repair_prompt(
+            work_order, control_sha, current_head, context, validation_failure
+        )
+        if prior_failure is not None:
+            prompt += (
+                "\nTRUSTED RUNNER REJECTED THE PREVIOUS PLAN BEFORE WRITES OR COMMIT:\n"
+                + prior_failure[:MAX_TEXT_CHARS]
+                + "\nReturn a complete REPLACEMENT plan against the unchanged context, "
+                "including every previous correct edit and all unresolved dependencies. "
+                "This is the same repair attempt, not another repair commit. If expected "
+                "checksum lines are supplied, preserve the proposed SQL bytes exactly "
+                "or recompute all dependent entries. Do not weaken the validator.\n"
             )
-            if prior_failure is not None:
+            if prior_plan is not None:
                 prompt += (
-                    "\nTRUSTED RUNNER REJECTED THE PREVIOUS PLAN BEFORE WRITES OR COMMIT:\n"
-                    + prior_failure[:MAX_TEXT_CHARS]
-                    + "\nReturn a complete REPLACEMENT plan against the unchanged context, "
-                    "including every previous correct edit and all unresolved dependencies. "
-                    "This is the same repair attempt, not another repair commit. If expected "
-                    "checksum lines are supplied, preserve the proposed SQL bytes exactly "
-                    "or recompute all dependent entries. Do not weaken the validator.\n"
+                    "\nPREVIOUS REJECTED EDIT PLAN (reference data only; no edits applied):\n"
+                    + prior_plan
                 )
-                if prior_plan is not None:
-                    prompt += (
-                        "\nPREVIOUS REJECTED EDIT PLAN (reference data only; no edits applied):\n"
-                        + prior_plan
-                    )
-            thread = codex.thread_start(
-                approval_mode=ApprovalMode.deny_all,
-                cwd=str(repo_path),
-                ephemeral=True,
-                sandbox=Sandbox.read_only,
-                config={"history": {"persistence": "none"}, "allow_login_shell": False},
-            )
-            result = thread.run(
-                prompt,
-                approval_mode=ApprovalMode.deny_all,
-                output_schema=output_schema,
-                sandbox=Sandbox.read_only,
-            )
+        try:
+            # A fresh SDK/app-server per plan prevents a timed-out turn from continuing
+            # behind its replacement. The pinned SDK's close terminates its subprocess
+            # and uses a two-second kill fallback plus bounded reader-thread joins.
+            with repair_plan_deadline(), Codex(config=config) as codex:
+                account = codex.account(refresh_token=False)
+                if account.account is None:
+                    raise ProductPilotError("Codex account session is missing")
+                thread = codex.thread_start(
+                    approval_mode=ApprovalMode.deny_all,
+                    cwd=str(repo_path),
+                    ephemeral=True,
+                    sandbox=Sandbox.read_only,
+                    config={"history": {"persistence": "none"}, "allow_login_shell": False},
+                )
+                result = thread.run(
+                    prompt,
+                    approval_mode=ApprovalMode.deny_all,
+                    output_schema=output_schema,
+                    sandbox=Sandbox.read_only,
+                )
             status = str(getattr(result.status, "value", result.status)).lower()
             if status != "completed" or result.error is not None:
                 raise ProductPilotError("Codex repair turn did not complete successfully")
             prior_plan = None
-            try:
-                edits = parse_edit_plan(result.final_response or "", work_order)
-                candidate = json.dumps([
-                    {"path": edit.path, "operation": edit.operation,
-                     "old_text": edit.old_text, "new_text": edit.new_text}
-                    for edit in edits
-                ])
-                if len(candidate) > MAX_CONTEXT_CHARS:
-                    raise ProductPilotError("repair plan exceeded the bounded reference size limit")
-                prior_plan = candidate
-                if git_head(repo_path) != current_head or changed_paths(repo_path):
-                    raise ProductPilotError(
-                        "product repository changed during the read-only repair turn"
-                    )
-                applied = apply_edit_plan(
-                    repo_path, edits, work_order, require_required_paths=False,
-                    pre_write_check=check_complete,
+            edits = parse_edit_plan(result.final_response or "", work_order)
+            candidate = json.dumps([
+                {"path": edit.path, "operation": edit.operation,
+                 "old_text": edit.old_text, "new_text": edit.new_text}
+                for edit in edits
+            ])
+            if len(candidate) > MAX_CONTEXT_CHARS:
+                raise ProductPilotError("repair plan exceeded the bounded reference size limit")
+            prior_plan = candidate
+            if git_head(repo_path) != current_head or changed_paths(repo_path):
+                raise ProductPilotError(
+                    "product repository changed during the read-only repair turn"
                 )
-                validate_branch_scope(repo_path, work_order, applied, require_required_paths=False)
-                return work_order, applied
-            except ProductPilotError as exc:
-                # Never retry after a write, head movement, or unexpected SDK mutation.
-                if git_head(repo_path) != current_head or changed_paths(repo_path):
-                    raise
-                if plan_attempt >= MAX_REPAIR_PLAN_REGENERATION_ATTEMPTS:
-                    raise
-                prior_failure = str(exc)
-                print("REPAIR_PLAN_RECOVERY="
-                      f"{plan_attempt + 1}/{MAX_REPAIR_PLAN_REGENERATION_ATTEMPTS}")
-
+            applied = apply_edit_plan(
+                repo_path, edits, work_order, require_required_paths=False,
+                pre_write_check=check_complete,
+            )
+            validate_branch_scope(repo_path, work_order, applied, require_required_paths=False)
+            return work_order, applied
+        except (ProductPilotError, RepairPlanTimeout) as exc:
+            if git_head(repo_path) != current_head or changed_paths(repo_path):
+                raise ProductPilotError("repair failed with unexpected checkout mutation") from exc
+            if plan_attempt >= MAX_REPAIR_PLAN_REGENERATION_ATTEMPTS:
+                raise ProductPilotError(
+                    f"bounded repair plan regeneration exhausted before commit: {exc}"
+                ) from exc
+            prior_failure = str(exc)
+            print("REPAIR_PLAN_RECOVERY="
+                  f"{plan_attempt + 1}/{MAX_REPAIR_PLAN_REGENERATION_ATTEMPTS}")
     raise ProductPilotError("bounded repair plan regeneration exhausted unexpectedly")
 
 

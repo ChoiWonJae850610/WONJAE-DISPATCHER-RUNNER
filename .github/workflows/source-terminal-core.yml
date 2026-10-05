@@ -1,0 +1,82 @@
+name: Source Terminal Finalizer Core
+
+on:
+  workflow_call:
+    inputs:
+      project:
+        required: true
+        type: string
+      source_run_id:
+        required: true
+        type: string
+      wake_issue_number:
+        required: true
+        type: string
+      product_pr:
+        required: false
+        type: string
+      last_head:
+        required: false
+        type: string
+      owner_reconciliation:
+        required: true
+        type: string
+      control_repository:
+        required: true
+        type: string
+      gmail_enabled:
+        required: true
+        type: string
+    secrets:
+      product_token:
+        required: true
+      control_read_token:
+        required: true
+      gmail_username:
+        required: false
+      gmail_app_password:
+        required: false
+
+permissions:
+  actions: read
+  contents: read
+  issues: write
+
+jobs:
+  finalize:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Runner · trusted terminal code
+        uses: actions/checkout@v6
+        with:
+          ref: main
+          persist-credentials: false
+      - name: Reconcile exact terminal PR, wake and native Gmail notification
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PRODUCT_GH_TOKEN: ${{ secrets.product_token }}
+          CONTROL_READ_TOKEN: ${{ secrets.control_read_token }}
+          CONTROL_REPOSITORY: ${{ inputs.control_repository }}
+          GMAIL_ENABLED: ${{ inputs.gmail_enabled }}
+          GMAIL_USERNAME: ${{ secrets.gmail_username }}
+          GMAIL_APP_PASSWORD: ${{ secrets.gmail_app_password }}
+          PROJECT: ${{ inputs.project }}
+          SOURCE_RUN_ID: ${{ inputs.source_run_id }}
+          WAKE_ISSUE: ${{ inputs.wake_issue_number }}
+          PRODUCT_PR: ${{ inputs.product_pr }}
+          LAST_HEAD: ${{ inputs.last_head }}
+          OWNER_RECONCILIATION: ${{ inputs.owner_reconciliation }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          args=()
+          if [ -n "$PRODUCT_PR" ]; then args+=(--product-pr "$PRODUCT_PR"); fi
+          if [ -n "$LAST_HEAD" ]; then args+=(--last-head "$LAST_HEAD"); fi
+          if [ "$OWNER_RECONCILIATION" = "true" ]; then args+=(--owner-reconciliation); fi
+          PYTHONPATH="$GITHUB_WORKSPACE/src" python scripts/source_terminal.py finalize \
+            --project "$PROJECT" --source-run-id "$SOURCE_RUN_ID" \
+            --wake-issue-number "$WAKE_ISSUE" "${args[@]}"
+      - name: Retain GitHub-native residue
+        if: failure()
+        run: echo 'Exact finalizer failed; inspect its identity or GitHub terminal checkpoint before reconciliation.' >> "$GITHUB_STEP_SUMMARY"

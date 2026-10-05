@@ -127,7 +127,9 @@ class GmailClient:
 
     @contextmanager
     def _imap(self) -> Iterator[imaplib.IMAP4_SSL]:
-        client = self.imap_factory("imap.gmail.com", 993, ssl_context=ssl.create_default_context())
+        client = self.imap_factory(
+            "imap.gmail.com", 993, ssl_context=ssl.create_default_context(), timeout=30
+        )
         try:
             client.login(self.username, self.app_password)
             yield client
@@ -221,6 +223,7 @@ class GmailClient:
             "smtp.gmail.com",
             465,
             context=ssl.create_default_context(),
+            timeout=30,
         ) as smtp:
             smtp.login(self.username, self.app_password)
             smtp.send_message(message)

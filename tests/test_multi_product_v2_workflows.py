@@ -64,23 +64,22 @@ def test_product_v2_workflows_recover_validation_and_terminalize_failure() -> No
 
 def test_terminal_guard_covers_all_source_dispatchers() -> None:
     text = Path(".github/workflows/product-terminal-guard.yml").read_text(encoding="utf-8")
+    core = Path("src/wonjae_dispatcher_runner/source_terminal.py").read_text(encoding="utf-8")
     for project in ("CLASSMO", "WAFL", "ESC", "MUVEL"):
         assert f"{project} Dispatcher v2" in text
-    assert "workflow_run:" in text
-    assert "## Dispatcher v2 terminal evidence" in text
-    assert "MANUAL_REQUIRED" in text
-    assert "CANCELLED" in text
-    assert "FAILED" in text
-    assert "gh issue close" in text
+    assert "workflow_run:" in text and "workflow_dispatch:" in text
+    assert "## Dispatcher v2 terminal evidence" in core
+    assert all(result in core for result in ("MANUAL_REQUIRED", "CANCELLED", "FAILED"))
+    assert "client.close_issue(request.wake_issue)" in core
 
 
-def test_terminal_guard_binds_wake_project_to_source_workflow() -> None:
-    text = Path(".github/workflows/product-terminal-guard.yml").read_text(encoding="utf-8")
-    assert "SOURCE_WORKFLOW_NAME" in text
-    assert 'expected_workflow = f"{project} Dispatcher v2"' in text
-    assert "GUARD_APPLICABLE" in text
-    assert "GUARD_APPLICABLE" in text
-    assert "GUARD_ACTION" in text
+def test_terminal_guard_binds_wake_project_to_exact_source_workflow_path() -> None:
+    text = Path("src/wonjae_dispatcher_runner/source_terminal.py").read_text(encoding="utf-8")
+    assert 'run.get("path") != expected_path' in text
+    assert 'run.get("id") != request.run_id' in text
+    assert 'run.get("head_branch") != "main"' in text
+    assert "registration.project != project" in text
+    assert "SOURCE_WORKFLOW_NAME" not in text
 
 
 def test_product_v2_higher_attempts_use_fresh_branches_and_track_repair_heads() -> None:
@@ -101,25 +100,38 @@ def test_completed_source_path_still_merges_only_validated_head() -> None:
 
 
 def test_source_terminal_guard_closes_only_exact_product_pr() -> None:
-    text = Path(".github/workflows/product-terminal-guard.yml").read_text(encoding="utf-8")
+    workflow = Path(".github/workflows/product-terminal-guard.yml").read_text(encoding="utf-8")
+    core = Path("src/wonjae_dispatcher_runner/source_terminal.py").read_text(encoding="utf-8")
     for project in ("CLASSMO", "WAFL", "ESC", "MUVEL"):
-        assert f"Close exact {project} terminal Product PR" in text
-        assert f"secrets.{project}_WRITE_TOKEN" in text
-    assert "source_pr_lifecycle.py" in text
-    assert "FINAL_GUARD" in text
-    assert "terminal PR cleanup evidence" in text
-    assert "product_pr_cleanup" in text
-    assert "cleanup_residue" in text
-    assert "delete-branch" not in text
-    assert "git push --delete" not in text
+        assert f"product_token: ${{{{ secrets.{project}_WRITE_TOKEN }}}}" in workflow
+    assert "terminalize_exact_pr(client, identity, body, result, pr_number)" in core
+    assert 'pr.get("headRefOid") != head' in core
+    assert 'metadata.get(key) != value' in core
+    assert 'pr.get("mergedAt")' in core
+    assert "product_pr_cleanup" in core
+    assert "delete-branch" not in workflow
+    assert "git push --delete" not in workflow
 
 
-def test_terminal_guard_records_cleanup_residue_even_if_close_step_errors() -> None:
-    text = Path(".github/workflows/product-terminal-guard.yml").read_text(encoding="utf-8")
-    for project in ("CLASSMO", "WAFL", "ESC", "MUVEL"):
-        marker = f"- name: Close exact {project} terminal Product PR"
-        start = text.index(marker)
-        block = text[start : start + 260]
-        assert "continue-on-error: true" in block
-    assert "always() && env.GUARD_ACTION == 'TERMINALIZE'" in text
-    assert 'SOURCE_PR_CLEANUP_STATUS:-RESIDUE' in text
+def test_terminal_guard_retains_cleanup_and_notification_residue() -> None:
+    core = Path("src/wonjae_dispatcher_runner/source_terminal.py").read_text(encoding="utf-8")
+    script = Path("scripts/source_terminal.py").read_text(encoding="utf-8")
+    assert "cleanup.status" in core and "cleanup.detail" in core
+    assert 'notification_result="RESIDUE"' in core
+    assert 'outcome["pr_cleanup"] == "RESIDUE"' in script
+    assert "SOURCE_TERMINAL_FINALIZER_RESIDUE" in script
+
+
+def test_non_success_handoff_and_checkpoint_are_common_and_budget_unchanged() -> None:
+    paths = [item["workflow"] for item in PRODUCTS.values()]
+    paths.append(".github/workflows/classmo-product-pilot.yml")
+    for path in paths:
+        text = Path(path).read_text(encoding="utf-8")
+        assert "terminal-handoff:" in text
+        assert "source_terminal.py checkpoint" in text
+        assert '-f source_run_id="$GITHUB_RUN_ID"' in text
+        assert "max_repairs=2" in text
+        assert "timeout-minutes: 60" in text
+    guard = Path(".github/workflows/product-terminal-guard.yml").read_text(encoding="utf-8")
+    assert "group: source-terminal-finalizer" in guard
+    assert "cancel-in-progress: false" in guard

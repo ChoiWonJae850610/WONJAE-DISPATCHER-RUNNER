@@ -282,3 +282,26 @@ repository API. The old code had no independent success handoff. The new route r
 single dependency instead of assuming a particular undocumented suppression cause.
 See GitHub's [triggering documentation](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/trigger-a-workflow)
 and [workflow_run reference](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#workflow_run).
+
+
+Each read-only source repair-plan turn is bounded by a Linux main-thread 480-second
+wall-clock deadline. Timeout closes its fresh SDK session and enters the existing same
+repair pre-write regeneration loop: at most two replacements, no rejected writes or
+commits. Committed validation repair maximum remains two; the outer job stays at 60 minutes.
+
+Product Dispatcher Terminal Guard and reusable Source Terminal Finalizer Core own
+external terminal reconciliation after source job failure/cancel/timeout. Triggers are
+workflow_run.completed, explicit non-success handoff and exact Owner orphan reconciliation.
+Each product workflow persists an exact run/PR/head checkpoint before STARTED mail and
+updates it after each repair push. Verify exact workflow path/run/repository, queue claim,
+private Control SHA, resolved Source SHA, project/task/attempt/revision, target and PR/head
+before mutation. Dynamic run names are not workflow identity. Never search/adopt another PR.
+A legacy orphan needs an Owner comment on its exact wake:
+`[SOURCE-TERMINAL-RECONCILE] run=<RUN-ID> pr=<PR-NUMBER> head=<40-CHAR-SHA>`.
+It never creates execution authority. Close only the exact unmerged failed PR, preserve
+branch/history, reconcile one terminal checkpoint and close/read back the exact wake.
+Deliver native Gmail RESULT by exact Notification-Key, read it back, then Trash only its
+matching STARTED and verify Trash present / Inbox absent. Preserve partial-cleanup residue.
+Retries must not duplicate comments, mail or close mutations. Never downgrade source
+completion after a successful product job. KDN, source/provider/device writes, integration,
+new attempts and ChatGPT foreground polling remain outside finalizer authority.
