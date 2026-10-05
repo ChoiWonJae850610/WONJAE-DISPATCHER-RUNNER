@@ -124,8 +124,8 @@ def test_explicit_unsafe_ambiguous_or_unscoped_item_fails_closed(tmp_path, path)
               {"docs/A.md": "partial\n"})
 
 
-def test_large_failure_log_is_fully_scanned_without_silently_dropping_aggregate():
-    failure = "Missing paths: docs/A.md\n" + ("validation noise\n" * 30_000)
+def test_large_failure_log_is_fully_scanned_without_silently_dropping_evidence():
+    failure = "Missing file: docs/A.md\n" + ("validation noise\n" * 30_000)
     assert len(failure) > 400_000
     assert collect_repair_evidence(failure, ("docs/A.md",)).missing_paths == ("docs/A.md",)
 
