@@ -206,9 +206,9 @@ jobs:
           {
             echo "## Direct Worker"
             echo
-            echo "- project: `${{ inputs.project }}`"
-            echo "- command: `${{ inputs.command }}`"
-            echo "- result: `NO_WORK`"
+            printf -- '- project: `%s`\n' "${{ inputs.project }}"
+            printf -- '- command: `%s`\n' "${{ inputs.command }}"
+            printf -- '- result: `%s`\n' "NO_WORK"
             echo
             jq -r '.summary' "$RESULT_FILE"
           } >> "$GITHUB_STEP_SUMMARY"
@@ -219,9 +219,9 @@ jobs:
           {
             echo "## Direct Worker"
             echo
-            echo "- project: `${{ inputs.project }}`"
-            echo "- command: `${{ inputs.command }}`"
-            echo "- result: `MANUAL_REQUIRED`"
+            printf -- '- project: `%s`\n' "${{ inputs.project }}"
+            printf -- '- command: `%s`\n' "${{ inputs.command }}"
+            printf -- '- result: `%s`\n' "MANUAL_REQUIRED"
             echo
             echo "**Owner action:**"
             jq -r '.manual_action' "$RESULT_FILE"
@@ -276,8 +276,8 @@ jobs:
               printf -- '- command: `%s`\n' "$COMMAND"
               printf -- '- source_base_sha: `%s`\n' "$START_HEAD"
               printf -- '- runner_run_id: `%s`\n' "$GITHUB_RUN_ID"
-              echo "- execution: `one source writer per project`"
-              echo "- provider/runtime/device: `NOT_RUN`"
+              printf -- '- execution: `%s`\n' "one source writer per project"
+              printf -- '- provider/runtime/device: `%s`\n' "NOT_RUN"
             } > "$body_file"
             pr_url="$(gh pr create --repo "$PRODUCT_REPOSITORY" --base "$TARGET_BRANCH" \
               --head "$DIRECT_BRANCH" --title "[DIRECT][$PROJECT] automated next work" \
@@ -301,7 +301,7 @@ jobs:
           {
             echo "## Direct Worker result"
             echo
-            echo "- result: `MANUAL_REQUIRED`"
+            printf -- '- result: `%s`\n' "MANUAL_REQUIRED"
             printf -- '- runner_run_id: `%s`\n' "$GITHUB_RUN_ID"
             printf -- '- head_sha: `%s`\n' "$DIRECT_HEAD"
             echo
@@ -382,14 +382,14 @@ jobs:
           {
             echo "## Direct Worker result"
             echo
-            echo "- result: `PASS`"
+            printf -- '- result: `%s`\n' "PASS"
             printf -- '- runner_run_id: `%s`\n' "$GITHUB_RUN_ID"
             printf -- '- source_base_sha: `%s`\n' "$START_HEAD"
             printf -- '- final_pr_head: `%s`\n' "$DIRECT_HEAD"
             printf -- '- exact_pr_head_validation_run: `%s`\n' "$PR_HEAD_RUN_ID"
             printf -- '- integrated_sha: `%s`\n' "$INTEGRATED_SHA"
             printf -- '- exact_integrated_sha_validation_run: `%s`\n' "$INTEGRATED_RUN_ID"
-            echo "- provider/runtime/device/physical: `NOT_RUN`"
+            printf -- '- provider/runtime/device/physical: `%s`\n' "NOT_RUN"
           } > "$result_file"
           gh pr comment "$PR_NUMBER" --repo "$PRODUCT_REPOSITORY" --body-file "$result_file"
           {
@@ -411,10 +411,10 @@ jobs:
           {
             echo "## Direct Worker result"
             echo
-            echo "- result: `FAILED`"
+            printf -- '- result: `%s`\n' "FAILED"
             printf -- '- runner_run_id: `%s`\n' "$GITHUB_RUN_ID"
             if [ -n "${DIRECT_HEAD:-}" ]; then printf -- '- head_sha: `%s`\n' "$DIRECT_HEAD"; fi
-            echo "- action: `Use Direct Worker retry; preserve this PR.`"
-            echo "- provider/runtime/device/physical: `NOT_INFERRED`"
+            printf -- '- action: `%s`\n' "Use Direct Worker retry; preserve this PR."
+            printf -- '- provider/runtime/device/physical: `%s`\n' "NOT_INFERRED"
           } > "$result_file"
           gh pr comment "$PR_NUMBER" --repo "$PRODUCT_REPOSITORY" --body-file "$result_file"
