@@ -128,6 +128,11 @@ def test_failure_log_cannot_silently_drop_aggregate_header():
         collect_repair_evidence("Missing paths: docs/A.md\n" + "x" * 80_000, ("docs/A.md",))
 
 
+def test_exact_allowed_path_with_spaces_is_unambiguous(tmp_path):
+    path = "docs/Feature Design.md"
+    guard(tmp_path, f"Missing paths: {path}", (path,), {path: "complete\n"})
+
+
 def test_new_migration_requires_dependency_closed_manifest_even_before_checksum_failure(tmp_path):
     put(tmp_path, MANIFEST, "")
     failure = f"Missing file: {MIGRATION}"

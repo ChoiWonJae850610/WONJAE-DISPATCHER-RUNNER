@@ -41,7 +41,9 @@ class RepairEvidence:
 def _safe_path(path: str) -> bool:
     value = Path(path)
     return (
-        bool(re.fullmatch(r"[\w./-]+", path))
+        bool(path)
+        and not any(ord(char) < 32 for char in path)
+        and "\\" not in path
         and not value.is_absolute()
         and ".." not in value.parts
         and value.as_posix() == path
