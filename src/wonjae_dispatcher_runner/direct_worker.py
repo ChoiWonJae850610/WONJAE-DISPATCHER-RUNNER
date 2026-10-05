@@ -356,12 +356,12 @@ def _prompt(
         )
     else:
         retry_note = (
-        "This is a retry/resume of the one existing Direct Worker PR. Preserve correct prior work "
-        "and fix the current task in place."
-        if command in {"retry", "resume"}
-        else
-        "Select the smallest complete already-decided next SOURCE task from the current canonical "
-        "repository documents."
+            "This is a retry/resume of the one existing Direct Worker PR. Preserve correct prior work "
+            "and fix the current task in place."
+            if command in {"retry", "resume"}
+            else
+            "Select the smallest complete already-decided next SOURCE task from the current canonical "
+            "repository documents."
         )
     return f"""You are the single source-writing Direct Worker for {route.project}.
 
