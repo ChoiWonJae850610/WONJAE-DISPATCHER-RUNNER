@@ -109,7 +109,12 @@ def load_direct_worker_route(registry_path: Path, project: str) -> DirectWorkerR
     startup_entry = value.get("startup_entry")
     project_rules = value.get("project_rules")
     canonical_docs = value.get("canonical_docs")
-    validation = (\n        value.get("ci", {}).get("validation")\n        if isinstance(value.get("ci"), dict)\n        else None\n    )\n    if not isinstance(repository, str) or "/" not in repository:
+    validation = (
+        value.get("ci", {}).get("validation")
+        if isinstance(value.get("ci"), dict)
+        else None
+    )
+    if not isinstance(repository, str) or "/" not in repository:
         raise DirectWorkerError("registry repository is invalid")
     if not isinstance(branch, str) or not branch.strip():
         raise DirectWorkerError("registry branch is invalid")
@@ -326,7 +331,10 @@ def run_direct_worker(
     if status_value != "completed" or result.error is not None:
         raise DirectWorkerError("Direct Worker Codex turn did not complete")
     if git_head(repo_path) != starting_sha:
-        raise DirectWorkerError(\n            "Codex changed Git history; Direct Worker requires trusted Git writes"\n        )\n
+        raise DirectWorkerError(
+            "Codex changed Git history; Direct Worker requires trusted Git writes"
+        )
+
     paths = changed_paths(repo_path)
     status, summary, manual_action = _parse_result(result.final_response or "")
     if status == "CHANGED" and not paths:
