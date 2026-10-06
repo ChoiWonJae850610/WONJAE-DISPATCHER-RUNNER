@@ -40,6 +40,14 @@ only the validated exact job directory, including auth, control/product clones,
 abandoned timeout checkouts, result/failure/body files, venv and Git auth helpers.
 There are no auth/source caches or uploaded private artifacts.
 
+The pinned Linux helper creates mount targets for missing protected paths. Trusted
+code therefore prepares empty file/directory targets only when originally absent,
+records their identity, and removes only the same unchanged empty targets after
+SDK closure, including failure/timeout. Existing source paths are never removed.
+Modified/replaced/nonempty targets fail closed; Git exclusions never hide them.
+Protected symlinks are rejected rather than granting an outside read mount. The
+actual sandbox regression checks that no mount placeholders survive in Git state.
+
 The home source app-server environment uses an explicit allowlist and fixed Linux
 PATH; GitHub/provider tokens and serialized `CODEX_AUTH_JSON` are removed before
 SDK startup. The SDK alone uses its protected file credential to contact its

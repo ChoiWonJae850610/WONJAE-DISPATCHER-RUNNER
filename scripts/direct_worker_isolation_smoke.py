@@ -16,6 +16,7 @@ from codex_cli_bin import bundled_codex_path
 
 from wonjae_dispatcher_runner.home_isolation import (
     cli_overrides,
+    protected_mount_placeholders,
     require_linux_host,
     source_environment,
 )
@@ -59,6 +60,9 @@ printf 'host-read-and-symlink: PASS\n'
 if touch ../other-product/changed 2>/dev/null; then exit 24; fi
 if touch .git/changed 2>/dev/null; then exit 25; fi
 if touch .wonjae/changed 2>/dev/null; then exit 26; fi
+if touch AGENTS.md 2>/dev/null; then exit 31; fi
+if touch .gitmodules 2>/dev/null; then exit 32; fi
+if touch .github/changed 2>/dev/null; then exit 33; fi
 if touch "$1-outside" 2>/dev/null; then exit 28; fi
 printf 'protected-and-cross-project-write: PASS\n'
 printf 'source\n' > allowed.txt
@@ -74,8 +78,9 @@ printf 'network: PASS\n'
             args += ["--config", override]
         args += ["sandbox", "--", "/bin/bash", "-c", script, "smoke", str(root),
                  os.readlink("/proc/self/ns/net")]
-        result = subprocess.run(args, cwd=product, env=env, capture_output=True,
-                                text=True, timeout=45)
+        with protected_mount_placeholders(product):
+            result = subprocess.run(args, cwd=product, env=env, capture_output=True,
+                                    text=True, timeout=45)
         expected = (
             "environment: PASS", "host-read-and-symlink: PASS",
             "protected-and-cross-project-write: PASS", "source-write: PASS", "network: PASS",
@@ -85,6 +90,15 @@ printf 'network: PASS\n'
             print(result.stderr[-3000:])
             raise RuntimeError(f"actual Codex Linux sandbox smoke failed: {result.returncode}")
         print(result.stdout.strip())
+        files = subprocess.run(
+            ["git", "-C", str(product), "ls-files", "--others", "--exclude-standard", "-z"],
+            check=True, capture_output=True, text=True,
+        ).stdout
+        if set(filter(None, files.split("\x00"))) != {
+            ".wonjae/execution-state.yaml", "allowed.txt", "escape",
+        }:
+            raise RuntimeError("sandbox introduced unexpected checkout files")
+        print("trusted-placeholder-cleanup: PASS")
     print("provider/model/publication: NOT_RUN")
     return 0
 
