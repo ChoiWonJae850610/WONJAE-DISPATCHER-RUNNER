@@ -16,6 +16,7 @@ from wonjae_dispatcher_runner.home_isolation import (
     PROFILE,
     cli_overrides,
     permission_config,
+    protected_mount_placeholders,
     source_environment,
 )
 
@@ -126,6 +127,42 @@ def test_rejects_non_independent_checkout(tmp_path):
         link.symlink_to(repo, target_is_directory=True)
         with pytest.raises(ValueError, match="independent"):
             permission_config(link)
+
+
+def test_trusted_missing_mounts_are_removed_on_success_and_failure(tmp_path):
+    repo = checkout(tmp_path)
+    original = set(repo.iterdir())
+    for failing in (False, True):
+        try:
+            with protected_mount_placeholders(repo):
+                assert (repo / ".github").is_dir()
+                assert (repo / ".gitmodules").read_bytes() == b""
+                if failing:
+                    raise RuntimeError("synthetic turn failure")
+        except RuntimeError:
+            assert failing
+        assert set(repo.iterdir()) == original
+
+
+def test_trusted_mount_cleanup_rejects_modified_placeholder(tmp_path):
+    repo = checkout(tmp_path)
+    with pytest.raises(ValueError, match="placeholder was modified"):
+        with protected_mount_placeholders(repo):
+            (repo / ".gitmodules").write_text("unexpected")
+    assert (repo / ".gitmodules").read_text() == "unexpected"
+
+
+@pytest.mark.skipif(os.name != "posix", reason="symlink fixture requires Linux")
+def test_protected_mount_symlink_cannot_grant_outside_reads(tmp_path):
+    repo = checkout(tmp_path)
+    outside = tmp_path / "other-product"
+    outside.mkdir()
+    (repo / ".github").symlink_to(outside, target_is_directory=True)
+    with pytest.raises(ValueError, match="symlink"):
+        permission_config(repo)
+    with pytest.raises(ValueError, match="symlink"):
+        with protected_mount_placeholders(repo):
+            pytest.fail("unsafe mount entered")
 
 
 def test_smoke_has_fixed_candidate_route_and_no_secret_surface():

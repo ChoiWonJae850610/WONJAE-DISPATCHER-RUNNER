@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 import subprocess
+from contextlib import nullcontext
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -15,7 +16,12 @@ from .execution_state import (
     ProductExecutionState,
     load_product_execution_state,
 )
-from .home_isolation import permission_config, require_linux_host, source_environment
+from .home_isolation import (
+    permission_config,
+    protected_mount_placeholders,
+    require_linux_host,
+    source_environment,
+)
 from .repair_timeout import RepairPlanTimeout, repair_plan_deadline
 
 RUNNER_REPOSITORY = "ChoiWonJae850610/WONJAE-DISPATCHER-RUNNER"
@@ -633,7 +639,8 @@ def run_direct_worker(
         sandbox = None
 
     try:
-        with repair_plan_deadline(), Codex(config=config) as codex:
+        mounts = protected_mount_placeholders(repo_path) if home_isolation else nullcontext()
+        with mounts, repair_plan_deadline(), Codex(config=config) as codex:
             account = codex.account(refresh_token=False)
             if account.account is None:
                 raise DirectWorkerError("Codex account session is missing")
