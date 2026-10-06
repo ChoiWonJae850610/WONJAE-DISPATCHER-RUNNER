@@ -137,4 +137,12 @@ Direct Worker is a separate source-writing route from Dispatcher v2.
   MANUAL_REQUIRED and source progress is preserved when applicable.
 - Failed PR-head validation keeps the same Direct Worker PR open for `retry`; it is not
   terminal-cleaned merely to start a new attempt.
+- Reconciliation PRs that only synchronize human canonical docs and the protected
+  product execution state may use the common Reconciliation Finalizer. Owner issue events
+  are the fast path; the scheduled sweeper is a fallback that scans only one exact open
+  Owner-authored reconciliation issue per registered project and dispatches the same
+  finalizer through workflow_dispatch. Existing STARTED/PASS/FAILED lifecycle evidence
+  suppresses automatic redispatch. The finalizer is docs/state-path bounded, exact PR-head
+  and integrated-SHA validated, project-token isolated and never grants provider/device/
+  Production authority.
 - KDN is excluded.
