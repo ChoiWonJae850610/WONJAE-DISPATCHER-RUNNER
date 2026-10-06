@@ -1,8 +1,9 @@
 """Restricted-read workspace-write profile for persistent Linux source workers.
 
 The SDK's legacy workspace-write turn override drops split read restrictions.
-Use its :workspace baseline through a named profile and retain that profile on
-both thread and turn. This module grants no Git/network/provider authority.
+Use a read-only named profile, reopen exactly one product checkout for writes,
+and retain that profile on both thread and turn. This module grants no
+Git/network/provider authority.
 """
 
 from __future__ import annotations
@@ -90,7 +91,7 @@ def permission_config(repo: Path) -> dict:
         "default_permissions": PROFILE,
         "permissions": {
             PROFILE: {
-                "extends": ":workspace",
+                "extends": ":read-only",
                 "workspace_roots": {str(root): True},
                 "filesystem": filesystem,
                 "network": {"enabled": False},

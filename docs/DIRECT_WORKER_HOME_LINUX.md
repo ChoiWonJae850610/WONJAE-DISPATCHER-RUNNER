@@ -37,14 +37,22 @@ trusted-step rotation authority, never product/provider credentials.
 
 ## Source and publication separation
 
-Every task reserves a unique `direct-<run-id>-<attempt>` directory. An existing
-directory fails closed; checkout uses `clean: false` into new paths, with Git
-credentials not persisted. No product checkout/cache is reused. Pinned SDK
-dependencies install in a job-owned virtual environment without a pip cache.
-The task uses a separate HOME and gh configuration directory. Cleanup removes
-only the validated exact job directory, including auth, control/product clones,
-abandoned timeout checkouts, result/failure/body files, venv and Git auth helpers.
-There are no auth/source caches or uploaded private artifacts.
+Every task reserves two unique roots: a trusted workflow root under
+`GITHUB_WORKSPACE` for runner/control code and a separate source root under the
+dedicated per-user source parent outside the runner's `_work` hierarchy
+(`~/.wonjae-direct-worker-sources`), rather than a child of `GITHUB_WORKSPACE`,
+`RUNNER_TEMP`, or another Actions workspace. The product is cloned by trusted
+workflow code into that source root; it is never nested inside runner/control or
+temporary-directory roots. Existing roots fail closed, no product checkout/cache
+is reused, and Git credentials remain only in the job-owned HOME/gh configuration.
+Pinned SDK dependencies use the trusted job virtual environment without a pip
+cache. After the trusted checkout is complete, the source root itself is chmod
+0500 while the existing product directory remains writable, so source tools
+cannot create or rename siblings even if an executor-level workspace rule were
+broader than expected. Trusted cleanup restores only that exact source root to
+0700 before removal. Cleanup independently validates and removes only the exact
+trusted and source roots, including auth, result/failure files, venv and Git
+auth helpers. There are no auth/source caches or uploaded private artifacts.
 
 The pinned Linux helper creates mount targets for missing protected paths. Trusted
 code therefore prepares empty file/directory targets only when originally absent,
@@ -59,13 +67,22 @@ PATH; GitHub/provider tokens and serialized `CODEX_AUTH_JSON` are removed before
 SDK startup. The SDK alone uses its protected file credential to contact its
 model service. Source tool commands have no network or access to that credential.
 
-The pinned SDK's `Sandbox.workspace_write` legacy override permits host reads.
-Its equivalent `:workspace` permission baseline is therefore inherited through
-the `direct_source` named profile for home execution: root deny, minimal public
-runtime read, exactly one product checkout write, protected Git/instruction/state
-paths read-only, and network disabled. A legacy `sandbox=workspace_write` thread
-or turn override would discard those split read restrictions; the home path
-retains the named workspace-write profile on both calls. Approvals stay
+The pinned SDK's `Sandbox.workspace_write` legacy override permits broader host
+reads and a `:workspace` parent can reopen surrounding runtime workspace roots.
+Home execution therefore uses the `direct_source` named profile inherited from
+`:read-only`, then reopens exactly one product checkout for writes: root deny,
+minimal public runtime read, protected Git/instruction/state paths read-only, and
+network disabled. The debug preflight also pins the named profile and exact product
+cwd. Runner Validation executes the smoke once with normal temporary storage and
+again with the same per-user, non-`_work`, non-temporary source-parent topology
+and the same locked-parent boundary used by production. The smoke explicitly
+verifies that writes cannot escape the synthetic product root, cannot create a
+file in the locked production-style source parent, and cannot write the trusted
+`GITHUB_WORKSPACE`. Product source is intentionally not placed under `TMPDIR`
+or `RUNNER_TEMP`, because temporary-directory semantics are a separate sandbox
+capability and must not broaden source authority. A legacy
+`sandbox=workspace_write` thread or turn override would discard those split read
+restrictions; home execution does not use it. Approvals stay
 `ApprovalMode.deny_all`. No full-access or weaker fallback is used. The existing
 hosted path keeps its current explicit `Sandbox.workspace_write` preset.
 

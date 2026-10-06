@@ -41,6 +41,19 @@ def main() -> int:
         (auth / "auth.json").write_text('{"synthetic": "no-secret"}\n')
         shell_home = Path("/nonexistent")
         env = source_environment(auth, shell_home)
+        workspace = os.environ.get("GITHUB_WORKSPACE", "")
+        workspace_probe = (
+            Path(workspace) / f".direct-worker-sandbox-write-probe-{os.getpid()}"
+            if workspace else None
+        )
+        forbidden_root_raw = os.environ.get("DIRECT_WORKER_FORBIDDEN_WRITE_ROOT", "")
+        forbidden_root = (
+            Path(forbidden_root_raw).resolve(strict=True) if forbidden_root_raw else None
+        )
+        forbidden_probe = (
+            forbidden_root / f".direct-worker-source-parent-probe-{os.getpid()}"
+            if forbidden_root else None
+        )
         # These must be absent inside the actual sandbox, regardless of parent secrets.
         script = r'''
 set -eu
@@ -61,6 +74,8 @@ if touch AGENTS.md 2>/dev/null; then exit 31; fi
 if touch .gitmodules 2>/dev/null; then exit 32; fi
 if touch .github/changed 2>/dev/null; then exit 33; fi
 if touch "$1-outside" 2>/dev/null; then exit 28; fi
+if [ -n "$3" ] && touch "$3" 2>/dev/null; then exit 34; fi
+if [ -n "$4" ] && touch "$4" 2>/dev/null; then exit 35; fi
 printf 'protected-and-cross-project-write: PASS\n'
 printf 'source\n' > allowed.txt
 printf 'source-write: PASS\n'
@@ -71,11 +86,19 @@ test "$source_network_namespace" != "$2"
 printf 'network: PASS\n'
 '''
         args = sandbox_cli_args(product)
-        args += ["/bin/bash", "-c", script, "smoke", str(root),
-                 os.readlink("/proc/self/ns/net")]
+        args += [
+            "/bin/bash", "-c", script, "smoke", str(root),
+            os.readlink("/proc/self/ns/net"),
+            str(workspace_probe) if workspace_probe else "",
+            str(forbidden_probe) if forbidden_probe else "",
+        ]
         with protected_mount_placeholders(product):
             result = subprocess.run(args, cwd=product, env=env, capture_output=True,
                                     text=True, timeout=45)
+        if workspace_probe and workspace_probe.exists():
+            workspace_probe.unlink()
+        if forbidden_probe and forbidden_probe.exists():
+            forbidden_probe.unlink()
         expected = (
             "environment: PASS", "host-read-and-symlink: PASS",
             "protected-and-cross-project-write: PASS", "source-write: PASS", "network: PASS",

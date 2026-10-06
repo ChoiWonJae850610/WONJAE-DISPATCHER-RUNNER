@@ -90,7 +90,7 @@ def test_profile_denies_host_reads_and_preserves_workspace_boundary(tmp_path):
     repo = checkout(tmp_path)
     config = permission_config(repo)
     profile = config["permissions"][PROFILE]
-    assert profile["extends"] == ":workspace"
+    assert profile["extends"] == ":read-only"
     assert profile["workspace_roots"] == {str(repo.resolve()): True}
     assert profile["network"] == {"enabled": False}
     filesystem = profile["filesystem"]
@@ -214,3 +214,27 @@ def test_all_registered_source_callers_and_core_default_use_verified_home_route(
     assert 'inputs.execution_host == \'home-linux\'' in job["runs-on"]
     assert '["self-hosted","Linux","X64","direct-worker"]' in job["runs-on"]
     assert "github.ref == 'refs/heads/main'" in job["if"]
+
+
+def test_direct_worker_core_separates_trusted_and_product_workspaces():
+    root = Path(__file__).resolve().parents[1]
+    raw = (root / ".github/workflows/direct-worker-core.yml").read_text()
+    assert "DW_JOB_ROOT: ${{ github.workspace }}/direct-" in raw
+    assert 'host_home="$(getent passwd "$(id -u)" | cut -d: -f6)"' in raw
+    assert 'source_parent="$host_home/.wonjae-direct-worker-sources"' in raw
+    assert 'source_root="$source_parent/run-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"' in raw
+    assert 'test "$source_parent" != "$RUNNER_TEMP"' in raw
+    assert 'echo "DW_SOURCE_ROOT=$source_root" >> "$GITHUB_ENV"' in raw
+    assert 'echo "DW_PRODUCT=$product_root" >> "$GITHUB_ENV"' in raw
+    assert 'echo "TMPDIR=' not in raw
+    assert "Checkout product outside trusted workflow workspace" in raw
+    assert 'chmod 0500 "$DW_SOURCE_ROOT"' in raw
+    assert 'DIRECT_WORKER_FORBIDDEN_WRITE_ROOT="$DW_SOURCE_ROOT"' in raw
+    clone_command = (
+        'git clone --no-checkout "https://github.com/$PRODUCT_REPOSITORY.git" '
+        '"$DW_PRODUCT"'
+    )
+    assert clone_command in raw
+    assert 'cd "$DW_PRODUCT"' in raw
+    assert 'chmod 0700 "$DW_SOURCE_ROOT"' in raw
+    assert 'rm -rf --one-file-system -- "$DW_SOURCE_ROOT"' in raw
