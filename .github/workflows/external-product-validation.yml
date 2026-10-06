@@ -208,14 +208,16 @@ jobs:
 
       - name: Record PASS
         if: ${{ success() && github.event_name == 'issues' }}
-        env: { GH_TOKEN: ${{ github.token }} }
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           gh issue comment "${{ github.event.issue.number }}" --repo "$GITHUB_REPOSITORY" --body $'## External validation evidence\n- project: `CLASSMO`\n- source_sha: `${{ steps.claim.outputs.sha }}`\n- result: `PASS`\n- runner_run_id: `'$GITHUB_RUN_ID$'`\n- canonical_product_workflow: `NOT_SUBSTITUTED`'
           gh issue close "${{ github.event.issue.number }}" --repo "$GITHUB_REPOSITORY" --reason completed
 
       - name: Record failure
         if: ${{ failure() && github.event_name == 'issues' }}
-        env: { GH_TOKEN: ${{ github.token }} }
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           gh issue comment "${{ github.event.issue.number }}" --repo "$GITHUB_REPOSITORY" --body $'## External validation evidence\n- project: `CLASSMO`\n- source_sha: `${{ steps.claim.outputs.sha }}`\n- result: `FAILED`\n- runner_run_id: `'$GITHUB_RUN_ID$'`'
 
@@ -300,14 +302,16 @@ jobs:
 
       - name: Record PASS
         if: ${{ success() && github.event_name == 'issues' }}
-        env: { GH_TOKEN: ${{ github.token }} }
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           gh issue comment "${{ github.event.issue.number }}" --repo "$GITHUB_REPOSITORY" --body $'## External validation evidence\n- project: `ESC`\n- source_sha: `${{ steps.claim.outputs.sha }}`\n- result: `PASS`\n- runner_run_id: `'$GITHUB_RUN_ID$'`\n- canonical_product_workflow: `NOT_SUBSTITUTED`'
           gh issue close "${{ github.event.issue.number }}" --repo "$GITHUB_REPOSITORY" --reason completed
 
       - name: Record failure
         if: ${{ failure() && github.event_name == 'issues' }}
-        env: { GH_TOKEN: ${{ github.token }} }
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           gh issue comment "${{ github.event.issue.number }}" --repo "$GITHUB_REPOSITORY" --body $'## External validation evidence\n- project: `ESC`\n- source_sha: `${{ steps.claim.outputs.sha }}`\n- result: `FAILED`\n- runner_run_id: `'$GITHUB_RUN_ID$'`'
 
