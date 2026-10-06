@@ -1,0 +1,69 @@
+name: Direct Worker Home Authenticated Synthetic Smoke
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  source-boundary:
+    if: ${{ github.ref == 'refs/heads/main' }}
+    runs-on: [self-hosted, Linux, X64, direct-worker]
+    timeout-minutes: 12
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Reserve fresh authenticated smoke storage
+        id: storage
+        run: |
+          set -euo pipefail
+          umask 077
+          path="codex-smoke-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          test ! -e "$GITHUB_WORKSPACE/$path" && test ! -L "$GITHUB_WORKSPACE/$path"
+          test -z "$(find "$GITHUB_WORKSPACE" -mindepth 1 -maxdepth 1 -name 'codex-smoke-*' -print -quit)"
+          mkdir "$GITHUB_WORKSPACE/$path"
+          echo "path=$path" >> "$GITHUB_OUTPUT"
+          echo "DW_SMOKE_ROOT=$GITHUB_WORKSPACE/$path" >> "$GITHUB_ENV"
+      - name: Checkout trusted default-branch exact SHA
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+          path: ${{ steps.storage.outputs.path }}/runner
+          clean: false
+          persist-credentials: false
+      - name: Install public runner in isolated environment
+        working-directory: ${{ steps.storage.outputs.path }}/runner
+        run: |
+          set -euo pipefail
+          python3 -m venv ../venv
+          ../venv/bin/python -m pip install --no-cache-dir -e .
+          PYTHONPATH=src ../venv/bin/python scripts/direct_worker_isolation_smoke.py
+      - name: Actual bounded authenticated Codex source turn
+        working-directory: ${{ steps.storage.outputs.path }}/runner
+        env:
+          CODEX_AUTH_JSON: ${{ secrets.CODEX_AUTH_JSON }}
+        run: |
+          set -euo pipefail
+          PYTHONPATH=src ../venv/bin/python scripts/direct_worker_authenticated_smoke.py
+          printf 'runner_name=%s\nos=%s\n' "$RUNNER_NAME" "$RUNNER_OS" >> "$GITHUB_STEP_SUMMARY"
+          uname -r >> "$GITHUB_STEP_SUMMARY"
+          echo 'authenticated synthetic source/trusted local Git boundary: PASS' >> "$GITHUB_STEP_SUMMARY"
+          echo 'product push/PR/provider/runtime/EAS/device/physical: NOT_RUN' >> "$GITHUB_STEP_SUMMARY"
+      - name: Rotate credential after successful synthetic turn
+        env:
+          GH_TOKEN: ${{ secrets.SECRET_ROTATION_TOKEN }}
+        run: |
+          set -euo pipefail
+          test -s "$DW_SMOKE_ROOT/auth/auth.json"
+          gh secret set CODEX_AUTH_JSON --repo "$GITHUB_REPOSITORY" < "$DW_SMOKE_ROOT/auth/auth.json"
+      - name: Cleanup exact authenticated smoke storage
+        if: ${{ always() && steps.storage.outputs.path != '' }}
+        run: |
+          set -euo pipefail
+          expected="$GITHUB_WORKSPACE/codex-smoke-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          test "$DW_SMOKE_ROOT" = "$expected"
+          test "$(realpath -m "$DW_SMOKE_ROOT")" = "$expected"
+          test ! -L "$DW_SMOKE_ROOT"
+          rm -rf --one-file-system -- "$DW_SMOKE_ROOT"

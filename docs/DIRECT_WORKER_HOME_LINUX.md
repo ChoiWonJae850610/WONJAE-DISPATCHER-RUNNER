@@ -121,12 +121,21 @@ no auth/model/provider call. This checks the candidate code on Linux; it is not
 home-PC allocation evidence. `direct-worker-home-smoke.yml` is dispatch-only and
 uses the fixed candidate home labels, fresh checkout and exact cleanup.
 
-After home smoke, still require a trusted-main authenticated synthetic/no-op
-Codex turn on that actual home runner with effective profile readback and tool
-evidence, plus trusted-publication boundary evidence. Do not edit product source
+After home smoke, require the trusted-main `direct-worker-home-codex-smoke.yml`
+authenticated synthetic source turn on that actual home runner, plus
+trusted-parent Git boundary evidence. It invokes the actual source function
+against a fresh synthetic checkout, verifies only the expected source change and
+unchanged Git metadata/HEAD, then commits locally only from trusted parent code.
+It receives only the protected Codex credential; no product/provider token or
+product publication is involved. It rotates auth only after success and removes
+the exact job storage even on failure. Do not edit product source
 just to manufacture smoke. Until these gates are observed, model source execution
 and publication smoke are **NOT_RUN**, not inferred from CLI/unit test PASS.
-Validate the final exact PR head, merge only on PASS, validate the actual integrated
+The preparation PR may integrate after its exact Linux/security PASS so both
+manual smoke workflows exist on trusted main. That does not activate home source
+routing. The separate final activation commit requires actual online inventory
+and both home smoke results. Validate the final activation PR head, merge only
+on PASS, validate the actual integrated
 SHA, and synchronize the private control document with those exact run identities.
 KDN, Dispatcher/Gmail queue, production/provider/runtime/EAS/device/physical work
 are excluded. Unperformed external stages remain NOT_RUN/NOT_INFERRED.
