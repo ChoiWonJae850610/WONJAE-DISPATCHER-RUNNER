@@ -65,7 +65,17 @@ jobs:
           printf '%s' "$ISSUE_BODY" > "$RUNNER_TEMP/reconciliation.json"
           PYTHONPATH="$GITHUB_WORKSPACE/src" python scripts/reconciliation_claim.py             --registry "$GITHUB_WORKSPACE/_control/PROJECTS.yaml"             --project "${{ inputs.project }}"             --body-file "$RUNNER_TEMP/reconciliation.json"             --github-output "$GITHUB_OUTPUT"
 
-      - name: Verify bounded open Product PR
+      - name: Record reconciliation STARTED
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PROJECT: ${{ inputs.project }}
+          PR_NUMBER: ${{ steps.claim.outputs.product_pr }}
+          EXPECTED_HEAD: ${{ steps.claim.outputs.expected_head }}
+        run: |
+          set -euo pipefail
+          gh issue comment "${{ inputs.issue_number }}" --repo "$GITHUB_REPOSITORY" --body             "STARTED: reconciliation finalizer run `$GITHUB_RUN_ID` is processing $PROJECT PR #$PR_NUMBER at exact head `$EXPECTED_HEAD`. GitHub validation wait is not an Owner action."
+
+      - name: Verify bounded Product PR
         env:
           GH_TOKEN: ${{ secrets.product_write_token }}
           PRODUCT_REPOSITORY: ${{ steps.claim.outputs.repository }}
@@ -75,8 +85,17 @@ jobs:
         run: |
           set -euo pipefail
           pr="$(gh api "repos/$PRODUCT_REPOSITORY/pulls/$PR_NUMBER")"
-          echo "$pr" | jq -e             --arg branch "$TARGET_BRANCH"             --arg head "$EXPECTED_HEAD"             --arg repo "$PRODUCT_REPOSITORY"             '.state == "open" and .draft == false and .base.ref == $branch and
+          echo "$pr" | jq -e             --arg branch "$TARGET_BRANCH"             --arg head "$EXPECTED_HEAD"             --arg repo "$PRODUCT_REPOSITORY"             '(.state == "open" or (.state == "closed" and .merged_at != null)) and
+             .draft == false and .base.ref == $branch and
              .head.sha == $head and .head.repo.full_name == $repo' >/dev/null
+
+          already_merged="$(echo "$pr" | jq -r '.merged_at != null')"
+          merge_sha="$(echo "$pr" | jq -r '.merge_commit_sha // empty')"
+          echo "ALREADY_MERGED=$already_merged" >> "$GITHUB_ENV"
+          if [ "$already_merged" = "true" ]; then
+            test -n "$merge_sha"
+            echo "INTEGRATED_SHA=$merge_sha" >> "$GITHUB_ENV"
+          fi
 
           files="$(gh api --paginate "repos/$PRODUCT_REPOSITORY/pulls/$PR_NUMBER/files?per_page=100" --jq '.[].filename')"
           test -n "$files"
@@ -85,6 +104,7 @@ jobs:
 import os
 import sys
 from wonjae_dispatcher_runner.reconciliation import path_allowed
+
 path = sys.argv[1]
 if not path_allowed(os.environ["PROJECT"], path):
     raise SystemExit(f"reconciliation path is not allowed: {path}")
@@ -105,8 +125,11 @@ PY
             if [ -n "$run_id" ]; then break; fi
             sleep 10
           done
-          test -n "$run_id" || { echo "::error::Exact reconciliation PR-head validation run not found."; exit 1; }
-          conclusion="$(PRODUCT_REPOSITORY="$PRODUCT_REPOSITORY" VALIDATION_WORKFLOW_FILE="$VALIDATION_WORKFLOW_FILE"             PYTHONPATH="$GITHUB_WORKSPACE/src" python scripts/source_validation.py             --run-id "$run_id" --head-sha "$EXPECTED_HEAD" --event pull_request)"
+          test -n "$run_id" || {
+            echo "::error::Exact reconciliation PR-head validation run not found."
+            exit 1
+          }
+          conclusion="$(PRODUCT_REPOSITORY="$PRODUCT_REPOSITORY"             VALIDATION_WORKFLOW_FILE="$VALIDATION_WORKFLOW_FILE"             PYTHONPATH="$GITHUB_WORKSPACE/src" python scripts/source_validation.py             --run-id "$run_id" --head-sha "$EXPECTED_HEAD" --event pull_request)"
           test "$conclusion" = "success $EXPECTED_HEAD"
           echo "PR_HEAD_RUN_ID=$run_id" >> "$GITHUB_ENV"
 
@@ -138,16 +161,25 @@ PY
             if [ -n "$run_id" ]; then break; fi
             sleep 10
           done
-          test -n "$run_id" || { echo "::error::Exact reconciliation integrated validation run not found."; exit 1; }
-          conclusion="$(PRODUCT_REPOSITORY="$PRODUCT_REPOSITORY" VALIDATION_WORKFLOW_FILE="$VALIDATION_WORKFLOW_FILE"             PYTHONPATH="$GITHUB_WORKSPACE/src" python scripts/source_validation.py             --run-id "$run_id" --head-sha "$INTEGRATED_SHA" --event push)"
+          test -n "$run_id" || {
+            echo "::error::Exact reconciliation integrated validation run not found."
+            exit 1
+          }
+          conclusion="$(PRODUCT_REPOSITORY="$PRODUCT_REPOSITORY"             VALIDATION_WORKFLOW_FILE="$VALIDATION_WORKFLOW_FILE"             PYTHONPATH="$GITHUB_WORKSPACE/src" python scripts/source_validation.py             --run-id "$run_id" --head-sha "$INTEGRATED_SHA" --event push)"
           test "$conclusion" = "success $INTEGRATED_SHA"
           echo "INTEGRATED_RUN_ID=$run_id" >> "$GITHUB_ENV"
 
       - name: Record reconciliation completion
         env:
           GH_TOKEN: ${{ github.token }}
+          PROJECT: ${{ inputs.project }}
+          PR_NUMBER: ${{ steps.claim.outputs.product_pr }}
         run: |
-          gh issue comment "${{ inputs.issue_number }}" --repo "$GITHUB_REPOSITORY" --body             "PASS: ${{ inputs.project }} reconciliation PR #${{ steps.claim.outputs.product_pr }} merged at `$INTEGRATED_SHA`; exact PR-head validation `$PR_HEAD_RUN_ID` and integrated validation `$INTEGRATED_RUN_ID` passed."
+          set -euo pipefail
+          marker="PASS: $PROJECT reconciliation PR #$PR_NUMBER merged at `$INTEGRATED_SHA`; exact PR-head validation `$PR_HEAD_RUN_ID` and integrated validation `$INTEGRATED_RUN_ID` passed."
+          if ! gh api "repos/$GITHUB_REPOSITORY/issues/${{ inputs.issue_number }}/comments?per_page=100"             --jq '.[].body' | grep -Fx -- "$marker" >/dev/null; then
+            gh issue comment "${{ inputs.issue_number }}" --repo "$GITHUB_REPOSITORY" --body "$marker"
+          fi
           gh issue close "${{ inputs.issue_number }}" --repo "$GITHUB_REPOSITORY" --reason completed
 
       - name: Record reconciliation failure
@@ -156,4 +188,4 @@ PY
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh issue comment "${{ inputs.issue_number }}" --repo "$GITHUB_REPOSITORY" --body             "FAILED: reconciliation did not reach exact validated integration. Inspect this Actions run. No broader source/provider/device authority was granted."
+          gh issue comment "${{ inputs.issue_number }}" --repo "$GITHUB_REPOSITORY" --body             "FAILED: reconciliation finalizer run `$GITHUB_RUN_ID` did not reach exact validated integration. Inspect this Actions run. No broader source/provider/device authority was granted."
