@@ -55,7 +55,12 @@ jobs:
           test "$source_parent" != "$RUNNER_TEMP"
           mkdir -p "$source_parent"
           test ! -e "$production_source"
-          mkdir "$production_source"
-          DIRECT_WORKER_SMOKE_PARENT="$production_source" \
+          mkdir "$production_source" "$production_source/product"
+          touch "$production_source/product/trusted-product-write-check"
+          rm "$production_source/product/trusted-product-write-check"
+          chmod 0500 "$production_source"
+          test "$(stat -c '%a' "$production_source")" = "500"
+          DIRECT_WORKER_FORBIDDEN_WRITE_ROOT="$production_source" \
             PYTHONPATH=src python scripts/direct_worker_isolation_smoke.py
+          chmod 0700 "$production_source"
           rm -rf --one-file-system -- "$production_source"
