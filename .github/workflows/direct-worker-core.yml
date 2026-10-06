@@ -52,11 +52,14 @@ jobs:
             home-linux|github-hosted) ;;
             *) echo '::error::Unknown execution host'; exit 1 ;;
           esac
-          source_parent="$(dirname "$(dirname "$GITHUB_WORKSPACE")")"
-          source_root="$source_parent/_wonjae-direct-source-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          host_home="$(getent passwd "$(id -u)" | cut -d: -f6)"
+          test -n "$host_home" && test -d "$host_home"
+          source_parent="$host_home/.wonjae-direct-worker-sources"
+          source_root="$source_parent/run-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
           product_root="$source_root/product"
           test "$source_parent" != "$GITHUB_WORKSPACE"
           test "$source_parent" != "$RUNNER_TEMP"
+          mkdir -p "$source_parent"
           test ! -e "$DW_JOB_ROOT" && test ! -L "$DW_JOB_ROOT"
           test ! -e "$source_root" && test ! -L "$source_root"
           test -z "$(find "$GITHUB_WORKSPACE" -mindepth 1 -maxdepth 1 -name 'direct-*' -print -quit)" || {
@@ -601,8 +604,9 @@ jobs:
         run: |
           set -euo pipefail
           expected_trusted="$GITHUB_WORKSPACE/direct-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
-          source_parent="$(dirname "$(dirname "$GITHUB_WORKSPACE")")"
-          expected_source="$source_parent/_wonjae-direct-source-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          host_home="$(getent passwd "$(id -u)" | cut -d: -f6)"
+          source_parent="$host_home/.wonjae-direct-worker-sources"
+          expected_source="$source_parent/run-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
           test "$DW_JOB_ROOT" = "$expected_trusted"
           test "$(realpath -m "$DW_JOB_ROOT")" = "$expected_trusted"
           test "$DW_SOURCE_ROOT" = "$expected_source"
