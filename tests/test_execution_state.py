@@ -21,7 +21,11 @@ def write_state(root: Path, action_type: str = "SOURCE_READY") -> Path:
             "title": "Prepare source hardening",
             "source_task_id": "WAFL-SOURCE-001" if action_type == "SOURCE_READY" else None,
             "owner_action": None,
-            "source_scope": ["Change the bounded source migration."] if action_type == "SOURCE_READY" else [],
+            "source_scope": (
+                ["Change the bounded source migration."]
+                if action_type == "SOURCE_READY"
+                else []
+            ),
             "gate": None,
         },
         "after_source_success": {
