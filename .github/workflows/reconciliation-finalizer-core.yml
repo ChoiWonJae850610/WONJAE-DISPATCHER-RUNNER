@@ -100,15 +100,8 @@ jobs:
           files="$(gh api --paginate "repos/$PRODUCT_REPOSITORY/pulls/$PR_NUMBER/files?per_page=100" --jq '.[].filename')"
           test -n "$files"
           while IFS= read -r path; do
-            PROJECT="${{ inputs.project }}" PYTHONPATH="$GITHUB_WORKSPACE/src"               python - "$path" <<'PY'
-import os
-import sys
-from wonjae_dispatcher_runner.reconciliation import path_allowed
-
-path = sys.argv[1]
-if not path_allowed(os.environ["PROJECT"], path):
-    raise SystemExit(f"reconciliation path is not allowed: {path}")
-PY
+            PROJECT="${{ inputs.project }}" PYTHONPATH="$GITHUB_WORKSPACE/src" \
+              python -c 'import os, sys; from wonjae_dispatcher_runner.reconciliation import path_allowed; path=sys.argv[1]; raise SystemExit(0 if path_allowed(os.environ["PROJECT"], path) else f"reconciliation path is not allowed: {path}")' "$path"
           done <<< "$files"
 
       - name: Wait for exact PR-head validation
