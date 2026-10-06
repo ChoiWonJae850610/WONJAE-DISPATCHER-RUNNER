@@ -145,6 +145,29 @@ jobs:
             echo "PR_NUMBER=${{ steps.prepare.outputs.pr_number }}" >> "$GITHUB_ENV"
           fi
 
+      - name: Require exact starting-head validation
+        if: ${{ inputs.command == 'next' }}
+        env:
+          GH_TOKEN: ${{ secrets.product_write_token }}
+          PRODUCT_REPOSITORY: ${{ steps.route.outputs.repository }}
+          VALIDATION_WORKFLOW_FILE: ${{ steps.route.outputs.validation_workflow_file }}
+        run: |
+          set -euo pipefail
+          run_json="$(gh api             "repos/$PRODUCT_REPOSITORY/actions/workflows/$VALIDATION_WORKFLOW_FILE/runs?head_sha=$START_HEAD&event=push&per_page=20"             --jq '.workflow_runs | sort_by(.created_at) | last // empty')"
+          test -n "$run_json" || {
+            echo "::error::No exact starting-head validation run exists yet."
+            exit 1
+          }
+          run_id="$(printf '%s' "$run_json" | jq -r '.id')"
+          status="$(printf '%s' "$run_json" | jq -r '.status')"
+          test "$status" = "completed" || {
+            echo "::error::Exact starting-head validation is still running."
+            exit 1
+          }
+          conclusion="$(PYTHONPATH="$GITHUB_WORKSPACE/src" python scripts/source_validation.py             --run-id "$run_id" --head-sha "$START_HEAD" --event push)"
+          test "$conclusion" = "success $START_HEAD"
+          echo "START_VALIDATION_RUN_ID=$run_id" >> "$GITHUB_ENV"
+
       - name: Collect retry validation evidence
         if: ${{ inputs.command == 'retry' }}
         env:
@@ -256,6 +279,12 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
           echo "::error::Direct Worker reached a real manual gate."
           exit 1
+
+      - name: Advance product execution state on source success
+        if: ${{ inputs.command == 'next' && steps.codex.outputs.status == 'CHANGED' }}
+        run: |
+          set -euo pipefail
+          PYTHONPATH="$GITHUB_WORKSPACE/src" python scripts/advance_execution_state.py             --registry "$GITHUB_WORKSPACE/_control/PROJECTS.yaml"             --project "${{ inputs.project }}"             --product-checkout "$GITHUB_WORKSPACE/_product"
 
       - name: Commit Direct Worker changes
         if: ${{ steps.codex.outputs.changed_count != '0' }}
