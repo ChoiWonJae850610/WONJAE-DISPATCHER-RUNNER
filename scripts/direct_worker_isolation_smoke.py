@@ -64,7 +64,9 @@ printf 'protected-and-cross-project-write: PASS\n'
 printf 'source\n' > allowed.txt
 printf 'source-write: PASS\n'
 if bash -c 'exec 3<>/dev/tcp/1.1.1.1/443' 2>/dev/null; then exit 27; fi
-test "$(readlink /proc/self/ns/net)" != "$2"
+source_network_namespace="$(readlink /proc/self/ns/net)"
+test -n "$source_network_namespace"
+test "$source_network_namespace" != "$2"
 printf 'network: PASS\n'
 '''
         args = [codex]
