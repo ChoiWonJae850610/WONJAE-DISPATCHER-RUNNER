@@ -40,6 +40,8 @@ jobs:
     env:
       DW_JOB_ROOT: ${{ github.workspace }}/direct-${{ github.run_id }}-${{ github.run_attempt }}
       DW_RUNNER: ${{ github.workspace }}/direct-${{ github.run_id }}-${{ github.run_attempt }}/runner
+      DW_SOURCE_ROOT: ${{ runner.temp }}/wonjae-direct-source-${{ github.run_id }}-${{ github.run_attempt }}
+      DW_PRODUCT: ${{ runner.temp }}/wonjae-direct-source-${{ github.run_id }}-${{ github.run_attempt }}/product
       DIRECT_WORKER_HOME_ISOLATION: ${{ inputs.execution_host == 'home-linux' && '1' || '0' }}
     steps:
       - name: Reserve fresh trusted job storage
@@ -53,17 +55,18 @@ jobs:
             *) echo '::error::Unknown execution host'; exit 1 ;;
           esac
           test ! -e "$DW_JOB_ROOT" && test ! -L "$DW_JOB_ROOT"
+          test ! -e "$DW_SOURCE_ROOT" && test ! -L "$DW_SOURCE_ROOT"
           test -z "$(find "$GITHUB_WORKSPACE" -mindepth 1 -maxdepth 1 -name 'direct-*' -print -quit)" || {
-            echo '::error::Unexpected prior job residue; inspect exact runner storage before retry.'
+            echo '::error::Unexpected prior trusted-workspace residue; inspect exact runner storage before retry.'
             exit 1
           }
-          mkdir "$DW_JOB_ROOT"
-          mkdir "$DW_JOB_ROOT/trusted-home" "$DW_JOB_ROOT/gh"
+          mkdir "$DW_JOB_ROOT" "$DW_SOURCE_ROOT"
+          mkdir "$DW_JOB_ROOT/trusted-home" "$DW_JOB_ROOT/gh" "$DW_SOURCE_ROOT/tmp"
           echo "path=direct-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
           echo "HOME=$DW_JOB_ROOT/trusted-home" >> "$GITHUB_ENV"
           echo "GH_CONFIG_DIR=$DW_JOB_ROOT/gh" >> "$GITHUB_ENV"
           echo "PIP_NO_CACHE_DIR=1" >> "$GITHUB_ENV"
-          echo "TMPDIR=$DW_JOB_ROOT" >> "$GITHUB_ENV"
+          echo "TMPDIR=$DW_SOURCE_ROOT/tmp" >> "$GITHUB_ENV"
 
       - name: Checkout trusted runner
         uses: actions/checkout@v6
@@ -151,16 +154,20 @@ jobs:
             echo "pr_number=$pr_number" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Checkout product
-        uses: actions/checkout@v6
-        with:
-          repository: ${{ steps.route.outputs.repository }}
-          ref: ${{ steps.prepare.outputs.source_ref }}
-          token: ${{ secrets.product_write_token }}
-          path: ${{ steps.storage.outputs.path }}/runner/_product
-          clean: false
-          persist-credentials: false
-          fetch-depth: 0
+      - name: Checkout product outside trusted workflow workspace
+        env:
+          GH_TOKEN: ${{ secrets.product_write_token }}
+          PRODUCT_REPOSITORY: ${{ steps.route.outputs.repository }}
+          SOURCE_REF: ${{ steps.prepare.outputs.source_ref }}
+        working-directory: ${{ env.DW_RUNNER }}
+        run: |
+          set -euo pipefail
+          test ! -e "$DW_PRODUCT" && test ! -L "$DW_PRODUCT"
+          gh auth setup-git
+          git clone --no-checkout "https://github.com/$PRODUCT_REPOSITORY.git" "$DW_PRODUCT"
+          git -C "$DW_PRODUCT" fetch --no-tags origin "$SOURCE_REF"
+          git -C "$DW_PRODUCT" checkout --detach FETCH_HEAD
+          test -z "$(git -C "$DW_PRODUCT" status --porcelain=v1 --untracked-files=all)"
 
       - name: Establish exact starting head
         id: source
@@ -173,7 +180,7 @@ jobs:
         working-directory: ${{ env.DW_RUNNER }}
         run: |
           set -euo pipefail
-          cd "$DW_RUNNER/_product"
+          cd "$DW_PRODUCT"
           test -z "$(git status --porcelain=v1 --untracked-files=all)"
           start_head="$(git rev-parse HEAD)"
           live_head="$(gh api "repos/$PRODUCT_REPOSITORY/branches/$TARGET_BRANCH" --jq '.commit.sha')"
@@ -276,7 +283,7 @@ jobs:
           args=(
             --registry "$DW_RUNNER/_control/PROJECTS.yaml"
             --project "${{ inputs.project }}"
-            --product-checkout "$DW_RUNNER/_product"
+            --product-checkout "$DW_PRODUCT"
             --command "${{ inputs.command }}"
             --result-file "$result_file"
           )
@@ -348,14 +355,14 @@ jobs:
         working-directory: ${{ env.DW_RUNNER }}
         run: |
           set -euo pipefail
-          PYTHONPATH="$DW_RUNNER/src" python scripts/advance_execution_state.py             --registry "$DW_RUNNER/_control/PROJECTS.yaml"             --project "${{ inputs.project }}"             --product-checkout "$DW_RUNNER/_product"
+          PYTHONPATH="$DW_RUNNER/src" python scripts/advance_execution_state.py             --registry "$DW_RUNNER/_control/PROJECTS.yaml"             --project "${{ inputs.project }}"             --product-checkout "$DW_PRODUCT"
 
       - name: Commit Direct Worker changes
         if: ${{ steps.codex.outputs.changed_count != '0' }}
         working-directory: ${{ env.DW_RUNNER }}
         run: |
           set -euo pipefail
-          cd "$DW_RUNNER/_product"
+          cd "$DW_PRODUCT"
           test "$(git rev-parse "$START_HEAD")" = "$START_HEAD"
           git diff --check
           git diff --cached --check
@@ -376,7 +383,7 @@ jobs:
         working-directory: ${{ env.DW_RUNNER }}
         run: |
           set -euo pipefail
-          cd "$DW_RUNNER/_product"
+          cd "$DW_PRODUCT"
           live_base="$(gh api "repos/$PRODUCT_REPOSITORY/branches/$TARGET_BRANCH" --jq '.commit.sha')"
           test "$live_base" = "$START_ACTIVE_HEAD"
           pulls="$(gh api --paginate "repos/$PRODUCT_REPOSITORY/pulls?state=open&base=$TARGET_BRANCH&per_page=100")"
@@ -588,8 +595,12 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          expected="$GITHUB_WORKSPACE/direct-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
-          test "$DW_JOB_ROOT" = "$expected"
-          test "$(realpath -m "$DW_JOB_ROOT")" = "$expected"
-          test ! -L "$DW_JOB_ROOT"
+          expected_trusted="$GITHUB_WORKSPACE/direct-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          expected_source="$RUNNER_TEMP/wonjae-direct-source-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          test "$DW_JOB_ROOT" = "$expected_trusted"
+          test "$(realpath -m "$DW_JOB_ROOT")" = "$expected_trusted"
+          test "$DW_SOURCE_ROOT" = "$expected_source"
+          test "$(realpath -m "$DW_SOURCE_ROOT")" = "$expected_source"
+          test ! -L "$DW_JOB_ROOT" && test ! -L "$DW_SOURCE_ROOT"
           rm -rf --one-file-system -- "$DW_JOB_ROOT"
+          rm -rf --one-file-system -- "$DW_SOURCE_ROOT"
