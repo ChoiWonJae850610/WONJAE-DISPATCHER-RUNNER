@@ -7,6 +7,7 @@ import pytest
 
 from wonjae_dispatcher_runner.direct_worker import (
     DirectWorkerError,
+    _prompt,
     changed_paths,
     git_metadata_snapshot,
     load_direct_worker_route,
@@ -186,3 +187,18 @@ def test_handoff_gates_next_source_work(tmp_path):
     )
     with pytest.raises(DirectWorkerError, match="MANUAL_QA"):
         require_next_source_ready(blocked, sha)
+
+
+def test_source_ready_prompt_makes_handoff_sequencing_authoritative(tmp_path):
+    sha = "a" * 40
+    route = load_direct_worker_route(
+        registry_with_handoff(tmp_path, "SOURCE_READY", sha),
+        "ESC",
+    )
+    prompt = _prompt(route, "next", sha, "")
+    assert "registered DEV-CONTROL execution handoff" in prompt
+    assert "execution-routing authority" in prompt
+    assert "supersede older task-state" in prompt
+    assert "SOURCE_READY handoff explicitly authorizes source-only schema/migration FILE" in prompt
+    assert "never authorizes applying that migration to a live provider" in prompt
+    assert "Execute exactly the SOURCE_READY handoff task: Current handoff task" in prompt

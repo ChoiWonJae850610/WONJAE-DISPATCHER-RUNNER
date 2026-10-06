@@ -188,6 +188,16 @@ jobs:
           echo "status=$status" >> "$GITHUB_OUTPUT"
           echo "changed_count=$changed_count" >> "$GITHUB_OUTPUT"
           echo "RESULT_FILE=$result_file" >> "$GITHUB_ENV"
+          echo "DIRECT_WORKER_RESULT_BEGIN"
+          printf 'status='
+          jq -r '.status' "$result_file"
+          printf 'summary='
+          jq -r '.summary | gsub("[\\r\\n]+"; " ") | .[0:2000]' "$result_file"
+          if [ "$status" = "MANUAL_REQUIRED" ]; then
+            printf 'manual_action='
+            jq -r '.manual_action | gsub("[\\r\\n]+"; " ") | .[0:2000]' "$result_file"
+          fi
+          echo "DIRECT_WORKER_RESULT_END"
 
       - name: Rotate refreshed Codex session
         if: ${{ always() }}
