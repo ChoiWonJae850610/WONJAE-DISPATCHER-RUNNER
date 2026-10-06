@@ -66,3 +66,20 @@ def test_reconciliation_paths_are_docs_and_state_only() -> None:
     assert not path_allowed("WAFL", "supabase/migrations/202610060002.sql")
     assert not path_allowed("CLASSMO", "src/App.tsx")
     assert not path_allowed("ESC", ".github/workflows/validate.yml")
+
+
+
+def test_reconciliation_workflow_has_explicit_owner_replay_and_started_evidence() -> None:
+    root = Path(__file__).resolve().parents[1]
+    adapter = (root / ".github/workflows/reconciliation-finalizer.yml").read_text(
+        encoding="utf-8"
+    )
+    core = (root / ".github/workflows/reconciliation-finalizer-core.yml").read_text(
+        encoding="utf-8"
+    )
+    assert "issue_comment:" in adapter
+    assert "github.event.comment.body == '[RECONCILE-RUN]'" in adapter
+    assert "Record reconciliation STARTED" in core
+    assert "GitHub validation wait is not an Owner action" in core
+    assert '.state == "closed" and .merged_at != null' in core
+    assert "ALREADY_MERGED" in core
