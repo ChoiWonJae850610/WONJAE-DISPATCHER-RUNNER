@@ -6,6 +6,7 @@ the candidate host/profile is NOT ready. Prints only assertion names/results.
 
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 import tempfile
@@ -39,6 +40,7 @@ def main() -> int:
         (product / ".wonjae").mkdir()
         (product / ".wonjae" / "execution-state.yaml").write_text("protected\n")
         auth = root / "auth"
+        (auth / "auth.json").write_text('{"synthetic": "no-secret"}\n')
         shell_home = Path("/nonexistent")
         env = source_environment(auth, shell_home)
         # These must be absent inside the actual sandbox, regardless of parent secrets.
@@ -50,23 +52,26 @@ printf 'environment: PASS\n'
 for folder in auth publication other-product cache trusted; do
   if cat "$1/$folder/sentinel" >/dev/null 2>&1; then exit 21; fi
 done
+if cat "$1/auth/auth.json" >/dev/null 2>&1; then exit 30; fi
 if cat escape/sentinel >/dev/null 2>&1; then exit 22; fi
 if cat /proc/1/root"$1/auth/sentinel" >/dev/null 2>&1; then exit 23; fi
 printf 'host-read-and-symlink: PASS\n'
 if touch ../other-product/changed 2>/dev/null; then exit 24; fi
 if touch .git/changed 2>/dev/null; then exit 25; fi
 if touch .wonjae/changed 2>/dev/null; then exit 26; fi
-if touch /tmp/direct-smoke-outside 2>/dev/null; then exit 28; fi
+if touch "$1-outside" 2>/dev/null; then exit 28; fi
 printf 'protected-and-cross-project-write: PASS\n'
 printf 'source\n' > allowed.txt
 printf 'source-write: PASS\n'
 if bash -c 'exec 3<>/dev/tcp/1.1.1.1/443' 2>/dev/null; then exit 27; fi
+test "$(readlink /proc/self/ns/net)" != "$2"
 printf 'network: PASS\n'
 '''
         args = [codex]
         for override in cli_overrides(product):
             args += ["--config", override]
-        args += ["sandbox", "--", "/bin/bash", "-c", script, "smoke", str(root)]
+        args += ["sandbox", "--", "/bin/bash", "-c", script, "smoke", str(root),
+                 os.readlink("/proc/self/ns/net")]
         result = subprocess.run(args, cwd=product, env=env, capture_output=True,
                                 text=True, timeout=45)
         expected = (
