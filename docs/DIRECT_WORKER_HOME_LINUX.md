@@ -59,13 +59,16 @@ PATH; GitHub/provider tokens and serialized `CODEX_AUTH_JSON` are removed before
 SDK startup. The SDK alone uses its protected file credential to contact its
 model service. Source tool commands have no network or access to that credential.
 
-The pinned SDK's `Sandbox.workspace_write` legacy override permits host reads.
-Its equivalent `:workspace` permission baseline is therefore inherited through
-the `direct_source` named profile for home execution: root deny, minimal public
-runtime read, exactly one product checkout write, protected Git/instruction/state
-paths read-only, and network disabled. A legacy `sandbox=workspace_write` thread
-or turn override would discard those split read restrictions; the home path
-retains the named workspace-write profile on both calls. Approvals stay
+The pinned SDK's `Sandbox.workspace_write` legacy override permits broader host
+reads and a `:workspace` parent can reopen surrounding runtime workspace roots.
+Home execution therefore uses the `direct_source` named profile inherited from
+`:read-only`, then reopens exactly one product checkout for writes: root deny,
+minimal public runtime read, protected Git/instruction/state paths read-only, and
+network disabled. The debug preflight also pins the named profile and exact product
+cwd. Runner Validation executes the smoke both with normal temp storage and with
+`TMPDIR` nested under the GitHub workspace to match production layout. A legacy
+`sandbox=workspace_write` thread or turn override would discard those split read
+restrictions; home execution does not use it. Approvals stay
 `ApprovalMode.deny_all`. No full-access or weaker fallback is used. The existing
 hosted path keeps its current explicit `Sandbox.workspace_write` preset.
 
