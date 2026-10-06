@@ -38,16 +38,16 @@ trusted-step rotation authority, never product/provider credentials.
 ## Source and publication separation
 
 Every task reserves two unique roots: a trusted workflow root under
-`GITHUB_WORKSPACE` for runner/control code and a source root under
-`RUNNER_TEMP` for the product checkout and source-process temporary files.
-The product is cloned by trusted workflow code into that external source root;
-it is never nested inside the runner/control checkout. Existing roots fail closed,
-no product checkout/cache is reused, and Git credentials remain only in the
-job-owned HOME/gh configuration. Pinned SDK dependencies use the trusted job
-virtual environment without a pip cache. Cleanup independently validates and
-removes only the exact trusted and source roots, including auth, result/failure
-files, venv and Git auth helpers. There are no auth/source caches or uploaded
-private artifacts.
+`GITHUB_WORKSPACE` for runner/control code and a separate source root under the
+runner's work parent, as a sibling of repository workspaces rather than a child
+of either `GITHUB_WORKSPACE` or `RUNNER_TEMP`. The product is cloned by trusted
+workflow code into that source root; it is never nested inside runner/control or
+temporary-directory roots. Existing roots fail closed, no product checkout/cache
+is reused, and Git credentials remain only in the job-owned HOME/gh configuration.
+Pinned SDK dependencies use the trusted job virtual environment without a pip
+cache. Cleanup independently validates and removes only the exact trusted and
+source roots, including auth, result/failure files, venv and Git auth helpers.
+There are no auth/source caches or uploaded private artifacts.
 
 The pinned Linux helper creates mount targets for missing protected paths. Trusted
 code therefore prepares empty file/directory targets only when originally absent,
@@ -68,10 +68,13 @@ Home execution therefore uses the `direct_source` named profile inherited from
 `:read-only`, then reopens exactly one product checkout for writes: root deny,
 minimal public runtime read, protected Git/instruction/state paths read-only, and
 network disabled. The debug preflight also pins the named profile and exact product
-cwd. Runner Validation executes the smoke both with normal temp storage and with
-`TMPDIR` under `RUNNER_TEMP`, matching the production source-root layout,
-and explicitly verifies that the trusted `GITHUB_WORKSPACE` remains unwritable
-from the Codex sandbox. A legacy
+cwd. Runner Validation executes the smoke once with normal temporary storage and
+again from the same non-temporary source-parent topology used by production.
+The smoke explicitly verifies that writes cannot escape the synthetic product
+root and that the trusted `GITHUB_WORKSPACE` remains unwritable from the Codex
+sandbox. Product source is intentionally not placed under `TMPDIR` or
+`RUNNER_TEMP`, because temporary-directory semantics are a separate sandbox
+capability and must not broaden source authority. A legacy
 `sandbox=workspace_write` thread or turn override would discard those split read
 restrictions; home execution does not use it. Approvals stay
 `ApprovalMode.deny_all`. No full-access or weaker fallback is used. The existing
