@@ -13,6 +13,7 @@ from pathlib import Path
 
 from wonjae_dispatcher_runner.auth_store import restore_auth_json
 from wonjae_dispatcher_runner.direct_worker import (
+    DirectWorkerError,
     DirectWorkerRoute,
     changed_paths,
     git_head,
@@ -54,14 +55,24 @@ def main() -> int:
             runner_workflow="synthetic", state_path=None, handoff_path=None, handoff=None,
         )
         os.environ["DIRECT_WORKER_HOME_ISOLATION"] = "1"
-        result = run_direct_worker(
-            product, route, "retry", auth,
-            "Synthetic isolated acceptance fixture, not a registered product task. "
-            "The only required correction is source.txt: replace before with after, "
-            "retaining one trailing newline. Use a shell command to check GH_TOKEN, "
-            "PRODUCT_TOKEN, RUNNER_TOKEN and CODEX_AUTH_JSON are unset. "
-            "Do not commit or publish. Return CHANGED only after the source correction.",
-        )
+        try:
+            result = run_direct_worker(
+                product, route, "retry", auth,
+                "Synthetic isolated acceptance fixture, not a registered product task. "
+                "The only required correction is source.txt: replace before with after, "
+                "retaining one trailing newline. Use a shell command to check GH_TOKEN, "
+                "PRODUCT_TOKEN, RUNNER_TOKEN and CODEX_AUTH_JSON are unset. "
+                "Do not commit or publish. Return CHANGED only after the source correction.",
+            )
+        except DirectWorkerError:
+            # This fixture contains only public synthetic files, never product/auth data.
+            # Emit paths/status only; retain the failed gate and never print model prose.
+            status = subprocess.run(
+                ["git", "-C", str(product), "status", "--porcelain"], check=True,
+                capture_output=True, text=True,
+            )
+            print("synthetic-only changed path diagnostic:", status.stdout[:2000], flush=True)
+            raise
         if (result.status != "CHANGED" or changed_paths(product) != ("source.txt",)
                 or (product / "source.txt").read_text() != "after\n"
                 or git_head(product) != original or git_metadata_snapshot(product) != metadata):
