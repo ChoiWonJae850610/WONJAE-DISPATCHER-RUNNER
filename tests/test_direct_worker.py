@@ -201,10 +201,9 @@ def test_source_ready_prompt_makes_handoff_sequencing_authoritative(tmp_path):
     )
     prompt = _prompt(route, "next", sha, "direct/ESC-synthetic", "")
     assert "trusted Runner has already read and validated" in prompt
-    assert "execution-routing authority" in prompt
-    assert "supersede older task-state" in prompt
-    assert "SOURCE_READY handoff explicitly authorizes source-only schema/migration FILE" in prompt
-    assert "never authorizes applying that migration to a live provider" in prompt
+    assert "legacy DEV-CONTROL execution handoff" in prompt
+    assert "product rules still" in prompt
+    assert "approval boundaries" in prompt
     assert "Execute exactly the SOURCE_READY handoff task: Current handoff task" in prompt
     assert "Trusted Runner execution handoff snapshot" in prompt
     assert f"- exact current_head: {sha}" in prompt
