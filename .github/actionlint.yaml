@@ -1,0 +1,4 @@
+# Candidate custom label vocabulary only; does not assert runner registration.
+self-hosted-runner:
+  labels:
+    - direct-worker

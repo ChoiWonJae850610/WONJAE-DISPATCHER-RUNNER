@@ -9,6 +9,11 @@ on:
       command:
         required: true
         type: string
+      execution_host:
+        description: Staged home-linux route; enable only after exact runner/smoke evidence
+        required: false
+        default: github-hosted
+        type: string
     secrets:
       product_write_token:
         required: true
@@ -29,23 +34,58 @@ concurrency:
 
 jobs:
   direct-worker:
-    runs-on: ubuntu-latest
+    if: ${{ github.ref == 'refs/heads/main' }}
+    runs-on: ${{ fromJSON(inputs.execution_host == 'home-linux' && '["self-hosted","Linux","X64","direct-worker"]' || '["ubuntu-latest"]') }}
     timeout-minutes: 75
+    env:
+      DW_JOB_ROOT: ${{ github.workspace }}/direct-${{ github.run_id }}-${{ github.run_attempt }}
+      DW_RUNNER: ${{ github.workspace }}/direct-${{ github.run_id }}-${{ github.run_attempt }}/runner
+      DIRECT_WORKER_HOME_ISOLATION: ${{ inputs.execution_host == 'home-linux' && '1' || '0' }}
     steps:
+      - name: Reserve fresh trusted job storage
+        id: storage
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          case "${{ inputs.execution_host }}" in
+            home-linux|github-hosted) ;;
+            *) echo '::error::Unknown execution host'; exit 1 ;;
+          esac
+          test ! -e "$DW_JOB_ROOT" && test ! -L "$DW_JOB_ROOT"
+          test -z "$(find "$GITHUB_WORKSPACE" -mindepth 1 -maxdepth 1 -name 'direct-*' -print -quit)" || {
+            echo '::error::Unexpected prior job residue; inspect exact runner storage before retry.'
+            exit 1
+          }
+          mkdir "$DW_JOB_ROOT"
+          mkdir "$DW_JOB_ROOT/trusted-home" "$DW_JOB_ROOT/gh"
+          echo "path=direct-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
+          echo "HOME=$DW_JOB_ROOT/trusted-home" >> "$GITHUB_ENV"
+          echo "GH_CONFIG_DIR=$DW_JOB_ROOT/gh" >> "$GITHUB_ENV"
+          echo "PIP_NO_CACHE_DIR=1" >> "$GITHUB_ENV"
+          echo "TMPDIR=$DW_JOB_ROOT" >> "$GITHUB_ENV"
+
       - name: Checkout trusted runner
         uses: actions/checkout@v6
         with:
           ref: ${{ github.sha }}
+          path: ${{ steps.storage.outputs.path }}/runner
+          clean: false
           persist-credentials: false
 
       - name: Set up Python
+        if: ${{ inputs.execution_host == 'github-hosted' }}
         uses: actions/setup-python@v6
         with:
           python-version: "3.12"
-          cache: pip
 
       - name: Install runner
-        run: python -m pip install -e .
+        working-directory: ${{ env.DW_RUNNER }}
+        run: |
+          set -euo pipefail
+          python3 -m venv "$DW_JOB_ROOT/venv"
+          "$DW_JOB_ROOT/venv/bin/python" -m pip install --no-cache-dir -e .
+          echo "$DW_JOB_ROOT/venv/bin" >> "$GITHUB_PATH"
 
       - name: Checkout current DEV-CONTROL registry
         uses: actions/checkout@v6
@@ -53,15 +93,17 @@ jobs:
           repository: ChoiWonJae850610/DEV-CONTROL
           ref: main
           token: ${{ secrets.control_read_token }}
-          path: _control
+          path: ${{ steps.storage.outputs.path }}/runner/_control
+          clean: false
           persist-credentials: false
           fetch-depth: 1
 
       - name: Resolve registered Direct Worker route
         id: route
+        working-directory: ${{ env.DW_RUNNER }}
         run: |
-          PYTHONPATH="$GITHUB_WORKSPACE/src" python scripts/direct_worker_route.py \
-            --registry "$GITHUB_WORKSPACE/_control/PROJECTS.yaml" \
+          PYTHONPATH="$DW_RUNNER/src" python scripts/direct_worker_route.py \
+            --registry "$DW_RUNNER/_control/PROJECTS.yaml" \
             --project "${{ inputs.project }}" \
             --github-output "$GITHUB_OUTPUT"
 
@@ -73,6 +115,7 @@ jobs:
           TARGET_BRANCH: ${{ steps.route.outputs.branch }}
           PROJECT: ${{ inputs.project }}
           COMMAND: ${{ inputs.command }}
+        working-directory: ${{ env.DW_RUNNER }}
         run: |
           set -euo pipefail
           case "$COMMAND" in
@@ -114,7 +157,8 @@ jobs:
           repository: ${{ steps.route.outputs.repository }}
           ref: ${{ steps.prepare.outputs.source_ref }}
           token: ${{ secrets.product_write_token }}
-          path: _product
+          path: ${{ steps.storage.outputs.path }}/runner/_product
+          clean: false
           persist-credentials: false
           fetch-depth: 0
 
@@ -126,13 +170,15 @@ jobs:
           TARGET_BRANCH: ${{ steps.route.outputs.branch }}
           COMMAND: ${{ inputs.command }}
           DIRECT_BRANCH: ${{ steps.prepare.outputs.direct_branch }}
+        working-directory: ${{ env.DW_RUNNER }}
         run: |
           set -euo pipefail
-          cd "$GITHUB_WORKSPACE/_product"
+          cd "$DW_RUNNER/_product"
           test -z "$(git status --porcelain=v1 --untracked-files=all)"
           start_head="$(git rev-parse HEAD)"
+          live_head="$(gh api "repos/$PRODUCT_REPOSITORY/branches/$TARGET_BRANCH" --jq '.commit.sha')"
+          echo "START_ACTIVE_HEAD=$live_head" >> "$GITHUB_ENV"
           if [ "$COMMAND" = "next" ]; then
-            live_head="$(gh api "repos/$PRODUCT_REPOSITORY/branches/$TARGET_BRANCH" --jq '.commit.sha')"
             test "$start_head" = "$live_head" || {
               echo "::error::Active branch moved during Direct Worker startup."
               exit 1
@@ -154,6 +200,7 @@ jobs:
           RUNNER_TOKEN: ${{ github.token }}
           PRODUCT_REPOSITORY: ${{ steps.route.outputs.repository }}
           VALIDATION_WORKFLOW_FILE: ${{ steps.route.outputs.validation_workflow_file }}
+        working-directory: ${{ env.DW_RUNNER }}
         run: |
           set -euo pipefail
           run_json="$(gh api             "repos/$PRODUCT_REPOSITORY/actions/workflows/$VALIDATION_WORKFLOW_FILE/runs?head_sha=$START_HEAD&event=push&per_page=20"             --jq '.workflow_runs | sort_by(.created_at) | last // empty')"
@@ -168,7 +215,7 @@ jobs:
             exit 1
           }
           echo "START_VALIDATION_RUN_ID=$run_id" >> "$GITHUB_ENV"
-          conclusion="$(PYTHONPATH="$GITHUB_WORKSPACE/src" python scripts/validation_gate.py             --project "${{ inputs.project }}"             --run-id "$run_id" --head-sha "$START_HEAD" --event push             --output-prefix START)"
+          conclusion="$(PYTHONPATH="$DW_RUNNER/src" python scripts/validation_gate.py             --project "${{ inputs.project }}"             --run-id "$run_id" --head-sha "$START_HEAD" --event push             --output-prefix START)"
           test "$conclusion" = "success $START_HEAD"
 
       - name: Collect retry validation evidence
@@ -177,9 +224,10 @@ jobs:
           GH_TOKEN: ${{ secrets.product_write_token }}
           PRODUCT_REPOSITORY: ${{ steps.route.outputs.repository }}
           VALIDATION_WORKFLOW_FILE: ${{ steps.route.outputs.validation_workflow_file }}
+        working-directory: ${{ env.DW_RUNNER }}
         run: |
           set -euo pipefail
-          failure_log="$RUNNER_TEMP/direct-worker-validation-failure.log"
+          failure_log="$DW_JOB_ROOT/direct-worker-validation-failure.log"
           run_id="$(gh api \
             "repos/$PRODUCT_REPOSITORY/actions/workflows/$VALIDATION_WORKFLOW_FILE/runs?head_sha=$START_HEAD&event=pull_request&per_page=20" \
             --jq '.workflow_runs | map(select(.status == "completed" and .conclusion != "success")) | sort_by(.created_at) | last | .id // empty')"
@@ -191,8 +239,14 @@ jobs:
 
       - name: Prepare Linux sandbox prerequisites
         shell: bash
+        working-directory: ${{ env.DW_RUNNER }}
         run: |
           set -euo pipefail
+          if [ "$DIRECT_WORKER_HOME_ISOLATION" = 1 ]; then
+            # Provisioning is an Owner host operation, never a privileged job mutation.
+            PYTHONPATH=src python scripts/direct_worker_isolation_smoke.py
+            exit 0
+          fi
           current_userns="$(sysctl -n kernel.unprivileged_userns_clone 2>/dev/null || true)"
           if [ -n "$current_userns" ] && [ "$current_userns" != "1" ]; then
             echo "Enabling kernel.unprivileged_userns_clone for bubblewrap."
@@ -212,23 +266,24 @@ jobs:
         env:
           PRODUCT_TOKEN: ${{ secrets.product_write_token }}
           RUNNER_TOKEN: ${{ github.token }}
-          CODEX_HOME: ${{ runner.temp }}/direct-codex-home
+          CODEX_HOME: ${{ env.DW_JOB_ROOT }}/auth
           CODEX_AUTH_JSON: ${{ secrets.codex_auth_json }}
+        working-directory: ${{ env.DW_RUNNER }}
         run: |
           set -euo pipefail
           mkdir -p "$CODEX_HOME"
-          result_file="$RUNNER_TEMP/direct-worker-result.json"
+          result_file="$DW_JOB_ROOT/direct-worker-result.json"
           args=(
-            --registry "$GITHUB_WORKSPACE/_control/PROJECTS.yaml"
+            --registry "$DW_RUNNER/_control/PROJECTS.yaml"
             --project "${{ inputs.project }}"
-            --product-checkout "$GITHUB_WORKSPACE/_product"
+            --product-checkout "$DW_RUNNER/_product"
             --command "${{ inputs.command }}"
             --result-file "$result_file"
           )
           if [ -n "${FAILURE_LOG:-}" ] && [ -s "${FAILURE_LOG:-}" ]; then
             args+=(--failure-log "$FAILURE_LOG")
           fi
-          PYTHONPATH="$GITHUB_WORKSPACE/src" python scripts/run_direct_worker_recovery.py "${args[@]}"
+          PYTHONPATH="$DW_RUNNER/src" python scripts/run_direct_worker_recovery.py "${args[@]}"
           status="$(jq -r '.status' "$result_file")"
           changed_count="$(jq '.changed_paths | length' "$result_file")"
           echo "status=$status" >> "$GITHUB_OUTPUT"
@@ -250,7 +305,8 @@ jobs:
         continue-on-error: true
         env:
           GH_TOKEN: ${{ secrets.secret_rotation_token }}
-          CODEX_HOME: ${{ runner.temp }}/direct-codex-home
+          CODEX_HOME: ${{ env.DW_JOB_ROOT }}/auth
+        working-directory: ${{ env.DW_RUNNER }}
         run: |
           if [ -s "$CODEX_HOME/auth.json" ]; then
             gh secret set CODEX_AUTH_JSON --repo "$GITHUB_REPOSITORY" < "$CODEX_HOME/auth.json"
@@ -258,6 +314,7 @@ jobs:
 
       - name: Report no-work result
         if: ${{ steps.codex.outputs.status == 'NO_WORK' }}
+        working-directory: ${{ env.DW_RUNNER }}
         run: |
           {
             echo "## Direct Worker"
@@ -271,6 +328,7 @@ jobs:
 
       - name: Report manual gate without source mutation
         if: ${{ steps.codex.outputs.status == 'MANUAL_REQUIRED' && steps.codex.outputs.changed_count == '0' }}
+        working-directory: ${{ env.DW_RUNNER }}
         run: |
           {
             echo "## Direct Worker"
@@ -287,15 +345,17 @@ jobs:
 
       - name: Advance product execution state on source success
         if: ${{ inputs.command == 'next' && steps.codex.outputs.status == 'CHANGED' }}
+        working-directory: ${{ env.DW_RUNNER }}
         run: |
           set -euo pipefail
-          PYTHONPATH="$GITHUB_WORKSPACE/src" python scripts/advance_execution_state.py             --registry "$GITHUB_WORKSPACE/_control/PROJECTS.yaml"             --project "${{ inputs.project }}"             --product-checkout "$GITHUB_WORKSPACE/_product"
+          PYTHONPATH="$DW_RUNNER/src" python scripts/advance_execution_state.py             --registry "$DW_RUNNER/_control/PROJECTS.yaml"             --project "${{ inputs.project }}"             --product-checkout "$DW_RUNNER/_product"
 
       - name: Commit Direct Worker changes
         if: ${{ steps.codex.outputs.changed_count != '0' }}
+        working-directory: ${{ env.DW_RUNNER }}
         run: |
           set -euo pipefail
-          cd "$GITHUB_WORKSPACE/_product"
+          cd "$DW_RUNNER/_product"
           test "$(git rev-parse "$START_HEAD")" = "$START_HEAD"
           git diff --check
           git diff --cached --check
@@ -312,10 +372,23 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.product_write_token }}
           PRODUCT_REPOSITORY: ${{ steps.route.outputs.repository }}
+          TARGET_BRANCH: ${{ steps.route.outputs.branch }}
+        working-directory: ${{ env.DW_RUNNER }}
         run: |
           set -euo pipefail
-          cd "$GITHUB_WORKSPACE/_product"
+          cd "$DW_RUNNER/_product"
+          live_base="$(gh api "repos/$PRODUCT_REPOSITORY/branches/$TARGET_BRANCH" --jq '.commit.sha')"
+          test "$live_base" = "$START_ACTIVE_HEAD"
+          pulls="$(gh api --paginate "repos/$PRODUCT_REPOSITORY/pulls?state=open&base=$TARGET_BRANCH&per_page=100")"
+          conflicts="$(printf '%s' "$pulls" | jq --arg own "${PR_NUMBER:-}" '[.[] | select((.head.ref | startswith("job/") or startswith("direct/")) and (.number|tostring) != $own)] | length')"
+          test "$conflicts" = 0
+          if [ -n "${PR_NUMBER:-}" ]; then
+            live_pr="$(gh api "repos/$PRODUCT_REPOSITORY/pulls/$PR_NUMBER")"
+            printf '%s' "$live_pr" | jq -e --arg sha "$START_HEAD" --arg branch "$DIRECT_BRANCH" --arg base "$TARGET_BRANCH" \
+              '.state == "open" and .merged == false and .head.sha == $sha and .head.ref == $branch and .base.ref == $base' >/dev/null
+          fi
           git remote set-url origin "https://github.com/$PRODUCT_REPOSITORY.git"
+          # HOME/GH_CONFIG_DIR are job-owned and removed after publication.
           gh auth setup-git
           git -c core.hooksPath=/dev/null push origin "HEAD:refs/heads/$DIRECT_BRANCH"
 
@@ -327,10 +400,11 @@ jobs:
           TARGET_BRANCH: ${{ steps.route.outputs.branch }}
           PROJECT: ${{ inputs.project }}
           COMMAND: ${{ inputs.command }}
+        working-directory: ${{ env.DW_RUNNER }}
         run: |
           set -euo pipefail
           if [ -z "${PR_NUMBER:-}" ]; then
-            body_file="$RUNNER_TEMP/direct-worker-pr.md"
+            body_file="$DW_JOB_ROOT/direct-worker-pr.md"
             {
               echo "## Direct Worker"
               echo
@@ -358,8 +432,9 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.product_write_token }}
           PRODUCT_REPOSITORY: ${{ steps.route.outputs.repository }}
+        working-directory: ${{ env.DW_RUNNER }}
         run: |
-          result_file="$RUNNER_TEMP/direct-worker-manual.md"
+          result_file="$DW_JOB_ROOT/direct-worker-manual.md"
           {
             echo "## Direct Worker result"
             echo
@@ -382,6 +457,7 @@ jobs:
           RUNNER_TOKEN: ${{ github.token }}
           PRODUCT_REPOSITORY: ${{ steps.route.outputs.repository }}
           VALIDATION_WORKFLOW_FILE: ${{ steps.route.outputs.validation_workflow_file }}
+        working-directory: ${{ env.DW_RUNNER }}
         run: |
           set -euo pipefail
           run_id=""
@@ -395,7 +471,7 @@ jobs:
           test -n "$run_id" || { echo "::error::Exact PR-head validation run not found."; exit 1; }
           PR_HEAD_RUN_ID="$run_id"
           echo "PR_HEAD_RUN_ID=$PR_HEAD_RUN_ID" >> "$GITHUB_ENV"
-          conclusion="$(PYTHONPATH="$GITHUB_WORKSPACE/src" python scripts/validation_gate.py \
+          conclusion="$(PYTHONPATH="$DW_RUNNER/src" python scripts/validation_gate.py \
             --project "${{ inputs.project }}" \
             --run-id "$run_id" --head-sha "$DIRECT_HEAD" --event pull_request \
             --output-prefix PR_HEAD)"
@@ -406,8 +482,12 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.product_write_token }}
           PRODUCT_REPOSITORY: ${{ steps.route.outputs.repository }}
+          TARGET_BRANCH: ${{ steps.route.outputs.branch }}
+        working-directory: ${{ env.DW_RUNNER }}
         run: |
           set -euo pipefail
+          live_base="$(gh api "repos/$PRODUCT_REPOSITORY/branches/$TARGET_BRANCH" --jq '.commit.sha')"
+          test "$live_base" = "$START_ACTIVE_HEAD"
           merge_json="$(gh api --method PUT "repos/$PRODUCT_REPOSITORY/pulls/$PR_NUMBER/merge" \
             -f merge_method=merge -f sha="$DIRECT_HEAD")"
           echo "$merge_json" | jq -e '.merged == true' >/dev/null
@@ -423,6 +503,7 @@ jobs:
           RUNNER_TOKEN: ${{ github.token }}
           PRODUCT_REPOSITORY: ${{ steps.route.outputs.repository }}
           VALIDATION_WORKFLOW_FILE: ${{ steps.route.outputs.validation_workflow_file }}
+        working-directory: ${{ env.DW_RUNNER }}
         run: |
           set -euo pipefail
           run_id=""
@@ -436,7 +517,7 @@ jobs:
           test -n "$run_id" || { echo "::error::Integrated-SHA validation run not found."; exit 1; }
           INTEGRATED_RUN_ID="$run_id"
           echo "INTEGRATED_RUN_ID=$INTEGRATED_RUN_ID" >> "$GITHUB_ENV"
-          conclusion="$(PYTHONPATH="$GITHUB_WORKSPACE/src" python scripts/validation_gate.py \
+          conclusion="$(PYTHONPATH="$DW_RUNNER/src" python scripts/validation_gate.py \
             --project "${{ inputs.project }}" \
             --run-id "$run_id" --head-sha "$INTEGRATED_SHA" --event push \
             --output-prefix INTEGRATED)"
@@ -447,8 +528,9 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.product_write_token }}
           PRODUCT_REPOSITORY: ${{ steps.route.outputs.repository }}
+        working-directory: ${{ env.DW_RUNNER }}
         run: |
-          result_file="$RUNNER_TEMP/direct-worker-pass.md"
+          result_file="$DW_JOB_ROOT/direct-worker-pass.md"
           {
             echo "## Direct Worker result"
             echo
@@ -487,8 +569,9 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.product_write_token }}
           PRODUCT_REPOSITORY: ${{ steps.route.outputs.repository }}
+        working-directory: ${{ env.DW_RUNNER }}
         run: |
-          result_file="$RUNNER_TEMP/direct-worker-failed.md"
+          result_file="$DW_JOB_ROOT/direct-worker-failed.md"
           {
             echo "## Direct Worker result"
             echo
@@ -499,3 +582,14 @@ jobs:
             printf -- '- provider/runtime/device/physical: `%s`\n' "NOT_INFERRED"
           } > "$result_file"
           gh pr comment "$PR_NUMBER" --repo "$PRODUCT_REPOSITORY" --body-file "$result_file"
+
+      - name: Cleanup exact ephemeral Direct Worker storage
+        if: ${{ always() && steps.storage.outputs.path != '' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected="$GITHUB_WORKSPACE/direct-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          test "$DW_JOB_ROOT" = "$expected"
+          test "$(realpath -m "$DW_JOB_ROOT")" = "$expected"
+          test ! -L "$DW_JOB_ROOT"
+          rm -rf --one-file-system -- "$DW_JOB_ROOT"

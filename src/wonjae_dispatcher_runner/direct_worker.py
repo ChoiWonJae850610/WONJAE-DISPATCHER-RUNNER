@@ -15,6 +15,7 @@ from .execution_state import (
     ProductExecutionState,
     load_product_execution_state,
 )
+from .home_isolation import permission_config, require_linux_host, source_environment
 from .repair_timeout import RepairPlanTimeout, repair_plan_deadline
 
 RUNNER_REPOSITORY = "ChoiWonJae850610/WONJAE-DISPATCHER-RUNNER"
@@ -552,6 +553,9 @@ def run_direct_worker(
         raise DirectWorkerError("product checkout must be clean before Direct Worker")
     git_metadata = git_metadata_snapshot(repo_path)
 
+    home_isolation = os.environ.get("DIRECT_WORKER_HOME_ISOLATION") == "1"
+    if home_isolation:
+        require_linux_host()
     safe_path = os.environ.get("PATH", "/usr/local/bin:/usr/bin:/bin")
     safe_home = os.environ.get("HOME", str(Path.home()))
     safe_lang = os.environ.get("LANG", "C.UTF-8")
@@ -614,6 +618,19 @@ def run_direct_worker(
             },
         },
     }
+    sandbox = Sandbox.workspace_write
+    if home_isolation:
+        safe = source_environment(codex_home, Path("/nonexistent"))
+        os.environ.clear()
+        os.environ.update(safe)
+        config.env = safe
+        # Named profile inherits the same workspace-write baseline and narrows reads.
+        # Sending a legacy sandbox override would discard the split read restrictions.
+        thread_config.update(permission_config(repo_path))
+        thread_config["shell_environment_policy"]["set"] = {
+            key: safe[key] for key in ("PATH", "HOME", "LANG", "TZ")
+        }
+        sandbox = None
 
     try:
         with repair_plan_deadline(), Codex(config=config) as codex:
@@ -624,7 +641,7 @@ def run_direct_worker(
                 approval_mode=ApprovalMode.deny_all,
                 cwd=str(repo_path),
                 ephemeral=True,
-                sandbox=Sandbox.workspace_write,
+                sandbox=sandbox,
                 config=thread_config,
             )
             result = thread.run(
@@ -638,7 +655,7 @@ def run_direct_worker(
                 ),
                 approval_mode=ApprovalMode.deny_all,
                 output_schema=output_schema,
-                sandbox=Sandbox.workspace_write,
+                sandbox=sandbox,
             )
     except RepairPlanTimeout as exc:
         raise DirectWorkerTurnTimeout("Direct Worker Codex turn timed out") from exc
