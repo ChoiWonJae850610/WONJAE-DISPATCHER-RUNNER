@@ -39,8 +39,9 @@ trusted-step rotation authority, never product/provider credentials.
 
 Every task reserves two unique roots: a trusted workflow root under
 `GITHUB_WORKSPACE` for runner/control code and a separate source root under the
-runner's work parent, as a sibling of repository workspaces rather than a child
-of either `GITHUB_WORKSPACE` or `RUNNER_TEMP`. The product is cloned by trusted
+dedicated per-user source parent outside the runner's `_work` hierarchy
+(`~/.wonjae-direct-worker-sources`), rather than a child of `GITHUB_WORKSPACE`,
+`RUNNER_TEMP`, or another Actions workspace. The product is cloned by trusted
 workflow code into that source root; it is never nested inside runner/control or
 temporary-directory roots. Existing roots fail closed, no product checkout/cache
 is reused, and Git credentials remain only in the job-owned HOME/gh configuration.
@@ -69,7 +70,7 @@ Home execution therefore uses the `direct_source` named profile inherited from
 minimal public runtime read, protected Git/instruction/state paths read-only, and
 network disabled. The debug preflight also pins the named profile and exact product
 cwd. Runner Validation executes the smoke once with normal temporary storage and
-again from the same non-temporary source-parent topology used by production.
+again from the same per-user, non-`_work`, non-temporary source-parent topology used by production.
 The smoke explicitly verifies that writes cannot escape the synthetic product
 root and that the trusted `GITHUB_WORKSPACE` remains unwritable from the Codex
 sandbox. Product source is intentionally not placed under `TMPDIR` or
