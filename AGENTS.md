@@ -145,4 +145,5 @@ Direct Worker is a separate source-writing route from Dispatcher v2.
   suppresses automatic redispatch. The finalizer is docs/state-path bounded, exact PR-head
   and integrated-SHA validated, project-token isolated and never grants provider/device/
   Production authority.
+- The public-runner External Product Validation workflow may reproduce exact-SHA static checks for WAFL, CLASSMO, ESC and MUVEL when private GitHub-hosted jobs cannot start. Its structured evidence must say `canonical_product_workflow: NOT_SUBSTITUTED`; it is diagnostic/recovery evidence only until the product/control rules explicitly authorize it as a validation route. It never implies provider/runtime/device/physical PASS.
 - KDN is excluded.
