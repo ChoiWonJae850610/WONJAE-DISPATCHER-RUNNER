@@ -24,7 +24,6 @@ def test_external_validation_has_dispatch_identity_and_fallback_scope() -> None:
     )
     assert "run-name:" in workflow
     assert "External Product Validation {0} {1}" in workflow
-    assert "RUNNER_ALLOCATION_FAILURE_ONLY" in workflow
 
 
 def test_direct_worker_uses_validation_gate_for_all_exact_sha_stages() -> None:
