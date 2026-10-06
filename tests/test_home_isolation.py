@@ -220,10 +220,14 @@ def test_direct_worker_core_separates_trusted_and_product_workspaces():
     root = Path(__file__).resolve().parents[1]
     raw = (root / ".github/workflows/direct-worker-core.yml").read_text()
     assert "DW_JOB_ROOT: ${{ github.workspace }}/direct-" in raw
-    assert "DW_SOURCE_ROOT: ${{ runner.temp }}/wonjae-direct-source-" in raw
-    assert "DW_PRODUCT: ${{ runner.temp }}/wonjae-direct-source-" in raw
-    assert 'echo "TMPDIR=$DW_SOURCE_ROOT/tmp" >> "$GITHUB_ENV"' in raw
+    assert 'source_parent="$(dirname "$(dirname "$GITHUB_WORKSPACE")")"' in raw
+    assert '_wonjae-direct-source-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT' in raw
+    assert 'test "$source_parent" != "$RUNNER_TEMP"' in raw
+    assert 'echo "DW_SOURCE_ROOT=$source_root" >> "$GITHUB_ENV"' in raw
+    assert 'echo "DW_PRODUCT=$product_root" >> "$GITHUB_ENV"' in raw
+    assert 'echo "TMPDIR=' not in raw
     assert "Checkout product outside trusted workflow workspace" in raw
+    assert 'DIRECT_WORKER_SMOKE_PARENT="$DW_SOURCE_ROOT"' in raw
     clone_command = (
         'git clone --no-checkout "https://github.com/$PRODUCT_REPOSITORY.git" '
         '"$DW_PRODUCT"'
