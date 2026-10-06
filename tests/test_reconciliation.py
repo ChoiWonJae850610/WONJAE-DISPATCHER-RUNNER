@@ -97,6 +97,8 @@ def test_reconciliation_has_scheduled_sweeper_fallback() -> None:
     assert "inputs.project == 'WAFL'" in adapter
     assert "fromJSON(inputs.issue_number)" in adapter
     assert 'cron: "*/5 * * * *"' in sweeper
+    assert "push:" in sweeper
+    assert "- main" in sweeper
     assert "actions: write" in sweeper
     assert "actions/workflows/reconciliation-finalizer.yml/dispatches" in sweeper
     assert 'startswith("STARTED: reconciliation finalizer run ")' in sweeper
