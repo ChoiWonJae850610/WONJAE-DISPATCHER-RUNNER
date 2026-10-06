@@ -54,6 +54,14 @@ def main() -> int:
             forbidden_root / f".direct-worker-source-parent-probe-{os.getpid()}"
             if forbidden_root else None
         )
+        forbidden_state_raw = os.environ.get("DIRECT_WORKER_FORBIDDEN_STATE_ROOT", "")
+        forbidden_state = (
+            Path(forbidden_state_raw).resolve(strict=True) if forbidden_state_raw else None
+        )
+        forbidden_state_probe = (
+            forbidden_state / f".direct-worker-state-probe-{os.getpid()}"
+            if forbidden_state else None
+        )
         # These must be absent inside the actual sandbox, regardless of parent secrets.
         script = r'''
 set -eu
@@ -76,6 +84,7 @@ if touch .github/changed 2>/dev/null; then exit 33; fi
 if touch "$1-outside" 2>/dev/null; then exit 28; fi
 if [ -n "$3" ] && touch "$3" 2>/dev/null; then exit 34; fi
 if [ -n "$4" ] && touch "$4" 2>/dev/null; then exit 35; fi
+if [ -n "$5" ] && touch "$5" 2>/dev/null; then exit 36; fi
 printf 'protected-and-cross-project-write: PASS\n'
 printf 'source\n' > allowed.txt
 printf 'source-write: PASS\n'
@@ -91,6 +100,7 @@ printf 'network: PASS\n'
             os.readlink("/proc/self/ns/net"),
             str(workspace_probe) if workspace_probe else "",
             str(forbidden_probe) if forbidden_probe else "",
+            str(forbidden_state_probe) if forbidden_state_probe else "",
         ]
         with protected_mount_placeholders(product):
             result = subprocess.run(args, cwd=product, env=env, capture_output=True,
@@ -99,6 +109,8 @@ printf 'network: PASS\n'
             workspace_probe.unlink()
         if forbidden_probe and forbidden_probe.exists():
             forbidden_probe.unlink()
+        if forbidden_state_probe and forbidden_state_probe.exists():
+            forbidden_state_probe.unlink()
         expected = (
             "environment: PASS", "host-read-and-symlink: PASS",
             "protected-and-cross-project-write: PASS", "source-write: PASS", "network: PASS",

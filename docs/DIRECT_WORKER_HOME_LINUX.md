@@ -37,22 +37,24 @@ trusted-step rotation authority, never product/provider credentials.
 
 ## Source and publication separation
 
-Every task reserves two unique roots: a trusted workflow root under
-`GITHUB_WORKSPACE` for runner/control code and a separate source root under the
-dedicated per-user source parent outside the runner's `_work` hierarchy
-(`~/.wonjae-direct-worker-sources`), rather than a child of `GITHUB_WORKSPACE`,
-`RUNNER_TEMP`, or another Actions workspace. The product is cloned by trusted
-workflow code into that source root; it is never nested inside runner/control or
-temporary-directory roots. Existing roots fail closed, no product checkout/cache
-is reused, and Git credentials remain only in the job-owned HOME/gh configuration.
-Pinned SDK dependencies use the trusted job virtual environment without a pip
-cache. After the trusted checkout is complete, the source root itself is chmod
-0500 while the existing product directory remains writable, so source tools
-cannot create or rename siblings even if an executor-level workspace rule were
-broader than expected. Trusted cleanup restores only that exact source root to
-0700 before removal. Cleanup independently validates and removes only the exact
-trusted and source roots, including auth, result/failure files, venv and Git
-auth helpers. There are no auth/source caches or uploaded private artifacts.
+Every task reserves three unique roots: a trusted code root under
+`GITHUB_WORKSPACE` for runner/control source, a separate product source root at
+`~/.wonjae-direct-worker-sources/run-<id>-<attempt>`, and a separate mutable
+trusted-state root at `~/.wonjae-direct-worker-state/run-<id>-<attempt>`.
+Product source and mutable auth/result/GitHub state are therefore not children of
+`GITHUB_WORKSPACE`, `RUNNER_TEMP`, or each other. Existing roots fail closed
+and no checkout/cache is reused. The venv, HOME, gh configuration, Codex auth and
+trusted result files live only in the trusted-state root.
+
+After route/source/start-validation readback, the trusted code tree and
+`GITHUB_WORKSPACE` are made read-only before the sandbox preflight and remain
+read-only through the Codex turn. The product source parent is chmod 0500 while
+the existing product directory remains writable, so source tools cannot create
+or rename siblings. The sandbox smoke also verifies that the mutable trusted-state
+root is not writable from source tools. Trusted cleanup restores only the exact
+workspace/source roots needed for deletion, then independently validates and
+removes the exact trusted code, source and state roots. There are no auth/source
+caches or uploaded private artifacts.
 
 The pinned Linux helper creates mount targets for missing protected paths. Trusted
 code therefore prepares empty file/directory targets only when originally absent,
@@ -75,12 +77,12 @@ minimal public runtime read, protected Git/instruction/state paths read-only, an
 network disabled. The debug preflight also pins the named profile and exact product
 cwd. Runner Validation executes the smoke once with normal temporary storage and
 again with the same per-user, non-`_work`, non-temporary source-parent topology
-and the same locked-parent boundary used by production. The smoke explicitly
-verifies that writes cannot escape the synthetic product root, cannot create a
-file in the locked production-style source parent, and cannot write the trusted
-`GITHUB_WORKSPACE`. Product source is intentionally not placed under `TMPDIR`
-or `RUNNER_TEMP`, because temporary-directory semantics are a separate sandbox
-capability and must not broaden source authority. A legacy
+and the same locked-parent boundary used by production. The smoke explicitly verifies that writes cannot escape the synthetic product
+root, cannot create a file in the locked production-style source parent, cannot
+write the locked trusted `GITHUB_WORKSPACE`, and cannot write the separate
+mutable trusted-state root. Product source and trusted state are intentionally
+not placed under `TMPDIR` or `RUNNER_TEMP`, because temporary-directory
+semantics are a separate sandbox capability and must not broaden source authority. A legacy
 `sandbox=workspace_write` thread or turn override would discard those split read
 restrictions; home execution does not use it. Approvals stay
 `ApprovalMode.deny_all`. No full-access or weaker fallback is used. The existing
