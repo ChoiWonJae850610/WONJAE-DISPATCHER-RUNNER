@@ -48,10 +48,12 @@ jobs:
             sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
           fi
           PYTHONPATH=src python scripts/direct_worker_isolation_smoke.py
-          source_parent="$(dirname "$(dirname "$GITHUB_WORKSPACE")")"
-          production_source="$source_parent/_wonjae-validation-source-$GITHUB_RUN_ID"
+          host_home="$(getent passwd "$(id -u)" | cut -d: -f6)"
+          source_parent="$host_home/.wonjae-direct-worker-source-validation"
+          production_source="$source_parent/run-$GITHUB_RUN_ID"
           test "$source_parent" != "$GITHUB_WORKSPACE"
           test "$source_parent" != "$RUNNER_TEMP"
+          mkdir -p "$source_parent"
           test ! -e "$production_source"
           mkdir "$production_source"
           DIRECT_WORKER_SMOKE_PARENT="$production_source" \
