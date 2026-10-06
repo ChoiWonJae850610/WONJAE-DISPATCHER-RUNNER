@@ -196,7 +196,8 @@ def test_source_ready_prompt_makes_handoff_sequencing_authoritative(tmp_path):
         "ESC",
     )
     prompt = _prompt(route, "next", sha, "")
-    assert "execution handoff is the current execution-routing authority" in prompt
+    assert "registered DEV-CONTROL execution handoff" in prompt
+    assert "current execution-routing authority" in prompt
     assert "supersede older task-state" in prompt
     assert "SOURCE_READY handoff explicitly authorizes source-only schema/migration FILE" in prompt
     assert "never authorizes applying that migration to a live provider" in prompt
