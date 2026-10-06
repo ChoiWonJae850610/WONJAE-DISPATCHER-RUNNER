@@ -17,6 +17,7 @@ from wonjae_dispatcher_runner.home_isolation import (
     cli_overrides,
     permission_config,
     protected_mount_placeholders,
+    sandbox_cli_args,
     source_environment,
 )
 
@@ -101,6 +102,14 @@ def test_profile_denies_host_reads_and_preserves_workspace_boundary(tmp_path):
         assert filesystem[str(repo.resolve() / name)] == "read"
     decoded = tomllib.loads("\n".join(cli_overrides(repo)))
     assert decoded == config
+
+
+def test_sandbox_cli_pins_named_profile_and_product_cwd(tmp_path):
+    repo = checkout(tmp_path)
+    args = sandbox_cli_args(repo)
+    assert args[-6:] == [
+        "sandbox", "--permission-profile", PROFILE, "--cd", str(repo), "--",
+    ]
 
 
 def test_source_child_does_not_inherit_parent_secrets(tmp_path, monkeypatch):

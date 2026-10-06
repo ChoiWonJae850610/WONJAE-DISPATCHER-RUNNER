@@ -12,12 +12,10 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-from codex_cli_bin import bundled_codex_path
-
 from wonjae_dispatcher_runner.home_isolation import (
-    cli_overrides,
     protected_mount_placeholders,
     require_linux_host,
+    sandbox_cli_args,
     source_environment,
 )
 
@@ -27,7 +25,6 @@ def main() -> int:
     subprocess.run(["unshare", "-Urn", "true"], check=True, timeout=15)
     if not shutil.which("bwrap"):
         raise RuntimeError("bubblewrap must be provisioned before smoke")
-    codex = str(bundled_codex_path())
     with tempfile.TemporaryDirectory(prefix="direct-smoke-") as temporary:
         root = Path(temporary)
         product = root / "product"
@@ -73,10 +70,8 @@ test -n "$source_network_namespace"
 test "$source_network_namespace" != "$2"
 printf 'network: PASS\n'
 '''
-        args = [codex]
-        for override in cli_overrides(product):
-            args += ["--config", override]
-        args += ["sandbox", "--", "/bin/bash", "-c", script, "smoke", str(root),
+        args = sandbox_cli_args(product)
+        args += ["/bin/bash", "-c", script, "smoke", str(root),
                  os.readlink("/proc/self/ns/net")]
         with protected_mount_placeholders(product):
             result = subprocess.run(args, cwd=product, env=env, capture_output=True,
