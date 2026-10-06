@@ -1,0 +1,57 @@
+name: Direct Worker Home Isolation Smoke
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  isolation:
+    # Candidate labels, not evidence of registration. No product/auth/provider secrets.
+    runs-on: [self-hosted, Linux, X64, direct-worker]
+    timeout-minutes: 10
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Reserve fresh smoke workspace
+        id: storage
+        run: |
+          set -euo pipefail
+          umask 077
+          path="smoke-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          test ! -e "$GITHUB_WORKSPACE/$path"
+          mkdir "$GITHUB_WORKSPACE/$path"
+          echo "path=$path" >> "$GITHUB_OUTPUT"
+      - name: Checkout exact candidate
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+          path: ${{ steps.storage.outputs.path }}/runner
+          clean: false
+          persist-credentials: false
+      - name: Install isolated public test dependencies
+        working-directory: ${{ steps.storage.outputs.path }}/runner
+        run: |
+          set -euo pipefail
+          python3 -m venv ../venv
+          ../venv/bin/python -m pip install --no-cache-dir -e '.[dev]'
+      - name: Actual Codex sandbox and no-provider smoke
+        working-directory: ${{ steps.storage.outputs.path }}/runner
+        run: |
+          set -euo pipefail
+          PYTHONPATH=src ../venv/bin/python scripts/direct_worker_isolation_smoke.py
+          ../venv/bin/pytest tests/test_home_isolation.py tests/test_direct_worker.py tests/test_initial_turn_recovery.py tests/test_execution_state.py
+          printf 'runner_name=%s\nos=%s\n' "$RUNNER_NAME" "$RUNNER_OS" >> "$GITHUB_STEP_SUMMARY"
+          printf 'WSL2 kernel: ' >> "$GITHUB_STEP_SUMMARY"
+          uname -r >> "$GITHUB_STEP_SUMMARY"
+          echo 'model/provider/product-publication: NOT_RUN' >> "$GITHUB_STEP_SUMMARY"
+      - name: Cleanup exact ephemeral smoke workspace
+        if: ${{ always() && steps.storage.outputs.path != '' }}
+        run: |
+          set -euo pipefail
+          path="$GITHUB_WORKSPACE/${{ steps.storage.outputs.path }}"
+          test "$(realpath -m "$path")" = "$GITHUB_WORKSPACE/smoke-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          test ! -L "$path"
+          rm -rf --one-file-system -- "$path"

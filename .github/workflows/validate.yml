@@ -37,3 +37,12 @@ jobs:
 
       - name: Compile
         run: python -m compileall -q src scripts tests
+
+      - name: Linux isolation security regression (no auth or provider)
+        run: |
+          set -euo pipefail
+          current="$(sysctl -n kernel.apparmor_restrict_unprivileged_userns 2>/dev/null || true)"
+          if [ "$current" = 1 ]; then
+            sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          fi
+          PYTHONPATH=src python scripts/direct_worker_isolation_smoke.py
