@@ -342,6 +342,7 @@ def _prompt(
     route: DirectWorkerRoute,
     command: str,
     starting_sha: str,
+    checkout_branch: str,
     validation_failure: str,
 ) -> str:
     docs = "\n".join(f"- {path}" for path in route.canonical_docs)
@@ -389,6 +390,14 @@ The Owner has authorized command: {command}.
 Repository: {route.repository}
 Active development branch: {route.branch}
 Exact starting checkout SHA: {starting_sha}
+Current local source-writing checkout branch: {checkout_branch}
+
+The trusted Runner owns Git branch preparation. For command next, it first verified that
+the registered active branch {route.branch} still pointed to the exact starting SHA and
+then intentionally created the local direct/* source-writing branch shown above from that
+same SHA. Therefore a local direct/* branch name is expected and authorized for this run;
+do not require the local branch name itself to equal {route.branch}. Branch authority is
+the registered active branch plus exact starting SHA, not local branch-name equality.
 
 Before editing, read these files from the checkout:
 - {route.startup_entry}
@@ -469,6 +478,7 @@ def run_direct_worker(
     if command not in ALLOWED_COMMANDS:
         raise DirectWorkerError("unsupported Direct Worker command")
     starting_sha = git_head(repo_path)
+    checkout_branch = _git(repo_path, "branch", "--show-current").strip() or "(detached)"
     if command == "next":
         require_next_source_ready(route, starting_sha)
     if changed_paths(repo_path):
@@ -551,7 +561,13 @@ def run_direct_worker(
                 config=thread_config,
             )
             result = thread.run(
-                _prompt(route, command, starting_sha, validation_failure),
+                _prompt(
+                    route,
+                    command,
+                    starting_sha,
+                    checkout_branch,
+                    validation_failure,
+                ),
                 approval_mode=ApprovalMode.deny_all,
                 output_schema=output_schema,
                 sandbox=Sandbox.workspace_write,
