@@ -88,9 +88,23 @@ Starting-head, final PR-head and actual integrated-SHA validation remain distinc
 
    Terminate/restart only this dedicated distribution from Windows PowerShell
    (`wsl --terminate Ubuntu-24.04`). Confirm `unshare -Urn true` succeeds and no
-   Windows drives are mounted. If Ubuntu AppArmor blocks user namespaces, resolve
-   the dedicated distribution's host policy during provisioning; jobs fail closed
-   and never modify a persistent host policy themselves.
+   Windows drives are mounted. If `unshare -Urn true` is blocked by Ubuntu's
+   unprivileged-namespace policy, apply the existing Linux prerequisites only in
+   this dedicated distribution during Owner provisioning:
+
+   ```bash
+   for setting in kernel.unprivileged_userns_clone=1 kernel.apparmor_restrict_unprivileged_userns=0; do
+     key="${setting%=*}"
+     if sysctl -n "$key" >/dev/null 2>&1; then
+       printf '%s\n' "$setting" | sudo tee -a /etc/sysctl.d/90-direct-worker-userns.conf >/dev/null
+     fi
+   done
+   sudo sysctl --system
+   unshare -Urn true
+   ```
+
+   Jobs fail closed and never modify persistent host policy themselves. Do not
+   apply these provisioning commands to a shared Linux host/distribution.
 3. Open this repository's **Settings → Actions → Runners → New self-hosted
    runner → Linux / x64**. Execute GitHub's current download/extract commands in
    a fresh Linux directory such as `~/direct-worker-runner`. Do not copy the
@@ -100,9 +114,24 @@ Starting-head, final PR-head and actual integrated-SHA validation remain distinc
    Do not use root as the runner account. Install/start the repository-scoped
    service with `sudo ./svc.sh install <linux-user>` and `sudo ./svc.sh start`.
    Confirm GitHub shows **Idle/online**, OS **Linux**, and all four exact labels.
-   Keep WSL alive while jobs run; configure Windows startup/availability for this
-   distribution separately. A Linux service alone does not prove Windows-reboot
-   persistence or allocation. GitHub runner download/version commands come from
+   To keep this distribution alive after Windows logon, register a user task in
+   Windows PowerShell (no stored password/token):
+
+   ```powershell
+   $dwUser = "$env:USERDOMAIN\$env:USERNAME"
+   $dwAction = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument '-NoProfile -WindowStyle Hidden -Command "& wsl.exe -d Ubuntu-24.04 --exec /bin/sleep infinity"'
+   $dwTrigger = New-ScheduledTaskTrigger -AtLogOn -User $dwUser
+   $dwPrincipal = New-ScheduledTaskPrincipal -UserId $dwUser -LogonType Interactive -RunLevel Limited
+   $dwSettings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit ([TimeSpan]::Zero) -MultipleInstances IgnoreNew -StartWhenAvailable
+   Register-ScheduledTask -TaskName 'WONJAE-Direct-Worker-WSL2' -Action $dwAction -Trigger $dwTrigger -Principal $dwPrincipal -Settings $dwSettings
+   Start-ScheduledTask -TaskName 'WONJAE-Direct-Worker-WSL2'
+   ```
+
+   This starts only the dedicated distribution; its enabled runner service starts
+   inside WSL. Availability before Owner Windows logon is not claimed. A Linux
+   service or registered task alone does not prove reboot persistence/allocation;
+   observe online status again after the next Owner logon/restart. GitHub runner
+   download/version commands come from
    the live settings page, not a stale pinned archive URL in this guide.
 
 Return only the distribution/runner name and online status to Codex; never send
