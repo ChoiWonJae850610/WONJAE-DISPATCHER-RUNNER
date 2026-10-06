@@ -374,6 +374,10 @@ is merged to the registered active development branch and followed by exact inte
 validation. A failed validation leaves the PR open for the `retry` command.
 
 Direct Worker remains source-only. Provider/Production/deployment/payment/credential/signing/
-device/physical/destructive actions remain separate gates. WAFL is deliberately not exposed
-while its pre-existing Dispatcher v2 task is still active. Historical Dispatcher workflows
-and evidence are retained during migration.
+device/physical/destructive actions remain separate gates. WAFL, CLASSMO, ESC and MUVEL are
+registered Direct Worker products; KDN remains excluded. During the product-owned execution
+state rollout, a registered `execution.state_path` takes precedence over the older
+DEV-CONTROL handoff snapshot. The trusted runner requires exact active-HEAD push validation
+before a new `next`, protects the product state from Codex writes, and commits the
+predeclared source-success transition in the same Product PR so no separate ChatGPT
+handoff refresh is required after source integration.
