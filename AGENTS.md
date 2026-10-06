@@ -125,6 +125,13 @@ Direct Worker is a separate source-writing route from Dispatcher v2.
   It may edit only the ephemeral product checkout. It must not commit, push or merge.
 - The trusted workflow owns Git branch/PR publication, exact PR-head validation, exact-head
   merge to the registered active development branch and integrated-SHA validation.
+- When the registry defines `execution.state_path`, the product-owned execution-state
+  file at that path is the machine-readable next-action authority. It must not embed the
+  current Git SHA. The trusted runner separately requires exact current-HEAD push validation
+  before `next`, protects the state file from Codex mutation, and deterministically moves
+  `next_action` to the predeclared `after_source_success` in the same source PR. A
+  SOURCE_READY state without that predeclared transition fails closed. Legacy
+  DEV-CONTROL handoffs remain fallback only during migration.
 - Production/provider/deployment/payment/credential/signing/device/physical/destructive
   actions are outside Direct Worker source authority. A real gate is reported as
   MANUAL_REQUIRED and source progress is preserved when applicable.
