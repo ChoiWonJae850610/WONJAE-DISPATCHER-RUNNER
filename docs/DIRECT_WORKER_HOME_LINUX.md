@@ -37,14 +37,17 @@ trusted-step rotation authority, never product/provider credentials.
 
 ## Source and publication separation
 
-Every task reserves a unique `direct-<run-id>-<attempt>` directory. An existing
-directory fails closed; checkout uses `clean: false` into new paths, with Git
-credentials not persisted. No product checkout/cache is reused. Pinned SDK
-dependencies install in a job-owned virtual environment without a pip cache.
-The task uses a separate HOME and gh configuration directory. Cleanup removes
-only the validated exact job directory, including auth, control/product clones,
-abandoned timeout checkouts, result/failure/body files, venv and Git auth helpers.
-There are no auth/source caches or uploaded private artifacts.
+Every task reserves two unique roots: a trusted workflow root under
+`GITHUB_WORKSPACE` for runner/control code and a source root under
+`RUNNER_TEMP` for the product checkout and source-process temporary files.
+The product is cloned by trusted workflow code into that external source root;
+it is never nested inside the runner/control checkout. Existing roots fail closed,
+no product checkout/cache is reused, and Git credentials remain only in the
+job-owned HOME/gh configuration. Pinned SDK dependencies use the trusted job
+virtual environment without a pip cache. Cleanup independently validates and
+removes only the exact trusted and source roots, including auth, result/failure
+files, venv and Git auth helpers. There are no auth/source caches or uploaded
+private artifacts.
 
 The pinned Linux helper creates mount targets for missing protected paths. Trusted
 code therefore prepares empty file/directory targets only when originally absent,
@@ -66,7 +69,9 @@ Home execution therefore uses the `direct_source` named profile inherited from
 minimal public runtime read, protected Git/instruction/state paths read-only, and
 network disabled. The debug preflight also pins the named profile and exact product
 cwd. Runner Validation executes the smoke both with normal temp storage and with
-`TMPDIR` nested under the GitHub workspace to match production layout. A legacy
+`TMPDIR` under `RUNNER_TEMP`, matching the production source-root layout,
+and explicitly verifies that the trusted `GITHUB_WORKSPACE` remains unwritable
+from the Codex sandbox. A legacy
 `sandbox=workspace_write` thread or turn override would discard those split read
 restrictions; home execution does not use it. Approvals stay
 `ApprovalMode.deny_all`. No full-access or weaker fallback is used. The existing
