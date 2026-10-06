@@ -31,6 +31,7 @@ def test_profile_denies_host_reads_and_preserves_workspace_boundary(tmp_path):
     config = permission_config(repo)
     profile = config["permissions"][PROFILE]
     assert profile["extends"] == ":workspace"
+    assert profile["workspace_roots"] == {str(repo.resolve()): True}
     assert profile["network"] == {"enabled": False}
     filesystem = profile["filesystem"]
     assert filesystem[":root"] == "deny"

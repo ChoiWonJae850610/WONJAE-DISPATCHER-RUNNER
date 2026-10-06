@@ -51,7 +51,7 @@ def permission_config(repo: Path) -> dict:
         "permissions": {
             PROFILE: {
                 "extends": ":workspace",
-                "workspace_roots": [str(root)],
+                "workspace_roots": {str(root): True},
                 "filesystem": filesystem,
                 "network": {"enabled": False},
             },
