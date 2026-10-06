@@ -390,3 +390,17 @@ workflow-dispatches the same finalizer only when one exact open Owner-authored
 reconciliation issue exists for that project and has no STARTED/PASS/FAILED finalizer
 evidence. This fallback adds no source-task, provider, Production, device or KDN authority.
 Runner `main` pushes also wake one sweep so newly integrated control-plane fixes do not wait for the periodic fallback.
+
+## External product validation
+
+`.github/workflows/external-product-validation.yml` can reproduce the registered static
+checks for WAFL, CLASSMO, ESC and MUVEL at an exact private product SHA on this public
+runner. Owner-authored issues use the exact title
+`[EXTERNAL-VALIDATE][<PROJECT>] <40-char-sha>`.
+
+The workflow uses the selected product credential only for exact checkout, keeps
+credentials out of the product worktree, verifies the checkout/postcondition SHA, and
+records structured PASS/FAILED evidence on the request issue. This evidence is explicitly
+`canonical_product_workflow: NOT_SUBSTITUTED`: it does not pretend that a failed or
+unstarted product-repository GitHub Actions run passed, and it grants no provider,
+Production, credential, device, physical or KDN authority.
