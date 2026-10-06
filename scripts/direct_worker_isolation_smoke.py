@@ -25,7 +25,9 @@ def main() -> int:
     subprocess.run(["unshare", "-Urn", "true"], check=True, timeout=15)
     if not shutil.which("bwrap"):
         raise RuntimeError("bubblewrap must be provisioned before smoke")
-    with tempfile.TemporaryDirectory(prefix="direct-smoke-") as temporary:
+    smoke_parent_raw = os.environ.get("DIRECT_WORKER_SMOKE_PARENT")
+    smoke_parent = Path(smoke_parent_raw).resolve(strict=True) if smoke_parent_raw else None
+    with tempfile.TemporaryDirectory(prefix="direct-smoke-", dir=smoke_parent) as temporary:
         root = Path(temporary)
         product = root / "product"
         product.mkdir()
