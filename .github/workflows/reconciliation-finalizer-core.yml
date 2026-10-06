@@ -111,6 +111,7 @@ PY
           echo "PR_HEAD_RUN_ID=$run_id" >> "$GITHUB_ENV"
 
       - name: Merge exact validated reconciliation PR
+        if: ${{ env.ALREADY_MERGED != 'true' }}
         env:
           GH_TOKEN: ${{ secrets.product_write_token }}
           PRODUCT_REPOSITORY: ${{ steps.claim.outputs.repository }}
