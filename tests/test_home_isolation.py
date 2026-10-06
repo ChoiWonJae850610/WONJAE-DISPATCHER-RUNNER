@@ -189,3 +189,19 @@ def test_authenticated_smoke_is_trusted_main_only_and_has_no_product_tokens():
     assert "CONTROL_READ_TOKEN" not in raw
     assert "CODEX_AUTH_JSON" in raw
     assert job["steps"][-1]["name"] == "Cleanup exact authenticated smoke storage"
+
+
+def test_all_registered_source_callers_and_core_default_use_verified_home_route():
+    root = Path(__file__).resolve().parents[1]
+    caller = yaml.safe_load((root / ".github/workflows/direct-worker.yml").read_text())
+    assert set(caller["jobs"]) == {"wafl", "classmo", "esc", "muvel"}
+    for job in caller["jobs"].values():
+        assert job["uses"] == "./.github/workflows/direct-worker-core.yml"
+        assert job["with"]["execution_host"] == "home-linux"
+    core = yaml.safe_load((root / ".github/workflows/direct-worker-core.yml").read_text())
+    trigger = core.get("on", core.get(True))  # PyYAML YAML 1.1 treats 'on' as bool.
+    assert trigger["workflow_call"]["inputs"]["execution_host"]["default"] == "home-linux"
+    job = core["jobs"]["direct-worker"]
+    assert 'inputs.execution_host == \'home-linux\'' in job["runs-on"]
+    assert '["self-hosted","Linux","X64","direct-worker"]' in job["runs-on"]
+    assert "github.ref == 'refs/heads/main'" in job["if"]

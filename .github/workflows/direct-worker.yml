@@ -35,6 +35,7 @@ jobs:
     with:
       project: WAFL
       command: ${{ inputs.command }}
+      execution_host: home-linux
     secrets:
       product_write_token: ${{ secrets.WAFL_WRITE_TOKEN }}
       control_read_token: ${{ secrets.CONTROL_READ_TOKEN }}
@@ -47,6 +48,7 @@ jobs:
     with:
       project: CLASSMO
       command: ${{ inputs.command }}
+      execution_host: home-linux
     secrets:
       product_write_token: ${{ secrets.CLASSMO_WRITE_TOKEN }}
       control_read_token: ${{ secrets.CONTROL_READ_TOKEN }}
@@ -59,6 +61,7 @@ jobs:
     with:
       project: ESC
       command: ${{ inputs.command }}
+      execution_host: home-linux
     secrets:
       product_write_token: ${{ secrets.ESC_WRITE_TOKEN }}
       control_read_token: ${{ secrets.CONTROL_READ_TOKEN }}
@@ -71,6 +74,7 @@ jobs:
     with:
       project: MUVEL
       command: ${{ inputs.command }}
+      execution_host: home-linux
     secrets:
       product_write_token: ${{ secrets.MUVEL_WRITE_TOKEN }}
       control_read_token: ${{ secrets.CONTROL_READ_TOKEN }}

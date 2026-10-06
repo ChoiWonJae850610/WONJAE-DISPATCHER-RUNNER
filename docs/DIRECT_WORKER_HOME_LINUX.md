@@ -1,17 +1,21 @@
-# Persistent home-PC Direct Worker: staged Linux topology
+# Persistent home-PC Direct Worker: verified Linux topology
 
-Status: **IMPLEMENTED CANDIDATE; NOT ACTIVATED / MANUAL_REQUIRED**.
-Checked 2026-10-07 KST: this repository has zero registered Actions runners.
-The current production caller retains its existing hosted route until bootstrap
-and actual allocation/security evidence exist. This is not a completed migration.
+Status: **VERIFIED HOME-LINUX DEFAULT ROUTING**.
+Checked 2026-10-07 KST: repository-scoped runner `WONJAE-HOME-DIRECT-WORKER`
+(runner ID 21) is online on Linux X64 with the four labels below. Both real home
+smokes passed at `354e4bef3dc59663b7a464f17207c54b52123bd2`; see evidence below.
+All four registered source callers explicitly select `home-linux`, which is also
+the reusable core's default. Official exact PR-head/integrated validation remains
+mandatory. Source execution has no automatic hosted fallback.
 
 ## Selected topology and authority
 
 Use a dedicated WSL2 Ubuntu distribution on the Owner Windows PC, with a
 repository-scoped Linux X64 Actions runner registered only to this repository.
-Candidate name: `WONJAE-HOME-DIRECT-WORKER`.
-Candidate exact labels: `self-hosted`, `Linux`, `X64`, `direct-worker`.
-These are required registration targets, **not verified current labels**.
+Verified name: `WONJAE-HOME-DIRECT-WORKER`.
+Verified exact labels: `self-hosted`, `Linux`, `X64`, `direct-worker`.
+The Owner provisioned Ubuntu-24.04; local readback confirms WSL VERSION 2 and
+kernel `6.18.40.1-microsoft-standard-WSL2`. Actual smoke jobs used runner ID 21.
 The existing Windows product/control runners remain separate and unchanged.
 
 Store runner files and task workspaces on the distribution's Linux filesystem,
@@ -27,7 +31,9 @@ project; additional separately installed Linux runners can support independent
 projects within measured host capacity. Never share work/temp directories.
 Self-hosted runners must not receive fork/PR code-execution jobs. The production
 secret-using core accepts only trusted default-branch invocation. The new manual
-smoke receives no product, provider, auth or rotation secrets.
+no-provider smoke receives no product, provider, auth or rotation secrets. The
+separate main-only authenticated synthetic smoke receives only Codex auth and
+trusted-step rotation authority, never product/provider credentials.
 
 ## Source and publication separation
 
@@ -74,7 +80,7 @@ pre-merge checks retain base freshness and the existing exact-head merge API.
 Starting-head, final PR-head and actual integrated-SHA validation remain distinct.
 `next`/`retry`/`resume`, protected state and bounded fresh timeout recovery remain.
 
-## Owner bootstrap (one manual bootstrap operation)
+## Owner bootstrap reference (completed for the current runner)
 
 1. In elevated Windows PowerShell, install WSL2 if absent:
    `wsl --install -d Ubuntu-24.04`. Reboot only if Windows requests it. Use this
@@ -142,16 +148,30 @@ Starting-head, final PR-head and actual integrated-SHA validation remain distinc
    download/version commands come from
    the live settings page, not a stale pinned archive URL in this guide.
 
-Return only the distribution/runner name and online status to Codex; never send
-registration/auth tokens. Codex then re-reads runner inventory, dispatches the
-no-provider smoke at the current candidate SHA, confirms allocation and actual
-sandbox results, and wires the four trusted callers to `execution_host:
-home-linux` in a final implementation commit. Home routing has no automatic
-GitHub-hosted fallback. Offline/unallocated home jobs cannot silently acquire
-hosted source authority. Existing strict external *static-validation* fallback
+For any future runner replacement, report only the distribution/runner name and
+online status; never send registration/auth tokens. Re-read inventory and prove
+both actual allocation/isolation and authenticated synthetic source gates before
+changing routing. Offline/unallocated home jobs cannot silently acquire hosted
+source authority. The existing `github-hosted` core option is retained only as
+explicit alternate code routing; the public caller exposes no host selector and
+no operational caller selects it. Using it requires separately authorized trusted
+main code/policy changes. Existing strict external *static-validation* fallback
 is unchanged and grants no source execution or provider authority.
 
 ## Evidence and completion
+
+| Gate | Exact trusted main SHA | Home run / result |
+| --- | --- | --- |
+| No-provider isolation, checkout cleanup, 36 focused tests | `354e4bef3dc59663b7a464f17207c54b52123bd2` | [37498315724 / PASS](https://github.com/ChoiWonJae850610/WONJAE-DISPATCHER-RUNNER/actions/runs/37498315724) |
+| Actual authenticated source function, unchanged Git, trusted-parent local commit, auth rotation and cleanup | `354e4bef3dc59663b7a464f17207c54b52123bd2` | [37498500500 / PASS](https://github.com/ChoiWonJae850610/WONJAE-DISPATCHER-RUNNER/actions/runs/37498500500) |
+
+Both jobs allocated `WONJAE-HOME-DIRECT-WORKER` / Linux with all four labels.
+Preparation repair PR #230 passed 414 tests and actual Linux isolation at head
+`67836a4f83ebf45aabed5d450e38bcb3d93d363b` in run 37498063048, then its actual
+integrated SHA above passed canonical Runner Validation run 37498315072.
+Earlier authenticated runs 37496910260 and 37497615914 failed closed on helper-
+generated missing mount placeholders; cleanup succeeded and no source was
+published. PRs #229/#230 diagnosed and repaired this without weakening protection.
 
 The hosted Runner Validation runs the same actual Linux sandbox regression with
 no auth/model/provider call. This checks the candidate code on Linux; it is not
@@ -169,11 +189,11 @@ the exact job storage even on failure. Do not edit product source
 just to manufacture smoke. Until these gates are observed, model source execution
 and publication smoke are **NOT_RUN**, not inferred from CLI/unit test PASS.
 The preparation PR may integrate after its exact Linux/security PASS so both
-manual smoke workflows exist on trusted main. That does not activate home source
-routing. The separate final activation commit requires actual online inventory
-and both home smoke results. Validate the final activation PR head, merge only
-on PASS, validate the actual integrated
-SHA, and synchronize the private control document with those exact run identities.
+manual smoke workflows exist on trusted main. The separate routing activation
+uses the observed online inventory and both successful home runs above. Its
+exact final head and actual merge SHA are validated independently and recorded
+in the activation PR's Actions evidence and the private control document. Never
+infer a product source task/push/PR PASS from this synthetic acceptance.
 KDN, Dispatcher/Gmail queue, production/provider/runtime/EAS/device/physical work
 are excluded. Unperformed external stages remain NOT_RUN/NOT_INFERRED.
 

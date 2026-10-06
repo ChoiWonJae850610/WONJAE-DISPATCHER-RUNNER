@@ -8,7 +8,7 @@ permissions:
 
 jobs:
   isolation:
-    # Candidate labels, not evidence of registration. No product/auth/provider secrets.
+    # Verified repository-scoped labels. No product/auth/provider secrets.
     runs-on: [self-hosted, Linux, X64, direct-worker]
     timeout-minutes: 10
     defaults:

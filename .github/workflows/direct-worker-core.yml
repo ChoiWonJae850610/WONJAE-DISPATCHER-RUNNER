@@ -10,9 +10,9 @@ on:
         required: true
         type: string
       execution_host:
-        description: Staged home-linux route; enable only after exact runner/smoke evidence
+        description: Verified home-linux default; alternate routing requires trusted-main policy authority
         required: false
-        default: github-hosted
+        default: home-linux
         type: string
     secrets:
       product_write_token:
