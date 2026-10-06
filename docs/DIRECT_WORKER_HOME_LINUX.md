@@ -166,6 +166,18 @@ is unchanged and grants no source execution or provider authority.
 | Actual authenticated source function, unchanged Git, trusted-parent local commit, auth rotation and cleanup | `354e4bef3dc59663b7a464f17207c54b52123bd2` | [37498500500 / PASS](https://github.com/ChoiWonJae850610/WONJAE-DISPATCHER-RUNNER/actions/runs/37498500500) |
 
 Both jobs allocated `WONJAE-HOME-DIRECT-WORKER` / Linux with all four labels.
+
+Routing activation [PR #231](https://github.com/ChoiWonJae850610/WONJAE-DISPATCHER-RUNNER/pull/231)
+head `4c61a5e703ad795bcc8f4e1f56b0178c3dfac35f` passed canonical Runner Validation
+[37498850524](https://github.com/ChoiWonJae850610/WONJAE-DISPATCHER-RUNNER/actions/runs/37498850524).
+Its actual integrated SHA `30510b70711ed2f142d0c3fab89d9174a76e38d0` passed
+canonical [37499063588](https://github.com/ChoiWonJae850610/WONJAE-DISPATCHER-RUNNER/actions/runs/37499063588)
+with 415 tests and the actual Linux security regression. On that same integrated
+SHA, home isolation [37499066137](https://github.com/ChoiWonJae850610/WONJAE-DISPATCHER-RUNNER/actions/runs/37499066137)
+and authenticated synthetic source [37499156800](https://github.com/ChoiWonJae850610/WONJAE-DISPATCHER-RUNNER/actions/runs/37499156800)
+both passed on the same named home runner, including cleanup and successful auth
+rotation. These are bounded synthetic source evidence, never product publication.
+
 Preparation repair PR #230 passed 414 tests and actual Linux isolation at head
 `67836a4f83ebf45aabed5d450e38bcb3d93d363b` in run 37498063048, then its actual
 integrated SHA above passed canonical Runner Validation run 37498315072.
@@ -174,9 +186,9 @@ generated missing mount placeholders; cleanup succeeded and no source was
 published. PRs #229/#230 diagnosed and repaired this without weakening protection.
 
 The hosted Runner Validation runs the same actual Linux sandbox regression with
-no auth/model/provider call. This checks the candidate code on Linux; it is not
+no auth/model/provider call. This checks the runner code on Linux; it is not
 home-PC allocation evidence. `direct-worker-home-smoke.yml` is dispatch-only and
-uses the fixed candidate home labels, fresh checkout and exact cleanup.
+uses the fixed verified home labels, fresh checkout and exact cleanup.
 
 After home smoke, require the trusted-main `direct-worker-home-codex-smoke.yml`
 authenticated synthetic source turn on that actual home runner, plus

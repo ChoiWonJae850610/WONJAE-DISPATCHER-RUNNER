@@ -365,13 +365,20 @@ The repository also contains a smaller Direct Worker route for registered produc
 have migrated away from Dispatcher v2 source intake. It is intentionally independent of
 tasks-v2 control records, wake issues, persistent source queues and Gmail lifecycle mail.
 
-`.github/workflows/direct-worker.yml` currently exposes CLASSMO, ESC and MUVEL. Each
+`.github/workflows/direct-worker.yml` currently exposes WAFL, CLASSMO, ESC and MUVEL. Each
 project keeps a dedicated write credential and the reusable core receives only the selected
 project's token. The workflow reads the current DEV-CONTROL registry, checks out the selected
 product, runs Codex in a network-disabled workspace-write sandbox with a scrubbed environment,
 then lets trusted workflow code publish the branch/PR. A successful exact PR-head validation
 is merged to the registered active development branch and followed by exact integrated-SHA
 validation. A failed validation leaves the PR open for the `retry` command.
+
+All four source callers use the verified repository-scoped WSL2 Linux home runner
+through `home-linux`; offline home jobs have no automatic hosted source fallback.
+Canonical Runner PR validation stays secret-free on hosted Linux, and product
+Windows validation routes remain separate. Actual runner labels, smoke results,
+exact routing validation and bootstrap reference are recorded in
+[`DIRECT_WORKER_HOME_LINUX.md`](docs/DIRECT_WORKER_HOME_LINUX.md).
 
 Direct Worker remains source-only. Provider/Production/deployment/payment/credential/signing/
 device/physical/destructive actions remain separate gates. WAFL, CLASSMO, ESC and MUVEL are
