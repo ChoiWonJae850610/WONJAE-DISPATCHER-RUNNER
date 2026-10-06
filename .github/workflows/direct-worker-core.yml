@@ -53,6 +53,10 @@ jobs:
             *) echo '::error::Unknown execution host'; exit 1 ;;
           esac
           test ! -e "$DW_JOB_ROOT" && test ! -L "$DW_JOB_ROOT"
+          test -z "$(find "$GITHUB_WORKSPACE" -mindepth 1 -maxdepth 1 -name 'direct-*' -print -quit)" || {
+            echo '::error::Unexpected prior job residue; inspect exact runner storage before retry.'
+            exit 1
+          }
           mkdir "$DW_JOB_ROOT"
           mkdir "$DW_JOB_ROOT/trusted-home" "$DW_JOB_ROOT/gh"
           echo "path=direct-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
