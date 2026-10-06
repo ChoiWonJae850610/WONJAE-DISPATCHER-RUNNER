@@ -110,6 +110,20 @@ def cli_overrides(repo: Path) -> tuple[str, ...]:
     return tuple(f"{key}={toml(value)}" for key, value in permission_config(repo).items())
 
 
+def sandbox_cli_args(repo: Path) -> list[str]:
+    """Build an explicit sandbox invocation for the exact product checkout.
+
+    The debug sandbox CLI supports a named permission profile and explicit cwd.
+    Pin both so preflight cannot resolve its execution boundary from a surrounding
+    runner workspace or another fallback cwd.
+    """
+    args = [str(bundled_codex_path())]
+    for override in cli_overrides(repo):
+        args += ["--config", override]
+    args += ["sandbox", "--permission-profile", PROFILE, "--cd", str(repo), "--"]
+    return args
+
+
 def require_linux_host() -> None:
     if os.name != "posix" or not Path("/proc/sys/kernel/osrelease").is_file():
         raise ValueError("home Direct Worker requires Linux/WSL2, never Windows-native")
