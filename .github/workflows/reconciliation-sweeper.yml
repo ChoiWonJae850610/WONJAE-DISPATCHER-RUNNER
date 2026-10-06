@@ -1,0 +1,79 @@
+name: Reconciliation Sweeper
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: read
+  actions: write
+
+concurrency:
+  group: reconciliation-sweeper
+  cancel-in-progress: false
+
+jobs:
+  sweep:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Sweep unresolved reconciliation issues
+        env:
+          GH_TOKEN: ${{ github.token }}
+          OWNER: ${{ github.repository_owner }}
+        run: |
+          set -euo pipefail
+
+          issues="$(gh api --paginate "repos/$GITHUB_REPOSITORY/issues?state=open&per_page=100")"
+
+          for project in WAFL CLASSMO ESC MUVEL; do
+            matches="$(printf '%s' "$issues" | jq -c --arg owner "$OWNER" --arg prefix "[RECONCILE][$project] " '
+              [
+                .[]
+                | select(.pull_request == null)
+                | select(.user.login == $owner)
+                | select(.title | startswith($prefix))
+              ]
+            ')"
+            count="$(printf '%s' "$matches" | jq 'length')"
+
+            if [ "$count" -eq 0 ]; then
+              echo "$project: no open reconciliation issue"
+              continue
+            fi
+            if [ "$count" -ne 1 ]; then
+              echo "::error::$project has $count open reconciliation issues; refusing ambiguous sweep."
+              exit 1
+            fi
+
+            number="$(printf '%s' "$matches" | jq -r '.[0].number')"
+            body="$(printf '%s' "$matches" | jq -r '.[0].body // empty')"
+            test -n "$body" || {
+              echo "::error::$project reconciliation issue #$number has no claim body."
+              exit 1
+            }
+
+            comments="$(gh api --paginate "repos/$GITHUB_REPOSITORY/issues/$number/comments?per_page=100")"
+            terminal_or_active="$(printf '%s' "$comments" | jq -r '
+              [
+                .[].body
+                | select(
+                    startswith("STARTED: reconciliation finalizer run ") or
+                    startswith("PASS: ") or
+                    startswith("FAILED: reconciliation finalizer run ")
+                  )
+              ] | length
+            ')"
+            if [ "$terminal_or_active" -ne 0 ]; then
+              echo "$project: issue #$number already has finalizer lifecycle evidence"
+              continue
+            fi
+
+            payload="$(jq -nc               --arg ref "main"               --arg project "$project"               --arg issue_number "$number"               --arg issue_body "$body"               '{ref:$ref,inputs:{project:$project,issue_number:$issue_number,issue_body:$issue_body}}'
+            )"
+
+            printf '%s' "$payload" | gh api               --method POST               "repos/$GITHUB_REPOSITORY/actions/workflows/reconciliation-finalizer.yml/dispatches"               --input -
+            echo "$project: dispatched reconciliation finalizer for issue #$number"
+          done
