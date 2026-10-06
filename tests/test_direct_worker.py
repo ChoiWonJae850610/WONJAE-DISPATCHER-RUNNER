@@ -195,7 +195,7 @@ def test_source_ready_prompt_makes_handoff_sequencing_authoritative(tmp_path):
         registry_with_handoff(tmp_path, "SOURCE_READY", sha),
         "ESC",
     )
-    prompt = _prompt(route, "next", sha, "")
+    prompt = _prompt(route, "next", sha, "direct/ESC-synthetic", "")
     assert "trusted Runner has already read and validated" in prompt
     assert "execution-routing authority" in prompt
     assert "supersede older task-state" in prompt
@@ -220,3 +220,16 @@ def test_direct_worker_workflow_prepares_linux_user_namespaces():
     assert "kernel.unprivileged_userns_clone=1" in workflow
     assert "kernel.apparmor_restrict_unprivileged_userns=0" in workflow
     assert "unshare -Urn true" in workflow
+
+
+def test_source_ready_prompt_trusts_direct_work_branch(tmp_path):
+    sha = "a" * 40
+    route = load_direct_worker_route(
+        registry_with_handoff(tmp_path, "SOURCE_READY", sha),
+        "ESC",
+    )
+    prompt = _prompt(route, "next", sha, "direct/ESC-123", "")
+    assert "Current local source-writing checkout branch: direct/ESC-123" in prompt
+    assert "intentionally created the local direct/* source-writing branch" in prompt
+    assert "do not require the local branch name itself to equal cloud-dev-v1" in prompt
+    assert "registered active branch plus exact starting SHA" in prompt
