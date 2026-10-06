@@ -1,4 +1,5 @@
 name: External Product Validation
+run-name: ${{ github.event_name == 'issues' && github.event.issue.title || format('External Product Validation {0} {1}', inputs.project, inputs.source_sha) }}
 
 on:
   issues:
@@ -143,7 +144,19 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh issue comment "${{ github.event.issue.number }}" --repo "$env:GITHUB_REPOSITORY" --body "## External validation evidence`n- project: `WAFL``n- source_sha: `${{ steps.claim.outputs.sha }}``n- result: `PASS``n- runner_run_id: `$env:GITHUB_RUN_ID``n- canonical_product_workflow: `NOT_SUBSTITUTED``n`nThis public-runner result is exact-SHA static evidence only. It does not claim a successful WAFL repository Actions run or any provider/runtime/device PASS."
+          $body = @"
+          ## External validation evidence
+          - project: `WAFL`
+          - source_sha: `${{ steps.claim.outputs.sha }}`
+          - result: `PASS`
+          - runner_run_id: `$env:GITHUB_RUN_ID`
+          - canonical_product_workflow: `NOT_SUBSTITUTED`
+          - fallback_scope: `RUNNER_ALLOCATION_FAILURE_ONLY`
+
+          This public-runner result is exact-SHA static evidence only. It does not claim a successful WAFL repository Actions run or any provider/runtime/device PASS.
+          "@
+          $body | Set-Content -LiteralPath "$env:RUNNER_TEMP\external-validation.md" -Encoding utf8
+          gh issue comment "${{ github.event.issue.number }}" --repo "$env:GITHUB_REPOSITORY" --body-file "$env:RUNNER_TEMP\external-validation.md"
           gh issue close "${{ github.event.issue.number }}" --repo "$env:GITHUB_REPOSITORY" --reason completed
 
       - name: Record failure
@@ -152,7 +165,17 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh issue comment "${{ github.event.issue.number }}" --repo "$env:GITHUB_REPOSITORY" --body "## External validation evidence`n- project: `WAFL``n- source_sha: `${{ steps.claim.outputs.sha }}``n- result: `FAILED``n- runner_run_id: `$env:GITHUB_RUN_ID``n`nNo canonical product PASS is implied."
+          $body = @"
+          ## External validation evidence
+          - project: `WAFL`
+          - source_sha: `${{ steps.claim.outputs.sha }}`
+          - result: `FAILED`
+          - runner_run_id: `$env:GITHUB_RUN_ID`
+          - canonical_product_workflow: `NOT_SUBSTITUTED`
+          - fallback_scope: `RUNNER_ALLOCATION_FAILURE_ONLY`
+          "@
+          $body | Set-Content -LiteralPath "$env:RUNNER_TEMP\external-validation.md" -Encoding utf8
+          gh issue comment "${{ github.event.issue.number }}" --repo "$env:GITHUB_REPOSITORY" --body-file "$env:RUNNER_TEMP\external-validation.md"
 
   classmo:
     if: >-
@@ -211,7 +234,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh issue comment "${{ github.event.issue.number }}" --repo "$GITHUB_REPOSITORY" --body $'## External validation evidence\n- project: `CLASSMO`\n- source_sha: `${{ steps.claim.outputs.sha }}`\n- result: `PASS`\n- runner_run_id: `'$GITHUB_RUN_ID$'`\n- canonical_product_workflow: `NOT_SUBSTITUTED`'
+          gh issue comment "${{ github.event.issue.number }}" --repo "$GITHUB_REPOSITORY" --body $'## External validation evidence\n- project: `CLASSMO`\n- source_sha: `${{ steps.claim.outputs.sha }}`\n- result: `PASS`\n- runner_run_id: `'$GITHUB_RUN_ID$'`\n- canonical_product_workflow: `NOT_SUBSTITUTED`'\n- fallback_scope: `RUNNER_ALLOCATION_FAILURE_ONLY`'
           gh issue close "${{ github.event.issue.number }}" --repo "$GITHUB_REPOSITORY" --reason completed
 
       - name: Record failure
@@ -305,7 +328,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh issue comment "${{ github.event.issue.number }}" --repo "$GITHUB_REPOSITORY" --body $'## External validation evidence\n- project: `ESC`\n- source_sha: `${{ steps.claim.outputs.sha }}`\n- result: `PASS`\n- runner_run_id: `'$GITHUB_RUN_ID$'`\n- canonical_product_workflow: `NOT_SUBSTITUTED`'
+          gh issue comment "${{ github.event.issue.number }}" --repo "$GITHUB_REPOSITORY" --body $'## External validation evidence\n- project: `ESC`\n- source_sha: `${{ steps.claim.outputs.sha }}`\n- result: `PASS`\n- runner_run_id: `'$GITHUB_RUN_ID$'`\n- canonical_product_workflow: `NOT_SUBSTITUTED`'\n- fallback_scope: `RUNNER_ALLOCATION_FAILURE_ONLY`'
           gh issue close "${{ github.event.issue.number }}" --repo "$GITHUB_REPOSITORY" --reason completed
 
       - name: Record failure
@@ -409,7 +432,17 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh issue comment "${{ github.event.issue.number }}" --repo "$env:GITHUB_REPOSITORY" --body "## External validation evidence`n- project: `MUVEL``n- source_sha: `${{ steps.claim.outputs.sha }}``n- result: `PASS``n- runner_run_id: `$env:GITHUB_RUN_ID``n- canonical_product_workflow: `NOT_SUBSTITUTED`"
+          $body = @"
+          ## External validation evidence
+          - project: `MUVEL`
+          - source_sha: `${{ steps.claim.outputs.sha }}`
+          - result: `PASS`
+          - runner_run_id: `$env:GITHUB_RUN_ID`
+          - canonical_product_workflow: `NOT_SUBSTITUTED`
+          - fallback_scope: `RUNNER_ALLOCATION_FAILURE_ONLY`
+          "@
+          $body | Set-Content -LiteralPath "$env:RUNNER_TEMP\external-validation.md" -Encoding utf8
+          gh issue comment "${{ github.event.issue.number }}" --repo "$env:GITHUB_REPOSITORY" --body-file "$env:RUNNER_TEMP\external-validation.md"
           gh issue close "${{ github.event.issue.number }}" --repo "$env:GITHUB_REPOSITORY" --reason completed
 
       - name: Record failure
@@ -418,4 +451,14 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh issue comment "${{ github.event.issue.number }}" --repo "$env:GITHUB_REPOSITORY" --body "## External validation evidence`n- project: `MUVEL``n- source_sha: `${{ steps.claim.outputs.sha }}``n- result: `FAILED``n- runner_run_id: `$env:GITHUB_RUN_ID`"
+          $body = @"
+          ## External validation evidence
+          - project: `MUVEL`
+          - source_sha: `${{ steps.claim.outputs.sha }}`
+          - result: `FAILED`
+          - runner_run_id: `$env:GITHUB_RUN_ID`
+          - canonical_product_workflow: `NOT_SUBSTITUTED`
+          - fallback_scope: `RUNNER_ALLOCATION_FAILURE_ONLY`
+          "@
+          $body | Set-Content -LiteralPath "$env:RUNNER_TEMP\external-validation.md" -Encoding utf8
+          gh issue comment "${{ github.event.issue.number }}" --repo "$env:GITHUB_REPOSITORY" --body-file "$env:RUNNER_TEMP\external-validation.md"
