@@ -389,3 +389,4 @@ the normal wake. **Reconciliation Sweeper** runs every five minutes as a fallbac
 workflow-dispatches the same finalizer only when one exact open Owner-authored
 reconciliation issue exists for that project and has no STARTED/PASS/FAILED finalizer
 evidence. This fallback adds no source-task, provider, Production, device or KDN authority.
+Runner `main` pushes also wake one sweep so newly integrated control-plane fixes do not wait for the periodic fallback.
