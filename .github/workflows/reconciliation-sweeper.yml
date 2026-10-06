@@ -1,6 +1,9 @@
 name: Reconciliation Sweeper
 
 on:
+  push:
+    branches:
+      - main
   schedule:
     - cron: "*/5 * * * *"
   workflow_dispatch:
