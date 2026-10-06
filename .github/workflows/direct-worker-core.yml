@@ -175,6 +175,8 @@ jobs:
           git -C "$DW_PRODUCT" fetch --no-tags origin "$SOURCE_REF"
           git -C "$DW_PRODUCT" checkout --detach FETCH_HEAD
           test -z "$(git -C "$DW_PRODUCT" status --porcelain=v1 --untracked-files=all)"
+          chmod 0500 "$DW_SOURCE_ROOT"
+          test "$(stat -c '%a' "$DW_SOURCE_ROOT")" = "500"
 
       - name: Establish exact starting head
         id: source
@@ -258,7 +260,7 @@ jobs:
           set -euo pipefail
           if [ "$DIRECT_WORKER_HOME_ISOLATION" = 1 ]; then
             # Provisioning is an Owner host operation, never a privileged job mutation.
-            DIRECT_WORKER_SMOKE_PARENT="$DW_SOURCE_ROOT" \
+            DIRECT_WORKER_FORBIDDEN_WRITE_ROOT="$DW_SOURCE_ROOT" \
               PYTHONPATH=src python scripts/direct_worker_isolation_smoke.py
             exit 0
           fi
@@ -612,5 +614,6 @@ jobs:
           test "$DW_SOURCE_ROOT" = "$expected_source"
           test "$(realpath -m "$DW_SOURCE_ROOT")" = "$expected_source"
           test ! -L "$DW_JOB_ROOT" && test ! -L "$DW_SOURCE_ROOT"
+          chmod 0700 "$DW_SOURCE_ROOT"
           rm -rf --one-file-system -- "$DW_JOB_ROOT"
           rm -rf --one-file-system -- "$DW_SOURCE_ROOT"
