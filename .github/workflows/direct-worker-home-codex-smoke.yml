@@ -21,11 +21,16 @@ jobs:
           set -euo pipefail
           umask 077
           path="codex-smoke-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          host_home="$(getent passwd "$(id -u)" | cut -d: -f6)"
+          smoke_parent="$host_home/.wonjae-direct-worker-auth-smoke"
+          smoke_root="$smoke_parent/run-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
           test ! -e "$GITHUB_WORKSPACE/$path" && test ! -L "$GITHUB_WORKSPACE/$path"
+          test ! -e "$smoke_root" && test ! -L "$smoke_root"
           test -z "$(find "$GITHUB_WORKSPACE" -mindepth 1 -maxdepth 1 -name 'codex-smoke-*' -print -quit)"
-          mkdir "$GITHUB_WORKSPACE/$path"
+          mkdir -p "$smoke_parent"
+          mkdir "$GITHUB_WORKSPACE/$path" "$smoke_root"
           echo "path=$path" >> "$GITHUB_OUTPUT"
-          echo "DW_SMOKE_ROOT=$GITHUB_WORKSPACE/$path" >> "$GITHUB_ENV"
+          echo "DW_SMOKE_ROOT=$smoke_root" >> "$GITHUB_ENV"
       - name: Checkout trusted default-branch exact SHA
         uses: actions/checkout@v6
         with:
@@ -39,14 +44,23 @@ jobs:
           set -euo pipefail
           python3 -m venv ../venv
           ../venv/bin/python -m pip install --no-cache-dir -e .
-          PYTHONPATH=src ../venv/bin/python scripts/direct_worker_isolation_smoke.py
+      - name: Lock trusted workspace and verify isolation
+        working-directory: ${{ steps.storage.outputs.path }}/runner
+        run: |
+          set -euo pipefail
+          chmod -R a-w "$GITHUB_WORKSPACE"
+          chmod a-w "$GITHUB_WORKSPACE"
+          test ! -w "$GITHUB_WORKSPACE"
+          PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src \
+            ../venv/bin/python scripts/direct_worker_isolation_smoke.py
       - name: Actual bounded authenticated Codex source turn
         working-directory: ${{ steps.storage.outputs.path }}/runner
         env:
           CODEX_AUTH_JSON: ${{ secrets.CODEX_AUTH_JSON }}
         run: |
           set -euo pipefail
-          PYTHONPATH=src ../venv/bin/python scripts/direct_worker_authenticated_smoke.py
+          PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src \
+            ../venv/bin/python scripts/direct_worker_authenticated_smoke.py
           printf 'runner_name=%s\nos=%s\n' "$RUNNER_NAME" "$RUNNER_OS" >> "$GITHUB_STEP_SUMMARY"
           uname -r >> "$GITHUB_STEP_SUMMARY"
           echo 'authenticated synthetic source/trusted local Git boundary: PASS' >> "$GITHUB_STEP_SUMMARY"
@@ -62,8 +76,13 @@ jobs:
         if: ${{ always() && steps.storage.outputs.path != '' }}
         run: |
           set -euo pipefail
-          expected="$GITHUB_WORKSPACE/codex-smoke-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
-          test "$DW_SMOKE_ROOT" = "$expected"
-          test "$(realpath -m "$DW_SMOKE_ROOT")" = "$expected"
+          expected_workspace="$GITHUB_WORKSPACE/codex-smoke-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          host_home="$(getent passwd "$(id -u)" | cut -d: -f6)"
+          expected_smoke="$host_home/.wonjae-direct-worker-auth-smoke/run-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          test "$DW_SMOKE_ROOT" = "$expected_smoke"
+          test "$(realpath -m "$DW_SMOKE_ROOT")" = "$expected_smoke"
           test ! -L "$DW_SMOKE_ROOT"
+          chmod u+rwx "$GITHUB_WORKSPACE"
+          chmod -R u+w "$GITHUB_WORKSPACE"
+          rm -rf --one-file-system -- "$expected_workspace"
           rm -rf --one-file-system -- "$DW_SMOKE_ROOT"
