@@ -5,7 +5,6 @@ from pathlib import Path
 
 import pytest
 
-from wonjae_dispatcher_runner.execution_state import ExecutionAction, ProductExecutionState
 from wonjae_dispatcher_runner.direct_worker import (
     DirectWorkerError,
     _prompt,
@@ -13,6 +12,10 @@ from wonjae_dispatcher_runner.direct_worker import (
     git_metadata_snapshot,
     load_direct_worker_route,
     require_next_source_ready,
+)
+from wonjae_dispatcher_runner.execution_state import (
+    ExecutionAction,
+    ProductExecutionState,
 )
 
 
