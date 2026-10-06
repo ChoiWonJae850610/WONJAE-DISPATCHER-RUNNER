@@ -224,6 +224,10 @@ def test_direct_worker_core_separates_trusted_and_product_workspaces():
     assert "DW_PRODUCT: ${{ runner.temp }}/wonjae-direct-source-" in raw
     assert 'echo "TMPDIR=$DW_SOURCE_ROOT/tmp" >> "$GITHUB_ENV"' in raw
     assert "Checkout product outside trusted workflow workspace" in raw
-    assert 'git clone --no-checkout "https://github.com/$PRODUCT_REPOSITORY.git" "$DW_PRODUCT"' in raw
+    clone_command = (
+        'git clone --no-checkout "https://github.com/$PRODUCT_REPOSITORY.git" '
+        '"$DW_PRODUCT"'
+    )
+    assert clone_command in raw
     assert 'cd "$DW_PRODUCT"' in raw
     assert 'rm -rf --one-file-system -- "$DW_SOURCE_ROOT"' in raw
