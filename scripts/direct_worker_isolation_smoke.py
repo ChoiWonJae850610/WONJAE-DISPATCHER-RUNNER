@@ -13,9 +13,9 @@ import tempfile
 from pathlib import Path
 
 from wonjae_dispatcher_runner.home_isolation import (
-    sandbox_cli_args,
     protected_mount_placeholders,
     require_linux_host,
+    sandbox_cli_args,
     source_environment,
 )
 
