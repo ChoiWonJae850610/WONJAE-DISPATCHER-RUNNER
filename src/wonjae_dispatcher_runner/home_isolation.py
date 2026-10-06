@@ -35,7 +35,10 @@ def permission_config(repo: Path) -> dict:
         raise ValueError("home worker requires an independent non-symlink checkout")
     if str(root).startswith(("/mnt/", "/media/")):
         raise ValueError("home worker checkout must be on the Linux filesystem")
-    filesystem = {":root": "deny", ":minimal": "read", str(root): "write"}
+    filesystem = {
+        ":root": "deny", ":minimal": "read", ":tmpdir": "deny", ":slash_tmp": "deny",
+        str(root): "write",
+    }
     # Only the pinned public runtime binaries/resources, never the whole venv/cache.
     filesystem[str(bundled_codex_path().parent.resolve())] = "read"
     # Product instructions and integration authority are readable, never model-writable.
@@ -48,6 +51,7 @@ def permission_config(repo: Path) -> dict:
         "permissions": {
             PROFILE: {
                 "extends": ":workspace",
+                "workspace_roots": [str(root)],
                 "filesystem": filesystem,
                 "network": {"enabled": False},
             },

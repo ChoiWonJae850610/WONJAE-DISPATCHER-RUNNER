@@ -56,6 +56,7 @@ printf 'host-read-and-symlink: PASS\n'
 if touch ../other-product/changed 2>/dev/null; then exit 24; fi
 if touch .git/changed 2>/dev/null; then exit 25; fi
 if touch .wonjae/changed 2>/dev/null; then exit 26; fi
+if touch /tmp/direct-smoke-outside 2>/dev/null; then exit 28; fi
 printf 'protected-and-cross-project-write: PASS\n'
 printf 'source\n' > allowed.txt
 printf 'source-write: PASS\n'
@@ -65,7 +66,7 @@ printf 'network: PASS\n'
         args = [codex]
         for override in cli_overrides(product):
             args += ["--config", override]
-        args += ["sandbox", "linux", "--", "/bin/bash", "-c", script, "smoke", str(root)]
+        args += ["sandbox", "--", "/bin/bash", "-c", script, "smoke", str(root)]
         result = subprocess.run(args, cwd=product, env=env, capture_output=True,
                                 text=True, timeout=45)
         expected = (
