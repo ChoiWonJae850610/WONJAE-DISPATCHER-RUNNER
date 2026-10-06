@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from wonjae_dispatcher_runner.execution_state import ExecutionAction, ProductExecutionState
 from wonjae_dispatcher_runner.direct_worker import (
     DirectWorkerError,
     _prompt,
@@ -233,3 +234,86 @@ def test_source_ready_prompt_trusts_direct_work_branch(tmp_path):
     assert "intentionally created the local direct/* source-writing branch" in prompt
     assert "do not require the local branch name itself to equal cloud-dev-v1" in prompt
     assert "registered active branch plus exact starting SHA" in prompt
+
+
+def test_registry_accepts_product_execution_state_path(tmp_path):
+    path = registry(tmp_path)
+    content = path.read_text(encoding="utf-8").replace(
+        "      runner_workflow: .github/workflows/direct-worker.yml\n",
+        "      runner_workflow: .github/workflows/direct-worker.yml\n"
+        "      state_path: .wonjae/execution-state.yaml\n",
+    )
+    path.write_text(content, encoding="utf-8")
+    route = load_direct_worker_route(path, "ESC")
+    assert route.state_path == ".wonjae/execution-state.yaml"
+    assert route.handoff is None
+
+
+def test_product_execution_state_prompt_is_authoritative(tmp_path):
+    path = registry(tmp_path)
+    content = path.read_text(encoding="utf-8").replace(
+        "      runner_workflow: .github/workflows/direct-worker.yml\n",
+        "      runner_workflow: .github/workflows/direct-worker.yml\n"
+        "      state_path: .wonjae/execution-state.yaml\n",
+    )
+    path.write_text(content, encoding="utf-8")
+    route = load_direct_worker_route(path, "ESC")
+    state = ProductExecutionState(
+        project="ESC",
+        path=".wonjae/execution-state.yaml",
+        next_action=ExecutionAction(
+            type="SOURCE_READY",
+            title="Current product-state task",
+            source_task_id="ESC-NEXT",
+            owner_action=None,
+            source_scope=("Make the bounded source change.",),
+            gate=None,
+        ),
+        after_source_success=ExecutionAction(
+            type="MANUAL_QA",
+            title="Verify on device",
+            source_task_id=None,
+            owner_action="Test the device.",
+            source_scope=(),
+            gate="physical",
+        ),
+    )
+    prompt = _prompt(
+        route,
+        "next",
+        "a" * 40,
+        "direct/ESC-123",
+        "",
+        state,
+    )
+    assert "product execution state snapshot" in prompt
+    assert ".wonjae/execution-state.yaml" in prompt
+    assert "Current product-state task" in prompt
+    assert "execution-state file is protected from model mutation" in prompt
+
+
+def test_changed_paths_rejects_product_execution_state_mutation(tmp_path):
+    repo = tmp_path / "repo-state"
+    repo.mkdir()
+    git(repo, "init")
+    git(repo, "config", "user.email", "worker@example.invalid")
+    git(repo, "config", "user.name", "Direct Worker Test")
+    state = repo / ".wonjae" / "execution-state.yaml"
+    state.parent.mkdir()
+    state.write_text("schema_version: 1\n", encoding="utf-8")
+    git(repo, "add", ".wonjae/execution-state.yaml")
+    git(repo, "commit", "-m", "base")
+    state.write_text("schema_version: 2\n", encoding="utf-8")
+    with pytest.raises(DirectWorkerError, match="protected source path"):
+        changed_paths(repo)
+
+
+def test_direct_worker_workflow_requires_start_validation_and_advances_state():
+    root = Path(__file__).resolve().parents[1]
+    workflow = (root / ".github/workflows/direct-worker-core.yml").read_text(
+        encoding="utf-8"
+    )
+    assert "Require exact starting-head validation" in workflow
+    assert "event=push" in workflow
+    assert "Advance product execution state on source success" in workflow
+    assert "scripts/advance_execution_state.py" in workflow
