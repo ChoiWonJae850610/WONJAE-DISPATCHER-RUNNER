@@ -18,6 +18,8 @@ from wonjae_dispatcher_runner.source_validation import (  # noqa: E402
 )
 from wonjae_dispatcher_runner.validation_fallback import (  # noqa: E402
     EXTERNAL_WORKFLOW_PATH,
+    RUNNER_REPOSITORY,
+    exact_canonical,
     is_runner_allocation_failure,
     matching_dispatched_external_run,
     matching_external_success,
@@ -55,17 +57,26 @@ def product_run_reader(token: str, repository: str):
     return read
 
 
-def runner_workflow_runs(token: str) -> list[dict]:
-    runner_repository = os.environ["GITHUB_REPOSITORY"]
-    payload = gh_json(
-        token,
-        f"repos/{runner_repository}/actions/workflows/"
-        f"{EXTERNAL_WORKFLOW_PATH.rsplit('/', 1)[-1]}/runs?per_page=100",
-    )
-    runs = payload.get("workflow_runs")
-    if not isinstance(runs, list):
-        raise ValidationGateError("external validation workflow-runs response is invalid")
-    return runs
+def complete_list(token: str, endpoint: str, key: str) -> list[dict]:
+    items = []
+    for page in range(1, 5):
+        payload = gh_json(token, f"{endpoint}&per_page=100&page={page}")
+        values = payload.get(key)
+        total = payload.get("total_count")
+        if not isinstance(values, list) or type(total) is not int:
+            raise ValidationGateError("validation list evidence is malformed")
+        items.extend(values)
+        if len(items) == total:
+            return items
+        if len(items) > total or not values:
+            raise ValidationGateError("validation list evidence is incomplete")
+    raise ValidationGateError("validation list evidence exceeds the complete-read bound")
+
+
+def runner_workflow_runs(token: str, not_before: str) -> list[dict]:
+    return complete_list(token, f"repos/{RUNNER_REPOSITORY}/actions/workflows/"
+                         f"{EXTERNAL_WORKFLOW_PATH.rsplit('/', 1)[-1]}/runs?"
+                         f"created=>{not_before}", "workflow_runs")
 
 
 def dispatch_external(token: str, project: str, source_sha: str) -> None:
@@ -102,6 +113,9 @@ def emit(prefix: str, mode: str, canonical_run_id: int, external_run_id: int | N
     with Path(github_env).open("a", encoding="utf-8") as handle:
         handle.write(f"{key}_VALIDATION_MODE={mode}\n")
         handle.write(f"{key}_CANONICAL_VALIDATION_RUN_ID={canonical_run_id}\n")
+        handle.write(f"{key}_CANONICAL_RESULT="
+                     f"{'SUCCESS' if mode == 'CANONICAL' else 'INFRASTRUCTURE_ALLOCATION_FAILURE'}"
+                     "\n")
         handle.write(
             f"{key}_EXTERNAL_VALIDATION_RUN_ID="
             f"{external_run_id if external_run_id is not None else ''}\n"
@@ -148,12 +162,15 @@ def main(argv=None) -> int:
         product_token,
         f"repos/{repository}/actions/runs/{args.run_id}",
     )
-    jobs_payload = gh_json(
-        product_token,
-        f"repos/{repository}/actions/runs/{args.run_id}/jobs?filter=latest&per_page=100",
-    )
-    jobs = jobs_payload.get("jobs")
-    if not isinstance(jobs, list) or not is_runner_allocation_failure(canonical_run, jobs):
+    # Re-read identity after waiting; a changed/mismatched run is never fallback authority.
+    if not exact_canonical(canonical_run, repository=repository,
+                           workflow_path=f".github/workflows/{workflow_file}",
+                           source_sha=args.head_sha, event=args.event, run_id=args.run_id):
+        raise ValidationGateError("canonical validation identity changed")
+    jobs = complete_list(product_token,
+                         f"repos/{repository}/actions/runs/{args.run_id}/jobs?filter=latest",
+                         "jobs")
+    if not is_runner_allocation_failure(canonical_run, jobs):
         print(
             f"CANONICAL_VALIDATION_FAILED run={args.run_id} head={args.head_sha} "
             "without hosted-runner allocation-failure signature",
@@ -161,11 +178,20 @@ def main(argv=None) -> int:
         )
         return 1
 
+    if os.environ["GITHUB_REPOSITORY"] != RUNNER_REPOSITORY:
+        raise ValidationGateError("fallback must execute in the trusted Runner repository")
+    workflow = gh_json(runner_token, f"repos/{RUNNER_REPOSITORY}/actions/workflows/"
+                       f"{EXTERNAL_WORKFLOW_PATH.rsplit('/', 1)[-1]}")
+    if workflow.get("path") != EXTERNAL_WORKFLOW_PATH or workflow.get("state") != "active":
+        raise ValidationGateError("trusted external workflow identity is invalid")
+    workflow_id = workflow.get("id")
+    not_before = str(canonical_run.get("updated_at") or "")
     existing = matching_external_success(
-        runner_workflow_runs(runner_token),
+        runner_workflow_runs(runner_token, not_before),
         project=args.project,
         source_sha=args.head_sha,
-        not_before=str(canonical_run.get("created_at") or ""),
+        not_before=not_before,
+        workflow_id=workflow_id,
     )
     if existing is not None:
         external_id = int(existing["id"])
@@ -173,7 +199,7 @@ def main(argv=None) -> int:
         print(f"success {args.head_sha}")
         return 0
 
-    before = runner_workflow_runs(runner_token)
+    before = runner_workflow_runs(runner_token, not_before)
     minimum_run_id = max(
         (int(run.get("id") or 0) for run in before if isinstance(run, dict)),
         default=0,
@@ -181,17 +207,22 @@ def main(argv=None) -> int:
     dispatch_external(runner_token, args.project, args.head_sha)
 
     deadline = time.monotonic() + min(args.seconds, 3600)
-    selected = None
+    selected_id = None
     while time.monotonic() < deadline:
         selected = matching_dispatched_external_run(
-            runner_workflow_runs(runner_token),
+            runner_workflow_runs(runner_token, not_before),
             project=args.project,
             source_sha=args.head_sha,
             minimum_run_id=minimum_run_id,
+            not_before=not_before,
+            workflow_id=workflow_id,
         )
         if selected is None:
             time.sleep(10)
             continue
+        if selected_id is not None and selected["id"] != selected_id:
+            raise ValidationGateError("external validation selected run changed")
+        selected_id = selected["id"]
         status = selected.get("status")
         if status != "completed":
             time.sleep(10)

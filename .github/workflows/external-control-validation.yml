@@ -1,0 +1,66 @@
+name: External Control Validation
+run-name: ${{ github.event.issue.title }}
+on:
+  issues:
+    types: [opened]
+permissions:
+  contents: read
+  issues: write
+concurrency:
+  group: external-control-${{ github.event.issue.title }}
+  cancel-in-progress: false
+jobs:
+  validate:
+    if: >-
+      ${{ github.event.issue.user.login == github.repository_owner &&
+          startsWith(github.event.issue.title, '[EXTERNAL-CONTROL-VALIDATE] ') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Resolve exact Owner request
+        id: claim
+        env:
+          ISSUE_TITLE: ${{ github.event.issue.title }}
+        run: |
+          set -euo pipefail
+          [[ "$ISSUE_TITLE" =~ ^\[EXTERNAL-CONTROL-VALIDATE\]\ ([0-9a-f]{40})$ ]] || exit 1
+          echo "sha=${BASH_REMATCH[1]}" >> "$GITHUB_OUTPUT"
+      - name: Checkout exact control source
+        uses: actions/checkout@v6
+        with:
+          repository: ChoiWonJae850610/DEV-CONTROL
+          ref: ${{ steps.claim.outputs.sha }}
+          token: ${{ secrets.CONTROL_READ_TOKEN }}
+          persist-credentials: false
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.3"
+      - name: Validate exact control source
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "${{ steps.claim.outputs.sha }}"
+          ruby .github/scripts/validate_control.rb
+          test -z "$(git status --porcelain --untracked-files=no)"
+          test "$(git rev-parse HEAD)" = "${{ steps.claim.outputs.sha }}"
+      - name: Record exact static evidence
+        if: ${{ always() }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VALIDATION_RESULT: ${{ job.status }}
+          SOURCE_SHA: ${{ steps.claim.outputs.sha }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+        run: |
+          test -n "$SOURCE_SHA" || exit 1
+          body_file="$RUNNER_TEMP/control-static-evidence.md"
+          {
+            echo '## External control static validation'
+            printf -- '- source_sha: `%s`\n' "$SOURCE_SHA"
+            printf -- '- result: `%s`\n' "$VALIDATION_RESULT"
+            printf -- '- runner_run_id: `%s`\n' "$GITHUB_RUN_ID"
+            echo '- canonical_control_workflow: `NOT_SUBSTITUTED`'
+            echo '- product/provider/runtime/device/physical: `NOT_RUN`'
+          } > "$body_file"
+          gh issue comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --body-file "$body_file"
+          if [ "$VALIDATION_RESULT" = success ]; then
+            gh issue close "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --reason completed
+          fi

@@ -1,0 +1,298 @@
+{
+  "project": "ESC",
+  "source_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "repository": "ChoiWonJae850610/ESC",
+  "workflow_path": ".github/workflows/validate.yml",
+  "workflow_id": 17,
+  "canonical": {
+    "id": 42,
+    "name": "Validate ESC",
+    "repository": {
+      "full_name": "ChoiWonJae850610/ESC"
+    },
+    "head_repository": {
+      "full_name": "ChoiWonJae850610/ESC"
+    },
+    "path": ".github/workflows/validate.yml",
+    "head_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "event": "push",
+    "status": "completed",
+    "conclusion": "failure",
+    "updated_at": "2026-10-06T03:00:00Z",
+    "created_at": "2026-10-06T02:00:00Z"
+  },
+  "jobs": [
+    {
+      "id": 8,
+      "run_id": 42,
+      "runner_id": 0,
+      "steps": []
+    }
+  ],
+  "external": {
+    "id": 99,
+    "workflow_id": 17,
+    "repository": {
+      "full_name": "ChoiWonJae850610/WONJAE-DISPATCHER-RUNNER"
+    },
+    "head_repository": {
+      "full_name": "ChoiWonJae850610/WONJAE-DISPATCHER-RUNNER"
+    },
+    "path": ".github/workflows/external-product-validation.yml",
+    "head_branch": "main",
+    "head_sha": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "event": "workflow_dispatch",
+    "display_title": "External Product Validation ESC aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "status": "completed",
+    "conclusion": "success",
+    "created_at": "2026-10-06T03:01:00Z"
+  },
+  "cases": [
+    {
+      "name": "allocation-only",
+      "allow": true
+    },
+    {
+      "name": "canonical-cancelled",
+      "canonical": {
+        "conclusion": "cancelled"
+      },
+      "allow": false
+    },
+    {
+      "name": "canonical-timed_out",
+      "canonical": {
+        "conclusion": "timed_out"
+      },
+      "allow": false
+    },
+    {
+      "name": "canonical-action_required",
+      "canonical": {
+        "conclusion": "action_required"
+      },
+      "allow": false
+    },
+    {
+      "name": "canonical-null",
+      "canonical": {
+        "conclusion": null
+      },
+      "allow": false
+    },
+    {
+      "name": "canonical-pending",
+      "canonical": {
+        "status": "in_progress"
+      },
+      "allow": false
+    },
+    {
+      "name": "wrong-canonical-repository",
+      "canonical": {
+        "repository": {
+          "full_name": "bad/ESC"
+        }
+      },
+      "allow": false
+    },
+    {
+      "name": "wrong-head-repository",
+      "canonical": {
+        "head_repository": {
+          "full_name": "bad/ESC"
+        }
+      },
+      "allow": false
+    },
+    {
+      "name": "wrong-workflow",
+      "canonical": {
+        "path": ".github/workflows/other.yml"
+      },
+      "allow": false
+    },
+    {
+      "name": "wrong-SHA",
+      "canonical": {
+        "head_sha": "cccccccccccccccccccccccccccccccccccccccc"
+      },
+      "allow": false
+    },
+    {
+      "name": "wrong-event",
+      "canonical": {
+        "event": "workflow_dispatch"
+      },
+      "allow": false
+    },
+    {
+      "name": "missing-jobs",
+      "jobs": [],
+      "allow": false
+    },
+    {
+      "name": "assigned-runner",
+      "jobs": [
+        {
+          "run_id": 42,
+          "runner_id": 1,
+          "steps": []
+        }
+      ],
+      "allow": false
+    },
+    {
+      "name": "checkout-started",
+      "jobs": [
+        {
+          "run_id": 42,
+          "runner_id": 0,
+          "steps": [
+            {
+              "name": "Checkout"
+            }
+          ]
+        }
+      ],
+      "allow": false
+    },
+    {
+      "name": "null-steps",
+      "jobs": [
+        {
+          "run_id": 42,
+          "runner_id": 0,
+          "steps": null
+        }
+      ],
+      "allow": false
+    },
+    {
+      "name": "boolean-runner",
+      "jobs": [
+        {
+          "run_id": 42,
+          "runner_id": false,
+          "steps": []
+        }
+      ],
+      "allow": false
+    },
+    {
+      "name": "different-job-run",
+      "jobs": [
+        {
+          "run_id": 41,
+          "runner_id": 0,
+          "steps": []
+        }
+      ],
+      "allow": false
+    },
+    {
+      "name": "mixed-jobs",
+      "jobs": [
+        {
+          "run_id": 42,
+          "runner_id": 0,
+          "steps": []
+        },
+        {
+          "run_id": 42,
+          "runner_id": 1,
+          "steps": []
+        }
+      ],
+      "allow": false
+    },
+    {
+      "name": "wrong-external-repository",
+      "external": {
+        "repository": {
+          "full_name": "bad/Runner"
+        }
+      },
+      "allow": false
+    },
+    {
+      "name": "external-head-repository",
+      "external": {
+        "head_repository": {
+          "full_name": "bad/Runner"
+        }
+      },
+      "allow": false
+    },
+    {
+      "name": "untrusted-branch",
+      "external": {
+        "head_branch": "feature"
+      },
+      "allow": false
+    },
+    {
+      "name": "external-workflow-id",
+      "external": {
+        "workflow_id": 18
+      },
+      "allow": false
+    },
+    {
+      "name": "external-workflow-path",
+      "external": {
+        "path": ".github/workflows/other.yml"
+      },
+      "allow": false
+    },
+    {
+      "name": "wrong-external-project",
+      "external": {
+        "display_title": "External Product Validation WAFL aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "allow": false
+    },
+    {
+      "name": "wrong-external-SHA",
+      "external": {
+        "display_title": "External Product Validation ESC cccccccccccccccccccccccccccccccccccccccc"
+      },
+      "allow": false
+    },
+    {
+      "name": "external-before-failure",
+      "external": {
+        "created_at": "2026-10-06T02:59:59Z"
+      },
+      "allow": false
+    },
+    {
+      "name": "external-equal-failure",
+      "external": {
+        "created_at": "2026-10-06T03:00:00Z"
+      },
+      "allow": false
+    },
+    {
+      "name": "external-pending",
+      "external": {
+        "status": "in_progress"
+      },
+      "allow": false
+    },
+    {
+      "name": "external-failed",
+      "external": {
+        "conclusion": "failure"
+      },
+      "allow": false
+    },
+    {
+      "name": "invalid-timestamp",
+      "canonical": {
+        "updated_at": "invalid"
+      },
+      "allow": false
+    }
+  ]
+}

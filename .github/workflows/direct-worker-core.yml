@@ -210,6 +210,8 @@ jobs:
       - name: Run isolated Codex Direct Worker
         id: codex
         env:
+          PRODUCT_TOKEN: ${{ secrets.product_write_token }}
+          RUNNER_TOKEN: ${{ github.token }}
           CODEX_HOME: ${{ runner.temp }}/direct-codex-home
           CODEX_AUTH_JSON: ${{ secrets.codex_auth_json }}
         run: |
@@ -226,7 +228,7 @@ jobs:
           if [ -n "${FAILURE_LOG:-}" ] && [ -s "${FAILURE_LOG:-}" ]; then
             args+=(--failure-log "$FAILURE_LOG")
           fi
-          PYTHONPATH="$GITHUB_WORKSPACE/src" python scripts/run_direct_worker.py "${args[@]}"
+          PYTHONPATH="$GITHUB_WORKSPACE/src" python scripts/run_direct_worker_recovery.py "${args[@]}"
           status="$(jq -r '.status' "$result_file")"
           changed_count="$(jq '.changed_paths | length' "$result_file")"
           echo "status=$status" >> "$GITHUB_OUTPUT"
@@ -453,15 +455,22 @@ jobs:
             printf -- '- result: `%s`\n' "PASS"
             printf -- '- runner_run_id: `%s`\n' "$GITHUB_RUN_ID"
             printf -- '- source_base_sha: `%s`\n' "$START_HEAD"
+            printf -- '- start_validation_mode: `%s`\n' "${START_VALIDATION_MODE:-CANONICAL}"
+            printf -- '- start_canonical_validation_run: `%s`\n' "${START_VALIDATION_RUN_ID:-}"
+            printf -- '- start_canonical_result: `%s`\n' "${START_CANONICAL_RESULT:-SUCCESS}"
+            printf -- '- start_external_validation_run: `%s`\n' "${START_EXTERNAL_VALIDATION_RUN_ID:-}"
             printf -- '- final_pr_head: `%s`\n' "$DIRECT_HEAD"
             printf -- '- exact_pr_head_validation_run: `%s`\n' "$PR_HEAD_RUN_ID"
             printf -- '- pr_head_validation_mode: `%s`\n' "${PR_HEAD_VALIDATION_MODE:-CANONICAL}"
+            printf -- '- pr_head_canonical_result: `%s`\n' "${PR_HEAD_CANONICAL_RESULT:-SUCCESS}"
             printf -- '- pr_head_external_validation_run: `%s`\n' "${PR_HEAD_EXTERNAL_VALIDATION_RUN_ID:-}"
             printf -- '- integrated_sha: `%s`\n' "$INTEGRATED_SHA"
             printf -- '- exact_integrated_sha_validation_run: `%s`\n' "$INTEGRATED_RUN_ID"
             printf -- '- integrated_validation_mode: `%s`\n' "${INTEGRATED_VALIDATION_MODE:-CANONICAL}"
+            printf -- '- integrated_canonical_result: `%s`\n' "${INTEGRATED_CANONICAL_RESULT:-SUCCESS}"
             printf -- '- integrated_external_validation_run: `%s`\n' "${INTEGRATED_EXTERNAL_VALIDATION_RUN_ID:-}"
             printf -- '- provider/runtime/device/physical: `%s`\n' "NOT_RUN"
+            printf -- '- canonical_product_workflow: `%s`\n' "NOT_SUBSTITUTED"
           } > "$result_file"
           gh pr comment "$PR_NUMBER" --repo "$PRODUCT_REPOSITORY" --body-file "$result_file"
           {
