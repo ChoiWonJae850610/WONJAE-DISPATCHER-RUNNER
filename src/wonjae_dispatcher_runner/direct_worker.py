@@ -349,7 +349,27 @@ def _prompt(
     handoff = route.handoff
     if command == "next" and handoff is not None:
         scope = "\n".join(f"- {item}" for item in handoff.source_scope)
+        trusted_handoff = (
+            "Trusted Runner execution handoff snapshot (already read and validated from "
+            "DEV-CONTROL before this sandbox started):\n"
+            f"- project: {handoff.project}\n"
+            f"- updated_at: {handoff.updated_at}\n"
+            f"- repository: {handoff.repository}\n"
+            f"- branch: {handoff.branch}\n"
+            f"- exact current_head: {handoff.current_head}\n"
+            f"- source validation: {handoff.source_validation_result} "
+            f"(run {handoff.source_validation_run_id})\n"
+            f"- next_action.type: {handoff.next_action_type}\n"
+            f"- next_action.title: {handoff.next_action_title}\n"
+            f"- source_task_id: {handoff.source_task_id or '(none)'}\n"
+            f"- authorized source scope:\n{scope}\n"
+            "The handoff file itself is intentionally outside the product checkout and is "
+            "not available inside this network-disabled sandbox. Do NOT attempt to read "
+            "DEV-CONTROL, the handoff file, GitHub, or the network. Treat this trusted "
+            "snapshot as the exact handoff evidence for this run."
+        )
         retry_note = (
+            f"{trusted_handoff}\n\n"
             f"Execute exactly the SOURCE_READY handoff task: {handoff.next_action_title}\n"
             f"Source task ID: {handoff.source_task_id or '(none)'}\n"
             f"Authorized source scope:\n{scope}"
@@ -378,8 +398,11 @@ Before editing, read these files from the checkout:
 Then inspect task-relevant source and repository-owned current/next-work documentation.
 GitHub checkout state and repository safety/approval rules are authoritative; chat history is not.
 
-For command next, the registered DEV-CONTROL execution handoff is the current
-execution-routing authority. Its exact HEAD, validation evidence, action type, task title
+For command next, the trusted Runner has already read and validated the registered
+DEV-CONTROL execution handoff before starting this product-only sandbox. The handoff is
+the current execution-routing authority, but its file is intentionally NOT mounted into
+this checkout. Use only the trusted handoff snapshot supplied below; do not require or
+attempt a second handoff read. Its exact HEAD, validation evidence, action type, task title
 and source scope supersede older task-state, "current task", "next task", attempt or
 sequencing prose retained in product documents or project-rules history. Historical task
 sections remain evidence only. Product rules still govern durable safety, provider,
