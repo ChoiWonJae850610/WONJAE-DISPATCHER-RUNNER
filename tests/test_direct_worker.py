@@ -196,12 +196,19 @@ def test_source_ready_prompt_makes_handoff_sequencing_authoritative(tmp_path):
         "ESC",
     )
     prompt = _prompt(route, "next", sha, "")
-    assert "registered DEV-CONTROL execution handoff" in prompt
+    assert "trusted Runner has already read and validated" in prompt
     assert "execution-routing authority" in prompt
     assert "supersede older task-state" in prompt
     assert "SOURCE_READY handoff explicitly authorizes source-only schema/migration FILE" in prompt
     assert "never authorizes applying that migration to a live provider" in prompt
     assert "Execute exactly the SOURCE_READY handoff task: Current handoff task" in prompt
+    assert "Trusted Runner execution handoff snapshot" in prompt
+    assert f"- exact current_head: {sha}" in prompt
+    assert "- source validation: PASS (run 123)" in prompt
+    assert "- next_action.type: SOURCE_READY" in prompt
+    assert "not available inside this network-disabled sandbox" in prompt
+    assert "do not require or" in prompt
+    assert "attempt a second handoff read" in prompt
 
 
 def test_direct_worker_workflow_prepares_linux_user_namespaces():
