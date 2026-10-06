@@ -20,6 +20,7 @@ on:
         required: true
 
 permissions:
+  actions: write
   contents: read
 
 concurrency:
@@ -29,7 +30,7 @@ concurrency:
 jobs:
   direct-worker:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 75
     steps:
       - name: Checkout trusted runner
         uses: actions/checkout@v6
@@ -149,6 +150,8 @@ jobs:
         if: ${{ inputs.command == 'next' }}
         env:
           GH_TOKEN: ${{ secrets.product_write_token }}
+          PRODUCT_TOKEN: ${{ secrets.product_write_token }}
+          RUNNER_TOKEN: ${{ github.token }}
           PRODUCT_REPOSITORY: ${{ steps.route.outputs.repository }}
           VALIDATION_WORKFLOW_FILE: ${{ steps.route.outputs.validation_workflow_file }}
         run: |
@@ -164,9 +167,9 @@ jobs:
             echo "::error::Exact starting-head validation is still running."
             exit 1
           }
-          conclusion="$(PYTHONPATH="$GITHUB_WORKSPACE/src" python scripts/source_validation.py             --run-id "$run_id" --head-sha "$START_HEAD" --event push)"
-          test "$conclusion" = "success $START_HEAD"
           echo "START_VALIDATION_RUN_ID=$run_id" >> "$GITHUB_ENV"
+          conclusion="$(PYTHONPATH="$GITHUB_WORKSPACE/src" python scripts/validation_gate.py             --project "${{ inputs.project }}"             --run-id "$run_id" --head-sha "$START_HEAD" --event push             --output-prefix START)"
+          test "$conclusion" = "success $START_HEAD"
 
       - name: Collect retry validation evidence
         if: ${{ inputs.command == 'retry' }}
@@ -207,6 +210,8 @@ jobs:
       - name: Run isolated Codex Direct Worker
         id: codex
         env:
+          PRODUCT_TOKEN: ${{ secrets.product_write_token }}
+          RUNNER_TOKEN: ${{ github.token }}
           CODEX_HOME: ${{ runner.temp }}/direct-codex-home
           CODEX_AUTH_JSON: ${{ secrets.codex_auth_json }}
         run: |
@@ -223,7 +228,7 @@ jobs:
           if [ -n "${FAILURE_LOG:-}" ] && [ -s "${FAILURE_LOG:-}" ]; then
             args+=(--failure-log "$FAILURE_LOG")
           fi
-          PYTHONPATH="$GITHUB_WORKSPACE/src" python scripts/run_direct_worker.py "${args[@]}"
+          PYTHONPATH="$GITHUB_WORKSPACE/src" python scripts/run_direct_worker_recovery.py "${args[@]}"
           status="$(jq -r '.status' "$result_file")"
           changed_count="$(jq '.changed_paths | length' "$result_file")"
           echo "status=$status" >> "$GITHUB_OUTPUT"
@@ -373,6 +378,8 @@ jobs:
         if: ${{ steps.codex.outputs.status == 'CHANGED' }}
         env:
           GH_TOKEN: ${{ secrets.product_write_token }}
+          PRODUCT_TOKEN: ${{ secrets.product_write_token }}
+          RUNNER_TOKEN: ${{ github.token }}
           PRODUCT_REPOSITORY: ${{ steps.route.outputs.repository }}
           VALIDATION_WORKFLOW_FILE: ${{ steps.route.outputs.validation_workflow_file }}
         run: |
@@ -388,8 +395,10 @@ jobs:
           test -n "$run_id" || { echo "::error::Exact PR-head validation run not found."; exit 1; }
           PR_HEAD_RUN_ID="$run_id"
           echo "PR_HEAD_RUN_ID=$PR_HEAD_RUN_ID" >> "$GITHUB_ENV"
-          conclusion="$(PYTHONPATH="$GITHUB_WORKSPACE/src" python scripts/source_validation.py \
-            --run-id "$run_id" --head-sha "$DIRECT_HEAD" --event pull_request)"
+          conclusion="$(PYTHONPATH="$GITHUB_WORKSPACE/src" python scripts/validation_gate.py \
+            --project "${{ inputs.project }}" \
+            --run-id "$run_id" --head-sha "$DIRECT_HEAD" --event pull_request \
+            --output-prefix PR_HEAD)"
           test "$conclusion" = "success $DIRECT_HEAD"
 
       - name: Merge exact validated Direct Worker PR
@@ -410,6 +419,8 @@ jobs:
         if: ${{ steps.codex.outputs.status == 'CHANGED' }}
         env:
           GH_TOKEN: ${{ secrets.product_write_token }}
+          PRODUCT_TOKEN: ${{ secrets.product_write_token }}
+          RUNNER_TOKEN: ${{ github.token }}
           PRODUCT_REPOSITORY: ${{ steps.route.outputs.repository }}
           VALIDATION_WORKFLOW_FILE: ${{ steps.route.outputs.validation_workflow_file }}
         run: |
@@ -425,8 +436,10 @@ jobs:
           test -n "$run_id" || { echo "::error::Integrated-SHA validation run not found."; exit 1; }
           INTEGRATED_RUN_ID="$run_id"
           echo "INTEGRATED_RUN_ID=$INTEGRATED_RUN_ID" >> "$GITHUB_ENV"
-          conclusion="$(PYTHONPATH="$GITHUB_WORKSPACE/src" python scripts/source_validation.py \
-            --run-id "$run_id" --head-sha "$INTEGRATED_SHA" --event push)"
+          conclusion="$(PYTHONPATH="$GITHUB_WORKSPACE/src" python scripts/validation_gate.py \
+            --project "${{ inputs.project }}" \
+            --run-id "$run_id" --head-sha "$INTEGRATED_SHA" --event push \
+            --output-prefix INTEGRATED)"
           test "$conclusion" = "success $INTEGRATED_SHA"
 
       - name: Record Direct Worker PASS
@@ -442,11 +455,22 @@ jobs:
             printf -- '- result: `%s`\n' "PASS"
             printf -- '- runner_run_id: `%s`\n' "$GITHUB_RUN_ID"
             printf -- '- source_base_sha: `%s`\n' "$START_HEAD"
+            printf -- '- start_validation_mode: `%s`\n' "${START_VALIDATION_MODE:-CANONICAL}"
+            printf -- '- start_canonical_validation_run: `%s`\n' "${START_VALIDATION_RUN_ID:-}"
+            printf -- '- start_canonical_result: `%s`\n' "${START_CANONICAL_RESULT:-SUCCESS}"
+            printf -- '- start_external_validation_run: `%s`\n' "${START_EXTERNAL_VALIDATION_RUN_ID:-}"
             printf -- '- final_pr_head: `%s`\n' "$DIRECT_HEAD"
             printf -- '- exact_pr_head_validation_run: `%s`\n' "$PR_HEAD_RUN_ID"
+            printf -- '- pr_head_validation_mode: `%s`\n' "${PR_HEAD_VALIDATION_MODE:-CANONICAL}"
+            printf -- '- pr_head_canonical_result: `%s`\n' "${PR_HEAD_CANONICAL_RESULT:-SUCCESS}"
+            printf -- '- pr_head_external_validation_run: `%s`\n' "${PR_HEAD_EXTERNAL_VALIDATION_RUN_ID:-}"
             printf -- '- integrated_sha: `%s`\n' "$INTEGRATED_SHA"
             printf -- '- exact_integrated_sha_validation_run: `%s`\n' "$INTEGRATED_RUN_ID"
+            printf -- '- integrated_validation_mode: `%s`\n' "${INTEGRATED_VALIDATION_MODE:-CANONICAL}"
+            printf -- '- integrated_canonical_result: `%s`\n' "${INTEGRATED_CANONICAL_RESULT:-SUCCESS}"
+            printf -- '- integrated_external_validation_run: `%s`\n' "${INTEGRATED_EXTERNAL_VALIDATION_RUN_ID:-}"
             printf -- '- provider/runtime/device/physical: `%s`\n' "NOT_RUN"
+            printf -- '- canonical_product_workflow: `%s`\n' "NOT_SUBSTITUTED"
           } > "$result_file"
           gh pr comment "$PR_NUMBER" --repo "$PRODUCT_REPOSITORY" --body-file "$result_file"
           {

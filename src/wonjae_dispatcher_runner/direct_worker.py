@@ -30,6 +30,10 @@ class DirectWorkerError(RuntimeError):
     """Raised when a Direct Worker request violates the registered contract."""
 
 
+class DirectWorkerTurnTimeout(DirectWorkerError):
+    """The exact 480-second turn deadline, distinct from other failures."""
+
+
 @dataclass(frozen=True)
 class DirectWorkerHandoff:
     project: str
@@ -637,7 +641,7 @@ def run_direct_worker(
                 sandbox=Sandbox.workspace_write,
             )
     except RepairPlanTimeout as exc:
-        raise DirectWorkerError("Direct Worker Codex turn timed out") from exc
+        raise DirectWorkerTurnTimeout("Direct Worker Codex turn timed out") from exc
 
     status_value = str(getattr(result.status, "value", result.status)).lower()
     if status_value != "completed" or result.error is not None:

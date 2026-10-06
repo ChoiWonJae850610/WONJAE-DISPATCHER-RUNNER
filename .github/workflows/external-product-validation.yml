@@ -1,4 +1,5 @@
 name: External Product Validation
+run-name: ${{ github.event_name == 'issues' && github.event.issue.title || format('External Product Validation {0} {1}', inputs.project, inputs.source_sha) }}
 
 on:
   issues:

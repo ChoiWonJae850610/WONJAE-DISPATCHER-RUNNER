@@ -6,7 +6,11 @@ import os
 from pathlib import Path
 
 from wonjae_dispatcher_runner.auth_store import restore_auth_json
-from wonjae_dispatcher_runner.direct_worker import load_direct_worker_route, run_direct_worker
+from wonjae_dispatcher_runner.direct_worker import (
+    DirectWorkerTurnTimeout,
+    load_direct_worker_route,
+    run_direct_worker,
+)
 
 
 def main() -> int:
@@ -28,13 +32,13 @@ def main() -> int:
         if path.is_file():
             failure = path.read_text(encoding="utf-8", errors="replace")
 
-    result = run_direct_worker(
-        Path(args.product_checkout).resolve(),
-        route,
-        args.command,
-        codex_home,
-        failure,
-    )
+    try:
+        result = run_direct_worker(
+            Path(args.product_checkout).resolve(), route, args.command, codex_home, failure,
+        )
+    except DirectWorkerTurnTimeout:
+        print("INITIAL_CODEX_TIMEOUT_480_SECONDS", flush=True)
+        return 75
     Path(args.result_file).write_text(
         json.dumps(
             {
