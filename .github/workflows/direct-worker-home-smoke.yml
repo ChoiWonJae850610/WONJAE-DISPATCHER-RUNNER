@@ -41,12 +41,25 @@ jobs:
         working-directory: ${{ steps.storage.outputs.path }}/runner
         run: |
           set -euo pipefail
-          PYTHONPATH=src ../venv/bin/python scripts/direct_worker_isolation_smoke.py
-          ../venv/bin/pytest tests/test_home_isolation.py tests/test_direct_worker.py tests/test_initial_turn_recovery.py tests/test_execution_state.py
+          restore_workspace() {
+            chmod u+rwx "$GITHUB_WORKSPACE" || true
+            chmod -R u+w "$GITHUB_WORKSPACE" || true
+          }
+          trap restore_workspace EXIT
+          chmod -R a-w "$GITHUB_WORKSPACE"
+          chmod a-w "$GITHUB_WORKSPACE"
+          test ! -w "$GITHUB_WORKSPACE"
+          PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src \
+            ../venv/bin/python scripts/direct_worker_isolation_smoke.py
+          PYTHONDONTWRITEBYTECODE=1 ../venv/bin/pytest -p no:cacheprovider \
+            tests/test_home_isolation.py tests/test_direct_worker.py \
+            tests/test_initial_turn_recovery.py tests/test_execution_state.py
           printf 'runner_name=%s\nos=%s\n' "$RUNNER_NAME" "$RUNNER_OS" >> "$GITHUB_STEP_SUMMARY"
           printf 'WSL2 kernel: ' >> "$GITHUB_STEP_SUMMARY"
           uname -r >> "$GITHUB_STEP_SUMMARY"
           echo 'model/provider/product-publication: NOT_RUN' >> "$GITHUB_STEP_SUMMARY"
+          trap - EXIT
+          restore_workspace
       - name: Cleanup exact ephemeral smoke workspace
         if: ${{ always() && steps.storage.outputs.path != '' }}
         run: |
