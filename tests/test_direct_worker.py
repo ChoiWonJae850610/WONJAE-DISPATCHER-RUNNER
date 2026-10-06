@@ -202,3 +202,14 @@ def test_source_ready_prompt_makes_handoff_sequencing_authoritative(tmp_path):
     assert "SOURCE_READY handoff explicitly authorizes source-only schema/migration FILE" in prompt
     assert "never authorizes applying that migration to a live provider" in prompt
     assert "Execute exactly the SOURCE_READY handoff task: Current handoff task" in prompt
+
+
+def test_direct_worker_workflow_prepares_linux_user_namespaces():
+    root = Path(__file__).resolve().parents[1]
+    workflow = (root / ".github/workflows/direct-worker-core.yml").read_text(
+        encoding="utf-8"
+    )
+    assert "Prepare Linux sandbox prerequisites" in workflow
+    assert "kernel.unprivileged_userns_clone=1" in workflow
+    assert "kernel.apparmor_restrict_unprivileged_userns=0" in workflow
+    assert "unshare -Urn true" in workflow
