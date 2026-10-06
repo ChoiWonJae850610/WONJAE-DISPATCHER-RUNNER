@@ -48,3 +48,7 @@ jobs:
             sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
           fi
           PYTHONPATH=src python scripts/direct_worker_isolation_smoke.py
+          mkdir -p "$GITHUB_WORKSPACE/.direct-worker-production-tmp"
+          TMPDIR="$GITHUB_WORKSPACE/.direct-worker-production-tmp" \
+            PYTHONPATH=src python scripts/direct_worker_isolation_smoke.py
+          rm -rf "$GITHUB_WORKSPACE/.direct-worker-production-tmp"
