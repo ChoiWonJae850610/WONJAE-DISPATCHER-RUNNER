@@ -10,6 +10,11 @@ from pathlib import Path
 import yaml
 from openai_codex import ApprovalMode, Codex, CodexConfig, Sandbox
 
+from .execution_state import (
+    ExecutionStateError,
+    ProductExecutionState,
+    load_product_execution_state,
+)
 from .repair_timeout import RepairPlanTimeout, repair_plan_deadline
 
 RUNNER_REPOSITORY = "ChoiWonJae850610/WONJAE-DISPATCHER-RUNNER"
@@ -17,7 +22,7 @@ RUNNER_WORKFLOW = ".github/workflows/direct-worker.yml"
 ALLOWED_COMMANDS = {"next", "retry", "resume"}
 HANDOFF_ACTION_TYPES = {"SOURCE_READY", "MANUAL_QA", "PROVIDER_GATE", "DECISION_REQUIRED", "NONE"}
 PROTECTED_SOURCE_PATHS = {"AGENTS.md", "PROJECT_RULES.md", ".gitmodules"}
-PROTECTED_SOURCE_PREFIXES = (".github/",)
+PROTECTED_SOURCE_PREFIXES = (".github/", ".wonjae/")
 
 
 
@@ -53,6 +58,7 @@ class DirectWorkerRoute:
     validation_workflow_name: str
     runner_repository: str
     runner_workflow: str
+    state_path: str | None
     handoff_path: str | None
     handoff: DirectWorkerHandoff | None
 
@@ -242,7 +248,19 @@ def _load_execution_handoff(
     )
 
 
-def require_next_source_ready(route: DirectWorkerRoute, starting_sha: str) -> None:
+def require_next_source_ready(
+    route: DirectWorkerRoute,
+    starting_sha: str,
+    execution_state: ProductExecutionState | None = None,
+) -> None:
+    if execution_state is not None:
+        if execution_state.next_action.type != "SOURCE_READY":
+            raise DirectWorkerError(
+                "next source work is blocked by product execution state: "
+                f"{execution_state.next_action.type}"
+            )
+        return
+
     handoff = route.handoff
     if handoff is None:
         return
@@ -309,9 +327,15 @@ def load_direct_worker_route(registry_path: Path, project: str) -> DirectWorkerR
     for relative in (startup_entry, project_rules, *canonical_docs):
         _safe_relative(relative, "registry")
 
+    state_path = execution.get("state_path")
+    if state_path is not None:
+        if not isinstance(state_path, str) or not state_path.strip():
+            raise DirectWorkerError("registry state_path is invalid")
+        _safe_relative(state_path, "execution state")
+
     handoff_path = execution.get("handoff_path")
     handoff = None
-    if handoff_path is not None:
+    if state_path is None and handoff_path is not None:
         if not isinstance(handoff_path, str) or not handoff_path.strip():
             raise DirectWorkerError("registry handoff_path is invalid")
         handoff = _load_execution_handoff(
@@ -333,6 +357,7 @@ def load_direct_worker_route(registry_path: Path, project: str) -> DirectWorkerR
         validation_workflow_name=workflow_name,
         runner_repository=execution["runner_repository"],
         runner_workflow=execution["runner_workflow"],
+        state_path=state_path,
         handoff_path=handoff_path,
         handoff=handoff,
     )
@@ -344,11 +369,38 @@ def _prompt(
     starting_sha: str,
     checkout_branch: str,
     validation_failure: str,
+    execution_state: ProductExecutionState | None = None,
 ) -> str:
     docs = "\n".join(f"- {path}" for path in route.canonical_docs)
     failure = validation_failure[-80_000:] if validation_failure else "(none)"
     handoff = route.handoff
-    if command == "next" and handoff is not None:
+    if command == "next" and execution_state is not None:
+        action = execution_state.next_action
+        scope = "\n".join(f"- {item}" for item in action.source_scope)
+        retry_note = (
+            "Trusted Runner product execution state snapshot "
+            f"(read from protected {execution_state.path} at the exact starting checkout):\n"
+            f"- project: {execution_state.project}\n"
+            f"- next_action.type: {action.type}\n"
+            f"- next_action.title: {action.title}\n"
+            f"- source_task_id: {action.source_task_id or '(none)'}\n"
+            f"- authorized source scope:\n{scope}\n\n"
+            f"Execute exactly the SOURCE_READY product-state task: {action.title}\n"
+            f"Source task ID: {action.source_task_id or '(none)'}\n"
+            f"Authorized source scope:\n{scope}"
+        )
+        authority_description = (
+            "For command next, the trusted Runner read the protected product-owned "
+            f"execution state at {execution_state.path} from this exact checkout and "
+            "independently verified the exact starting HEAD against the registered "
+            "GitHub Actions workflow before the sandbox started. The execution-state "
+            "file is protected from model mutation. Its next-action type, task title and "
+            "source scope supersede older sequencing prose retained in product documents. "
+            "A SOURCE_READY state authorizes source-only preparation inside that scope; "
+            "it never authorizes a live provider, Production, credential, device or "
+            "physical action."
+        )
+    elif command == "next" and handoff is not None:
         scope = "\n".join(f"- {item}" for item in handoff.source_scope)
         trusted_handoff = (
             "Trusted Runner execution handoff snapshot (already read and validated from "
@@ -375,6 +427,13 @@ def _prompt(
             f"Source task ID: {handoff.source_task_id or '(none)'}\n"
             f"Authorized source scope:\n{scope}"
         )
+        authority_description = (
+            "For command next, the trusted Runner has already read and validated the "
+            "legacy DEV-CONTROL execution handoff before starting this product-only "
+            "sandbox. Use only the trusted handoff snapshot below; product rules still "
+            "govern provider, Production, credential, destructive and physical/device "
+            "approval boundaries."
+        )
     else:
         retry_note = (
             "This is a retry/resume of the one existing Direct Worker PR. "
@@ -383,6 +442,10 @@ def _prompt(
             else
             "Select the smallest complete already-decided next SOURCE task from the "
             "current canonical repository documents."
+        )
+        authority_description = (
+            "This run uses the legacy repository-document fallback because no registered "
+            "product execution-state path or execution handoff is available."
         )
     return f"""You are the single source-writing Direct Worker for {route.project}.
 
@@ -407,17 +470,7 @@ Before editing, read these files from the checkout:
 Then inspect task-relevant source and repository-owned current/next-work documentation.
 GitHub checkout state and repository safety/approval rules are authoritative; chat history is not.
 
-For command next, the trusted Runner has already read and validated the registered
-DEV-CONTROL execution handoff before starting this product-only sandbox. The handoff is
-the current execution-routing authority, but its file is intentionally NOT mounted into
-this checkout. Use only the trusted handoff snapshot supplied below; do not require or
-attempt a second handoff read. Its exact HEAD, validation evidence, action type, task title
-and source scope supersede older task-state, "current task", "next task", attempt or
-sequencing prose retained in product documents or project-rules history. Historical task
-sections remain evidence only. Product rules still govern durable safety, provider,
-Production, credential, destructive-operation and physical/device approval boundaries.
-A SOURCE_READY handoff explicitly authorizes source-only schema/migration FILE preparation
-inside its source scope; it never authorizes applying that migration to a live provider.
+{authority_description}
 
 {retry_note}
 
@@ -479,8 +532,18 @@ def run_direct_worker(
         raise DirectWorkerError("unsupported Direct Worker command")
     starting_sha = git_head(repo_path)
     checkout_branch = _git(repo_path, "branch", "--show-current").strip() or "(detached)"
+    execution_state = None
+    if route.state_path:
+        try:
+            execution_state = load_product_execution_state(
+                repo_path,
+                route.state_path,
+                route.project,
+            )
+        except ExecutionStateError as exc:
+            raise DirectWorkerError(str(exc)) from exc
     if command == "next":
-        require_next_source_ready(route, starting_sha)
+        require_next_source_ready(route, starting_sha, execution_state)
     if changed_paths(repo_path):
         raise DirectWorkerError("product checkout must be clean before Direct Worker")
     git_metadata = git_metadata_snapshot(repo_path)
@@ -567,6 +630,7 @@ def run_direct_worker(
                     starting_sha,
                     checkout_branch,
                     validation_failure,
+                    execution_state,
                 ),
                 approval_mode=ApprovalMode.deny_all,
                 output_schema=output_schema,
