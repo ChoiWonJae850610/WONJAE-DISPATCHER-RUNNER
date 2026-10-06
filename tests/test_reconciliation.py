@@ -83,3 +83,22 @@ def test_reconciliation_workflow_has_explicit_owner_replay_and_started_evidence(
     assert "GitHub validation wait is not an Owner action" in core
     assert '.state == "closed" and .merged_at != null' in core
     assert "ALREADY_MERGED" in core
+
+
+def test_reconciliation_has_scheduled_sweeper_fallback() -> None:
+    root = Path(__file__).resolve().parents[1]
+    adapter = (root / ".github/workflows/reconciliation-finalizer.yml").read_text(
+        encoding="utf-8"
+    )
+    sweeper = (root / ".github/workflows/reconciliation-sweeper.yml").read_text(
+        encoding="utf-8"
+    )
+    assert "workflow_dispatch:" in adapter
+    assert "inputs.project == 'WAFL'" in adapter
+    assert "fromJSON(inputs.issue_number)" in adapter
+    assert 'cron: "*/5 * * * *"' in sweeper
+    assert "actions: write" in sweeper
+    assert "actions/workflows/reconciliation-finalizer.yml/dispatches" in sweeper
+    assert 'startswith("STARTED: reconciliation finalizer run ")' in sweeper
+    assert 'startswith("FAILED: reconciliation finalizer run ")' in sweeper
+    assert "refusing ambiguous sweep" in sweeper
