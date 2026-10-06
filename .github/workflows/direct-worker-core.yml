@@ -40,8 +40,6 @@ jobs:
     env:
       DW_JOB_ROOT: ${{ github.workspace }}/direct-${{ github.run_id }}-${{ github.run_attempt }}
       DW_RUNNER: ${{ github.workspace }}/direct-${{ github.run_id }}-${{ github.run_attempt }}/runner
-      DW_SOURCE_ROOT: ${{ runner.temp }}/wonjae-direct-source-${{ github.run_id }}-${{ github.run_attempt }}
-      DW_PRODUCT: ${{ runner.temp }}/wonjae-direct-source-${{ github.run_id }}-${{ github.run_attempt }}/product
       DIRECT_WORKER_HOME_ISOLATION: ${{ inputs.execution_host == 'home-linux' && '1' || '0' }}
     steps:
       - name: Reserve fresh trusted job storage
@@ -54,19 +52,25 @@ jobs:
             home-linux|github-hosted) ;;
             *) echo '::error::Unknown execution host'; exit 1 ;;
           esac
+          source_parent="$(dirname "$(dirname "$GITHUB_WORKSPACE")")"
+          source_root="$source_parent/_wonjae-direct-source-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          product_root="$source_root/product"
+          test "$source_parent" != "$GITHUB_WORKSPACE"
+          test "$source_parent" != "$RUNNER_TEMP"
           test ! -e "$DW_JOB_ROOT" && test ! -L "$DW_JOB_ROOT"
-          test ! -e "$DW_SOURCE_ROOT" && test ! -L "$DW_SOURCE_ROOT"
+          test ! -e "$source_root" && test ! -L "$source_root"
           test -z "$(find "$GITHUB_WORKSPACE" -mindepth 1 -maxdepth 1 -name 'direct-*' -print -quit)" || {
             echo '::error::Unexpected prior trusted-workspace residue; inspect exact runner storage before retry.'
             exit 1
           }
-          mkdir "$DW_JOB_ROOT" "$DW_SOURCE_ROOT"
-          mkdir "$DW_JOB_ROOT/trusted-home" "$DW_JOB_ROOT/gh" "$DW_SOURCE_ROOT/tmp"
+          mkdir "$DW_JOB_ROOT" "$source_root"
+          mkdir "$DW_JOB_ROOT/trusted-home" "$DW_JOB_ROOT/gh"
           echo "path=direct-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
           echo "HOME=$DW_JOB_ROOT/trusted-home" >> "$GITHUB_ENV"
           echo "GH_CONFIG_DIR=$DW_JOB_ROOT/gh" >> "$GITHUB_ENV"
           echo "PIP_NO_CACHE_DIR=1" >> "$GITHUB_ENV"
-          echo "TMPDIR=$DW_SOURCE_ROOT/tmp" >> "$GITHUB_ENV"
+          echo "DW_SOURCE_ROOT=$source_root" >> "$GITHUB_ENV"
+          echo "DW_PRODUCT=$product_root" >> "$GITHUB_ENV"
 
       - name: Checkout trusted runner
         uses: actions/checkout@v6
@@ -251,7 +255,8 @@ jobs:
           set -euo pipefail
           if [ "$DIRECT_WORKER_HOME_ISOLATION" = 1 ]; then
             # Provisioning is an Owner host operation, never a privileged job mutation.
-            PYTHONPATH=src python scripts/direct_worker_isolation_smoke.py
+            DIRECT_WORKER_SMOKE_PARENT="$DW_SOURCE_ROOT" \
+              PYTHONPATH=src python scripts/direct_worker_isolation_smoke.py
             exit 0
           fi
           current_userns="$(sysctl -n kernel.unprivileged_userns_clone 2>/dev/null || true)"
@@ -596,7 +601,8 @@ jobs:
         run: |
           set -euo pipefail
           expected_trusted="$GITHUB_WORKSPACE/direct-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
-          expected_source="$RUNNER_TEMP/wonjae-direct-source-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          source_parent="$(dirname "$(dirname "$GITHUB_WORKSPACE")")"
+          expected_source="$source_parent/_wonjae-direct-source-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
           test "$DW_JOB_ROOT" = "$expected_trusted"
           test "$(realpath -m "$DW_JOB_ROOT")" = "$expected_trusted"
           test "$DW_SOURCE_ROOT" = "$expected_source"
