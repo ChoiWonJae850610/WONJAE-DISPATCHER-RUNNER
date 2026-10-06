@@ -375,9 +375,17 @@ validation. A failed validation leaves the PR open for the `retry` command.
 
 Direct Worker remains source-only. Provider/Production/deployment/payment/credential/signing/
 device/physical/destructive actions remain separate gates. WAFL, CLASSMO, ESC and MUVEL are
-registered Direct Worker products; KDN remains excluded. During the product-owned execution
-state rollout, a registered `execution.state_path` takes precedence over the older
-DEV-CONTROL handoff snapshot. The trusted runner requires exact active-HEAD push validation
-before a new `next`, protects the product state from Codex writes, and commits the
-predeclared source-success transition in the same Product PR so no separate ChatGPT
-handoff refresh is required after source integration.
+registered Direct Worker products; KDN remains excluded. A registered
+`execution.state_path` takes precedence over the older DEV-CONTROL handoff snapshot.
+The trusted runner requires exact active-HEAD push validation before a new `next`,
+protects the product state from Codex writes, and commits the predeclared source-success
+transition in the same Product PR so no separate ChatGPT handoff refresh is required after
+source integration.
+
+For bounded reconciliation PRs that only synchronize product canonical documentation and
+the protected execution state, **Reconciliation Finalizer** performs exact PR-head
+validation, exact-head merge and exact integrated-SHA validation. Owner issue events are
+the normal wake. **Reconciliation Sweeper** runs every five minutes as a fallback and
+workflow-dispatches the same finalizer only when one exact open Owner-authored
+reconciliation issue exists for that project and has no STARTED/PASS/FAILED finalizer
+evidence. This fallback adds no source-task, provider, Production, device or KDN authority.

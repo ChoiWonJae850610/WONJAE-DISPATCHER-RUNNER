@@ -5,6 +5,25 @@ on:
     types: [opened]
   issue_comment:
     types: [created]
+  workflow_dispatch:
+    inputs:
+      project:
+        description: Registered reconciliation project
+        required: true
+        type: choice
+        options:
+          - WAFL
+          - CLASSMO
+          - ESC
+          - MUVEL
+      issue_number:
+        description: Existing reconciliation issue number
+        required: true
+        type: string
+      issue_body:
+        description: Exact existing reconciliation issue JSON body
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -14,23 +33,29 @@ jobs:
   wafl:
     if: >-
       ${{
-        github.event.issue.state == 'open' &&
-        github.event.issue.user.login == github.repository_owner &&
-        startsWith(github.event.issue.title, '[RECONCILE][WAFL] ') &&
         (
-          github.event_name == 'issues' ||
+          github.event_name == 'workflow_dispatch' &&
+          inputs.project == 'WAFL'
+        ) ||
+        (
+          github.event.issue.state == 'open' &&
+          github.event.issue.user.login == github.repository_owner &&
+          startsWith(github.event.issue.title, '[RECONCILE][WAFL] ') &&
           (
-            github.event_name == 'issue_comment' &&
-            github.event.comment.user.login == github.repository_owner &&
-            github.event.comment.body == '[RECONCILE-RUN]'
+            github.event_name == 'issues' ||
+            (
+              github.event_name == 'issue_comment' &&
+              github.event.comment.user.login == github.repository_owner &&
+              github.event.comment.body == '[RECONCILE-RUN]'
+            )
           )
         )
       }}
     uses: ./.github/workflows/reconciliation-finalizer-core.yml
     with:
       project: WAFL
-      issue_number: ${{ github.event.issue.number }}
-      issue_body: ${{ github.event.issue.body }}
+      issue_number: ${{ github.event_name == 'workflow_dispatch' && fromJSON(inputs.issue_number) || github.event.issue.number }}
+      issue_body: ${{ github.event_name == 'workflow_dispatch' && inputs.issue_body || github.event.issue.body }}
     secrets:
       product_write_token: ${{ secrets.WAFL_WRITE_TOKEN }}
       control_read_token: ${{ secrets.CONTROL_READ_TOKEN }}
@@ -38,23 +63,29 @@ jobs:
   classmo:
     if: >-
       ${{
-        github.event.issue.state == 'open' &&
-        github.event.issue.user.login == github.repository_owner &&
-        startsWith(github.event.issue.title, '[RECONCILE][CLASSMO] ') &&
         (
-          github.event_name == 'issues' ||
+          github.event_name == 'workflow_dispatch' &&
+          inputs.project == 'CLASSMO'
+        ) ||
+        (
+          github.event.issue.state == 'open' &&
+          github.event.issue.user.login == github.repository_owner &&
+          startsWith(github.event.issue.title, '[RECONCILE][CLASSMO] ') &&
           (
-            github.event_name == 'issue_comment' &&
-            github.event.comment.user.login == github.repository_owner &&
-            github.event.comment.body == '[RECONCILE-RUN]'
+            github.event_name == 'issues' ||
+            (
+              github.event_name == 'issue_comment' &&
+              github.event.comment.user.login == github.repository_owner &&
+              github.event.comment.body == '[RECONCILE-RUN]'
+            )
           )
         )
       }}
     uses: ./.github/workflows/reconciliation-finalizer-core.yml
     with:
       project: CLASSMO
-      issue_number: ${{ github.event.issue.number }}
-      issue_body: ${{ github.event.issue.body }}
+      issue_number: ${{ github.event_name == 'workflow_dispatch' && fromJSON(inputs.issue_number) || github.event.issue.number }}
+      issue_body: ${{ github.event_name == 'workflow_dispatch' && inputs.issue_body || github.event.issue.body }}
     secrets:
       product_write_token: ${{ secrets.CLASSMO_WRITE_TOKEN }}
       control_read_token: ${{ secrets.CONTROL_READ_TOKEN }}
@@ -62,23 +93,29 @@ jobs:
   esc:
     if: >-
       ${{
-        github.event.issue.state == 'open' &&
-        github.event.issue.user.login == github.repository_owner &&
-        startsWith(github.event.issue.title, '[RECONCILE][ESC] ') &&
         (
-          github.event_name == 'issues' ||
+          github.event_name == 'workflow_dispatch' &&
+          inputs.project == 'ESC'
+        ) ||
+        (
+          github.event.issue.state == 'open' &&
+          github.event.issue.user.login == github.repository_owner &&
+          startsWith(github.event.issue.title, '[RECONCILE][ESC] ') &&
           (
-            github.event_name == 'issue_comment' &&
-            github.event.comment.user.login == github.repository_owner &&
-            github.event.comment.body == '[RECONCILE-RUN]'
+            github.event_name == 'issues' ||
+            (
+              github.event_name == 'issue_comment' &&
+              github.event.comment.user.login == github.repository_owner &&
+              github.event.comment.body == '[RECONCILE-RUN]'
+            )
           )
         )
       }}
     uses: ./.github/workflows/reconciliation-finalizer-core.yml
     with:
       project: ESC
-      issue_number: ${{ github.event.issue.number }}
-      issue_body: ${{ github.event.issue.body }}
+      issue_number: ${{ github.event_name == 'workflow_dispatch' && fromJSON(inputs.issue_number) || github.event.issue.number }}
+      issue_body: ${{ github.event_name == 'workflow_dispatch' && inputs.issue_body || github.event.issue.body }}
     secrets:
       product_write_token: ${{ secrets.ESC_WRITE_TOKEN }}
       control_read_token: ${{ secrets.CONTROL_READ_TOKEN }}
@@ -86,23 +123,29 @@ jobs:
   muvel:
     if: >-
       ${{
-        github.event.issue.state == 'open' &&
-        github.event.issue.user.login == github.repository_owner &&
-        startsWith(github.event.issue.title, '[RECONCILE][MUVEL] ') &&
         (
-          github.event_name == 'issues' ||
+          github.event_name == 'workflow_dispatch' &&
+          inputs.project == 'MUVEL'
+        ) ||
+        (
+          github.event.issue.state == 'open' &&
+          github.event.issue.user.login == github.repository_owner &&
+          startsWith(github.event.issue.title, '[RECONCILE][MUVEL] ') &&
           (
-            github.event_name == 'issue_comment' &&
-            github.event.comment.user.login == github.repository_owner &&
-            github.event.comment.body == '[RECONCILE-RUN]'
+            github.event_name == 'issues' ||
+            (
+              github.event_name == 'issue_comment' &&
+              github.event.comment.user.login == github.repository_owner &&
+              github.event.comment.body == '[RECONCILE-RUN]'
+            )
           )
         )
       }}
     uses: ./.github/workflows/reconciliation-finalizer-core.yml
     with:
       project: MUVEL
-      issue_number: ${{ github.event.issue.number }}
-      issue_body: ${{ github.event.issue.body }}
+      issue_number: ${{ github.event_name == 'workflow_dispatch' && fromJSON(inputs.issue_number) || github.event.issue.number }}
+      issue_body: ${{ github.event_name == 'workflow_dispatch' && inputs.issue_body || github.event.issue.body }}
     secrets:
       product_write_token: ${{ secrets.MUVEL_WRITE_TOKEN }}
       control_read_token: ${{ secrets.CONTROL_READ_TOKEN }}
