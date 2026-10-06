@@ -71,7 +71,7 @@ jobs:
           token: ${{ secrets.WAFL_WRITE_TOKEN }}
           path: product
           persist-credentials: false
-          fetch-depth: 1
+          fetch-depth: 0
 
       - name: Verify exact checkout
         shell: pwsh
