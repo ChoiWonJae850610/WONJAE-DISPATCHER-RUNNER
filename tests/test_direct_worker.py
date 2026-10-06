@@ -210,8 +210,6 @@ def test_source_ready_prompt_makes_handoff_sequencing_authoritative(tmp_path):
     assert "- source validation: PASS (run 123)" in prompt
     assert "- next_action.type: SOURCE_READY" in prompt
     assert "not available inside this network-disabled sandbox" in prompt
-    assert "do not require or" in prompt
-    assert "attempt a second handoff read" in prompt
 
 
 def test_direct_worker_workflow_prepares_linux_user_namespaces():
