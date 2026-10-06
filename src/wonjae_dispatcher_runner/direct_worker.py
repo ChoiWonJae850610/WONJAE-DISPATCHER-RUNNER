@@ -376,7 +376,16 @@ Before editing, read these files from the checkout:
 {docs}
 
 Then inspect task-relevant source and repository-owned current/next-work documentation.
-GitHub checkout state and repository rules are authoritative; chat history is not.
+GitHub checkout state and repository safety/approval rules are authoritative; chat history is not.
+
+For command next, the registered DEV-CONTROL execution handoff is the current
+execution-routing authority. Its exact HEAD, validation evidence, action type, task title
+and source scope supersede older task-state, "current task", "next task", attempt or
+sequencing prose retained in product documents or project-rules history. Historical task
+sections remain evidence only. Product rules still govern durable safety, provider,
+Production, credential, destructive-operation and physical/device approval boundaries.
+A SOURCE_READY handoff explicitly authorizes source-only schema/migration FILE preparation
+inside its source scope; it never authorizes applying that migration to a live provider.
 
 {retry_note}
 
