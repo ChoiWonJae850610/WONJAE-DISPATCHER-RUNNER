@@ -228,11 +228,13 @@ def test_direct_worker_core_separates_trusted_and_product_workspaces():
     assert 'echo "DW_PRODUCT=$product_root" >> "$GITHUB_ENV"' in raw
     assert 'echo "TMPDIR=' not in raw
     assert "Checkout product outside trusted workflow workspace" in raw
-    assert 'DIRECT_WORKER_SMOKE_PARENT="$DW_SOURCE_ROOT"' in raw
+    assert 'chmod 0500 "$DW_SOURCE_ROOT"' in raw
+    assert 'DIRECT_WORKER_FORBIDDEN_WRITE_ROOT="$DW_SOURCE_ROOT"' in raw
     clone_command = (
         'git clone --no-checkout "https://github.com/$PRODUCT_REPOSITORY.git" '
         '"$DW_PRODUCT"'
     )
     assert clone_command in raw
     assert 'cd "$DW_PRODUCT"' in raw
+    assert 'chmod 0700 "$DW_SOURCE_ROOT"' in raw
     assert 'rm -rf --one-file-system -- "$DW_SOURCE_ROOT"' in raw
