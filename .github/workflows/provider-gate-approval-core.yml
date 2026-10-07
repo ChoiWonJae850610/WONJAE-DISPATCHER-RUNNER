@@ -199,7 +199,6 @@ jobs:
               "PROVIDER_COMPATIBILITY_BASE_SHA" => config["compatibility_base_sha"],
               "PROVIDER_MESSAGE" => "#{label} #{ENV.fetch('SOURCE_SHA')[0,12]}",
             )
-          end
           elsif executor == "wafl_eas_update"
             abort("WAFL EAS update executor routed to another project") unless project == "WAFL"
             abort("WAFL EAS update provider gate mismatch") unless gate == "preview_ios_ota_update"
@@ -430,7 +429,7 @@ jobs:
           git -C .approval/product merge-base --is-ancestor "$PROVIDER_COMPATIBILITY_BASE_SHA" "$SOURCE_SHA"
           python scripts/provider_action.py check-ota \
             --repo "$GITHUB_WORKSPACE/.approval/product" \
-            --project CLASSMO \
+            --project "$PROJECT" \
             --base "$PROVIDER_COMPATIBILITY_BASE_SHA" \
             --head "$SOURCE_SHA" \
             --working-directory "$PROVIDER_WORKING_DIRECTORY"
@@ -439,10 +438,22 @@ jobs:
           from pathlib import Path
           root = Path(".approval/product") / os.environ["PROVIDER_WORKING_DIRECTORY"]
           app = json.loads((root / "app.json").read_text(encoding="utf-8"))["expo"]
-          if app.get("version") != os.environ["PROVIDER_RUNTIME_VERSION"]:
-              raise SystemExit("CLASSMO preview OTA app/runtime version mismatch")
-          if app.get("runtimeVersion") != {"policy": "appVersion"}:
-              raise SystemExit("CLASSMO preview OTA runtimeVersion policy changed")
+          eas = json.loads((root / "eas.json").read_text(encoding="utf-8"))
+          project = os.environ["PROJECT"]
+          runtime = os.environ["PROVIDER_RUNTIME_VERSION"]
+          if project == "CLASSMO":
+              if app.get("version") != runtime:
+                  raise SystemExit("CLASSMO preview OTA app/runtime version mismatch")
+              if app.get("runtimeVersion") != {"policy": "appVersion"}:
+                  raise SystemExit("CLASSMO preview OTA runtimeVersion policy changed")
+          elif project == "WAFL":
+              if app.get("runtimeVersion") != runtime:
+                  raise SystemExit("WAFL preview OTA runtimeVersion mismatch")
+              preview = eas.get("build", {}).get("preview", {})
+              if preview.get("distribution") != "internal" or preview.get("environment") != "development" or preview.get("channel") != "alpha83-p5":
+                  raise SystemExit("WAFL preview EAS profile mismatch")
+          else:
+              raise SystemExit("unexpected EAS update project")
           PY
 
       - name: EAS · publish compatible preview OTA
@@ -454,13 +465,14 @@ jobs:
           set -euo pipefail
           cd ".approval/product/$PROVIDER_WORKING_DIRECTORY"
           test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          if [ -n "${PROVIDER_APP_VARIANT:-}" ]; then export APP_VARIANT="$PROVIDER_APP_VARIANT"; fi
           eas update \
             --channel "$PROVIDER_CHANNEL" \
             --environment "$PROVIDER_ENVIRONMENT" \
             --platform "$PROVIDER_PLATFORM" \
             --message "$PROVIDER_MESSAGE" \
             --json \
-            --non-interactive > "$RUNNER_TEMP/classmo-eas-update.json"
+            --non-interactive > "$RUNNER_TEMP/eas-update.json"
 
       - name: EAS · resolve preview OTA group
         if: env.PROVIDER_EXECUTOR == 'classmo_eas_update' || env.PROVIDER_EXECUTOR == 'wafl_eas_update'
@@ -476,12 +488,12 @@ jobs:
             --runtime-version "$PROVIDER_RUNTIME_VERSION" \
             --limit 25 \
             --json \
-            --non-interactive > "$RUNNER_TEMP/classmo-eas-update-list.json"
+            --non-interactive > "$RUNNER_TEMP/eas-update-list.json"
           cd "$GITHUB_WORKSPACE"
-          update_env="$RUNNER_TEMP/classmo-eas-update.env"
+          update_env="$RUNNER_TEMP/eas-update.env"
           : > "$update_env"
           python scripts/provider_action.py parse-update-group \
-            --input "$RUNNER_TEMP/classmo-eas-update-list.json" \
+            --input "$RUNNER_TEMP/eas-update-list.json" \
             --message "$PROVIDER_MESSAGE" \
             --runtime-version "$PROVIDER_RUNTIME_VERSION" \
             --platform "$PROVIDER_PLATFORM" \
@@ -497,12 +509,12 @@ jobs:
           set -euo pipefail
           test -n "${EAS_UPDATE_GROUP_ID:-}"
           cd ".approval/product/$PROVIDER_WORKING_DIRECTORY"
-          eas update:view "$EAS_UPDATE_GROUP_ID" --json > "$RUNNER_TEMP/classmo-eas-update-view.json"
+          eas update:view "$EAS_UPDATE_GROUP_ID" --json > "$RUNNER_TEMP/eas-update-view.json"
           cd "$GITHUB_WORKSPACE"
-          update_view_env="$RUNNER_TEMP/classmo-eas-update-view.env"
+          update_view_env="$RUNNER_TEMP/eas-update-view.env"
           : > "$update_view_env"
           python scripts/provider_action.py parse-update-view \
-            --input "$RUNNER_TEMP/classmo-eas-update-view.json" \
+            --input "$RUNNER_TEMP/eas-update-view.json" \
             --group-id "$EAS_UPDATE_GROUP_ID" \
             --message "$PROVIDER_MESSAGE" \
             --runtime-version "$PROVIDER_RUNTIME_VERSION" \
@@ -514,7 +526,7 @@ jobs:
           cat "$update_view_env" >> "$GITHUB_ENV"
           test -n "$EAS_UPDATE_ID"
           {
-            echo "## CLASSMO preview iOS OTA"
+            echo "## $PROJECT preview iOS OTA"
             echo
             printf -- '- source SHA: `%s`\n' "$SOURCE_SHA"
             printf -- '- compatibility baseline: `%s`\n' "$PROVIDER_COMPATIBILITY_BASE_SHA"
