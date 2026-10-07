@@ -74,12 +74,15 @@ reads and a `:workspace` parent can reopen surrounding runtime workspace roots.
 Home execution therefore uses the `direct_source` named profile inherited from
 `:read-only`, then reopens exactly one product checkout for writes. In addition
 to root deny and protected Git/instruction/state paths, the profile receives
-explicit absolute-path deny entries for the per-run Codex auth/trusted-state root
-and trusted GitHub workflow root before the app-server starts. The only carve-out
-below a denied trusted-state ancestor is the pinned public Codex sandbox-helper
-binary directory required to launch enforcement; sibling auth/result paths stay
-denied. Network remains disabled. The debug preflight pins the same named profile,
-exact product cwd and explicit trusted-root denies. Runner Validation executes the smoke once with normal temporary storage and
+explicit absolute-path deny entries for the disjoint per-run trusted-state root
+(which contains Codex auth/results/venv) and trusted GitHub workflow root before
+the app-server source turn starts. The only carve-out below the denied
+trusted-state ancestor is the pinned public Codex sandbox-helper binary directory
+required to launch enforcement; sibling auth/result paths stay denied. Synthetic
+authenticated smoke keeps its auth as a hidden sibling of its product fixture
+under the already-restricted root rather than adding a redundant deny mount.
+Network remains disabled. The debug preflight pins the same named profile, exact
+product cwd and explicit disjoint trusted-root denies. Runner Validation executes the smoke once with normal temporary storage and
 again with the same per-user, non-`_work`, non-temporary source-parent topology
 and the same locked-parent boundary used by production. The smoke explicitly verifies that writes cannot escape the synthetic product
 root, cannot create a file in the locked production-style source parent, cannot
