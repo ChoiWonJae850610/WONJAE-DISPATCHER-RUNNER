@@ -25,7 +25,7 @@ def test_provider_gate_core_rechecks_identity_validation_and_registered_executor
     assert (
         '["approval_only", "classmo_supabase_migration", '
         '"classmo_eas_build", "classmo_eas_update", '
-        '"wafl_supabase_hardening"].include?(executor)' in raw
+        '"wafl_supabase_hardening", "wafl_eas_update"].include?(executor)' in raw
     )
     assert 'action["type"] == "PROVIDER_GATE"' in raw
     assert 'action["gate"] == gate' in raw
@@ -35,7 +35,7 @@ def test_provider_gate_core_rechecks_identity_validation_and_registered_executor
     assert "scripts/classmo_supabase_gate.py" in raw
     assert "scripts/wafl_supabase_gate.py" in raw
     assert 'executor == "classmo_eas_build"' in raw
-    assert "CLASSMO_EXPO_TOKEN is not configured" in raw
+    assert "Project-scoped Expo token is not configured" in raw
     assert 'eas build \\' in raw
     assert 'parse-eas-build-view' in raw
     assert 'build_env="$RUNNER_TEMP/classmo-eas-build.env"' in raw
@@ -97,3 +97,32 @@ def test_classmo_preview_ota_provider_gate_is_bounded_and_read_back():
     assert "parse-update-view" in raw
     assert 'device receipt / physical QA: `NOT_RUN`' in raw
 
+
+def test_wafl_preview_ota_provider_gate_is_bounded_and_read_back():
+    with open(".github/workflows/provider-gate-approval.yml", encoding="utf-8") as handle:
+        caller = handle.read()
+    with open(".github/workflows/provider-gate-approval-core.yml", encoding="utf-8") as handle:
+        raw = handle.read()
+    assert "WAFL_EXPO_TOKEN" in caller
+    assert 'executor == "wafl_eas_update"' in raw
+    assert 'gate == "preview_ios_ota_update"' in raw
+    assert '"provider" => "eas_update"' in raw
+    assert '"working_directory" => "apps/mobile"' in raw
+    assert '"platform" => "ios"' in raw
+    assert '"environment" => "development"' in raw
+    assert '"channel" => "alpha83-p5"' in raw
+    assert '"runtime_version" => "2.0.0-alpha.80-p5"' in raw
+    assert (
+        '"compatibility_base_sha" => '
+        '"bc727f87876949214b9fa29444a5a516909a5ea2"' in raw
+    )
+    assert '"PROVIDER_APP_VARIANT" => "development"' in raw
+    assert '--project "$PROJECT"' in raw
+    assert (
+        'if [ -n "${PROVIDER_APP_VARIANT:-}" ]; then '
+        'export APP_VARIANT="$PROVIDER_APP_VARIANT"; fi' in raw
+    )
+    assert 'preview.get("environment") != "development"' in raw
+    assert 'preview.get("channel") != "alpha83-p5"' in raw
+    assert 'echo "## $PROJECT preview iOS OTA"' in raw
+    assert 'device receipt / physical QA: `NOT_RUN`' in raw
