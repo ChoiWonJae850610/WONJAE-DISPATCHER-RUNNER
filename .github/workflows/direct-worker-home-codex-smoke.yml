@@ -31,7 +31,6 @@ jobs:
           mkdir "$GITHUB_WORKSPACE/$path" "$smoke_root"
           echo "path=$path" >> "$GITHUB_OUTPUT"
           echo "DW_SMOKE_ROOT=$smoke_root" >> "$GITHUB_ENV"
-          echo "DW_STATE_ROOT=$smoke_root/auth" >> "$GITHUB_ENV"
       - name: Checkout trusted default-branch exact SHA
         uses: actions/checkout@v6
         with:
