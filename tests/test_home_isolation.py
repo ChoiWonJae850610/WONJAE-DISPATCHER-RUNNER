@@ -237,36 +237,23 @@ def test_all_registered_source_callers_and_core_default_use_verified_home_route(
     assert "github.ref == 'refs/heads/main'" in job["if"]
 
 
-def test_direct_worker_core_separates_trusted_and_product_workspaces():
+def test_direct_worker_core_uses_minimal_head_match_flow():
     root = Path(__file__).resolve().parents[1]
     raw = (root / ".github/workflows/direct-worker-core.yml").read_text()
     assert "DW_JOB_ROOT: ${{ github.workspace }}/direct-" in raw
-    assert 'host_home="$(getent passwd "$(id -u)" | cut -d: -f6)"' in raw
-    assert 'source_parent="$host_home/.wonjae-direct-worker-sources"' in raw
-    assert 'source_root="$source_parent/run-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"' in raw
-    assert 'state_parent="$host_home/.wonjae-direct-worker-state"' in raw
-    assert 'state_root="$state_parent/run-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"' in raw
-    assert 'test "$source_parent" != "$RUNNER_TEMP"' in raw
-    assert 'test "$state_parent" != "$RUNNER_TEMP"' in raw
-    assert 'echo "DW_SOURCE_ROOT=$source_root" >> "$GITHUB_ENV"' in raw
-    assert 'echo "DW_PRODUCT=$product_root" >> "$GITHUB_ENV"' in raw
-    assert 'echo "DW_STATE_ROOT=$state_root" >> "$GITHUB_ENV"' in raw
-    assert 'echo "TMPDIR=' not in raw
-    assert "Checkout product outside trusted workflow workspace" in raw
-    assert 'chmod 0500 "$DW_SOURCE_ROOT"' in raw
-    assert "Lock trusted workflow workspace for source execution" in raw
-    assert 'chmod -R a-w "$DW_JOB_ROOT"' in raw
-    assert 'chmod a-w "$GITHUB_WORKSPACE"' in raw
-    assert 'DIRECT_WORKER_FORBIDDEN_WRITE_ROOT="$DW_SOURCE_ROOT"' in raw
-    assert 'DIRECT_WORKER_FORBIDDEN_STATE_ROOT="$DW_STATE_ROOT"' in raw
-    clone_command = (
-        'git clone --no-checkout "https://github.com/$PRODUCT_REPOSITORY.git" '
-        '"$DW_PRODUCT"'
-    )
-    assert clone_command in raw
-    assert 'cd "$DW_PRODUCT"' in raw
-    assert 'chmod u+rwx "$GITHUB_WORKSPACE"' in raw
-    assert 'chmod -R u+w "$DW_JOB_ROOT"' in raw
-    assert 'chmod 0700 "$DW_SOURCE_ROOT" "$DW_STATE_ROOT"' in raw
-    assert 'rm -rf --one-file-system -- "$DW_SOURCE_ROOT"' in raw
-    assert 'rm -rf --one-file-system -- "$DW_STATE_ROOT"' in raw
+    assert "DW_PRODUCT: ${{ github.workspace }}/direct-" in raw
+    assert "Checkout product" in raw
+    assert 'live_head="$(gh api "repos/$PRODUCT_REPOSITORY/branches/$TARGET_BRANCH"' in raw
+    assert 'test "$start_head" = "$live_head"' in raw
+    assert "Run isolated Codex Direct Worker" in raw
+    assert "Wait for exact PR-head validation" in raw
+    assert "Merge exact validated Direct Worker PR" in raw
+    assert "Wait for exact integrated-SHA validation" in raw
+    assert "Prepare Linux sandbox prerequisites" not in raw
+    assert "Lock trusted workflow workspace for source execution" not in raw
+    assert "Require exact starting-head validation" not in raw
+    assert "DIRECT_WORKER_HOME_ISOLATION" not in raw
+    assert "DW_SOURCE_ROOT" not in raw
+    assert "DW_STATE_ROOT" not in raw
+
+

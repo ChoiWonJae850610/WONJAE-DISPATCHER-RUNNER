@@ -212,15 +212,15 @@ def test_source_ready_prompt_makes_handoff_sequencing_authoritative(tmp_path):
     assert "not available inside this network-disabled sandbox" in prompt
 
 
-def test_direct_worker_workflow_prepares_linux_user_namespaces():
+def test_direct_worker_workflow_skips_custom_linux_preflight():
     root = Path(__file__).resolve().parents[1]
     workflow = (root / ".github/workflows/direct-worker-core.yml").read_text(
         encoding="utf-8"
     )
-    assert "Prepare Linux sandbox prerequisites" in workflow
-    assert "kernel.unprivileged_userns_clone=1" in workflow
-    assert "kernel.apparmor_restrict_unprivileged_userns=0" in workflow
-    assert "unshare -Urn true" in workflow
+    assert "Prepare Linux sandbox prerequisites" not in workflow
+    assert "kernel.unprivileged_userns_clone=1" not in workflow
+    assert "kernel.apparmor_restrict_unprivileged_userns=0" not in workflow
+    assert "unshare -Urn true" not in workflow
 
 
 def test_source_ready_prompt_trusts_direct_work_branch(tmp_path):
@@ -308,12 +308,13 @@ def test_changed_paths_rejects_product_execution_state_mutation(tmp_path):
         changed_paths(repo)
 
 
-def test_direct_worker_workflow_requires_start_validation_and_advances_state():
+def test_direct_worker_workflow_uses_head_match_and_advances_state():
     root = Path(__file__).resolve().parents[1]
     workflow = (root / ".github/workflows/direct-worker-core.yml").read_text(
         encoding="utf-8"
     )
-    assert "Require exact starting-head validation" in workflow
-    assert "event=push" in workflow
+    assert "Require exact starting-head validation" not in workflow
+    assert 'live_head="$(gh api "repos/$PRODUCT_REPOSITORY/branches/$TARGET_BRANCH"' in workflow
+    assert 'test "$start_head" = "$live_head"' in workflow
     assert "Advance product execution state on source success" in workflow
     assert "scripts/advance_execution_state.py" in workflow
