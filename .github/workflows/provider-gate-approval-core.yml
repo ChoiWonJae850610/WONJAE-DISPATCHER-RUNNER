@@ -105,7 +105,7 @@ jobs:
           abort("provider gate is not registered") unless config.is_a?(Hash)
           abort("provider gate approval mode mismatch") unless config["approval_mode"] == "sanjinworks_owner_button"
           executor = config["executor"]
-          abort("provider gate executor is unsupported") unless ["approval_only", "classmo_supabase_migration"].include?(executor)
+          abort("provider gate executor is unsupported") unless ["approval_only", "classmo_supabase_migration", "wafl_supabase_hardening"].include?(executor)
           label = config["label"]
           abort("provider gate label missing") unless label.is_a?(String) && !label.strip.empty?
 
@@ -125,7 +125,10 @@ jobs:
             "PROVIDER_LABEL" => label,
           }
 
-          if executor == "classmo_supabase_migration"
+          if executor == "wafl_supabase_hardening"
+            abort("WAFL executor routed to another project") unless project == "WAFL"
+            abort("WAFL provider gate mismatch") unless gate == "separate_explicit_provider_authority"
+          elsif executor == "classmo_supabase_migration"
             abort("CLASSMO executor routed to another project") unless project == "CLASSMO"
             expected = {
               "provider" => "supabase_management_api",
@@ -202,6 +205,40 @@ jobs:
             echo "- provider mutation: `NOT_RUN`"
           } >> "$GITHUB_STEP_SUMMARY"
           echo "Provider gate approval recorded for $PROJECT / $GATE / $SOURCE_SHA."
+
+      - name: WAFL · require scoped Supabase credential
+        if: env.PROVIDER_EXECUTOR == 'wafl_supabase_hardening'
+        env:
+          WAFL_SUPABASE_ACCESS_TOKEN: ${{ secrets.supabase_access_token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$WAFL_SUPABASE_ACCESS_TOKEN" || {
+            echo "::error::WAFL_SUPABASE_ACCESS_TOKEN is not configured in the trusted Runner repository."
+            exit 1
+          }
+
+      - name: WAFL · apply Stage-4 hardening and verify provider state
+        if: env.PROVIDER_EXECUTOR == 'wafl_supabase_hardening'
+        env:
+          WAFL_SUPABASE_ACCESS_TOKEN: ${{ secrets.supabase_access_token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python scripts/wafl_supabase_gate.py \
+            --repo "$GITHUB_WORKSPACE/.approval/product" \
+            --source-sha "$SOURCE_SHA" \
+            --evidence "$RUNNER_TEMP/wafl-provider-evidence.json" \
+            --summary "$GITHUB_STEP_SUMMARY"
+
+      - name: WAFL · upload provider evidence
+        if: env.PROVIDER_EXECUTOR == 'wafl_supabase_hardening' && success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: wafl-provider-evidence-${{ inputs.source_sha }}
+          path: ${{ runner.temp }}/wafl-provider-evidence.json
+          if-no-files-found: error
+          retention-days: 30
 
       - name: CLASSMO · require scoped Supabase credential
         if: env.PROVIDER_EXECUTOR == 'classmo_supabase_migration'
