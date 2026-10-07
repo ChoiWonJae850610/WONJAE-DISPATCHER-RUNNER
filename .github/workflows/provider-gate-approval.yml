@@ -1,6 +1,6 @@
 name: Provider Gate Approval
 
-run-name: Provider Gate Approval ${{ inputs.project }} ${{ inputs.gate }} ${{ inputs.source_sha }}
+run-name: Provider Gate Approval ${{ inputs.project }} ${{ inputs.gate }} ${{ inputs.source_sha }} ${{ inputs.control_sha }}
 
 on:
   workflow_dispatch:
