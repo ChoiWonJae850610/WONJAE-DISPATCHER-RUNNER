@@ -21,7 +21,10 @@ def test_provider_gate_core_rechecks_identity_validation_and_registered_executor
         raw = handle.read()
     assert 'test "$current" = "$SOURCE_SHA"' in raw
     assert 'config["approval_mode"] == "sanjinworks_owner_button"' in raw
-    assert '["approval_only", "classmo_supabase_migration", "wafl_supabase_hardening"].include?(executor)' in raw
+    assert (
+        '["approval_only", "classmo_supabase_migration", '
+        '"wafl_supabase_hardening"].include?(executor)' in raw
+    )
     assert 'action["type"] == "PROVIDER_GATE"' in raw
     assert 'action["gate"] == gate' in raw
     assert "Exact current source has no successful integrated validation" in raw
@@ -51,7 +54,11 @@ def test_wafl_supabase_executor_is_bounded_to_stage4_hardening():
     with open("scripts/wafl_supabase_gate.py", encoding="utf-8") as handle:
         raw = handle.read()
     assert 'MIGRATION_NAME = "wafl_stage4_post_apply_hardening"' in raw
-    assert 'MIGRATION_PATH = "supabase/migrations/202610070001_wafl_stage4_post_apply_hardening.sql"' in raw
+    assert (
+        'MIGRATION_PATH = '
+        '"supabase/migrations/202610070001_wafl_stage4_post_apply_hardening.sql"'
+        in raw
+    )
     assert 'EXPECTED_PRIOR_MIGRATION = "wafl_stage4_target_schema"' in raw
     assert "company_members_company_user_unique" in raw
     assert "company_members_company_id_user_id_key" in raw
