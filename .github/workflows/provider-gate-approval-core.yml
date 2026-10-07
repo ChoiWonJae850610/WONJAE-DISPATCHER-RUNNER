@@ -1,0 +1,133 @@
+name: Provider Gate Approval Core
+
+on:
+  workflow_call:
+    inputs:
+      project:
+        required: true
+        type: string
+      product_repository:
+        required: true
+        type: string
+      target_branch:
+        required: true
+        type: string
+      state_path:
+        required: true
+        type: string
+      control_sha:
+        required: true
+        type: string
+      source_sha:
+        required: true
+        type: string
+      gate:
+        required: true
+        type: string
+    secrets:
+      control_read_token:
+        required: true
+      product_read_token:
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  approve:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      PROJECT: ${{ inputs.project }}
+      PRODUCT_REPOSITORY: ${{ inputs.product_repository }}
+      TARGET_BRANCH: ${{ inputs.target_branch }}
+      STATE_PATH: ${{ inputs.state_path }}
+      CONTROL_SHA: ${{ inputs.control_sha }}
+      SOURCE_SHA: ${{ inputs.source_sha }}
+      GATE: ${{ inputs.gate }}
+    steps:
+      - name: Checkout trusted approval workflow
+        uses: actions/checkout@v6
+        with:
+          ref: main
+          persist-credentials: false
+
+      - name: Checkout exact DEV-CONTROL registration
+        uses: actions/checkout@v6
+        with:
+          repository: ChoiWonJae850610/DEV-CONTROL
+          ref: ${{ inputs.control_sha }}
+          path: .approval/control
+          token: ${{ secrets.control_read_token }}
+          persist-credentials: false
+
+      - name: Checkout exact product source
+        uses: actions/checkout@v6
+        with:
+          repository: ${{ inputs.product_repository }}
+          ref: ${{ inputs.source_sha }}
+          path: .approval/product
+          token: ${{ secrets.product_read_token }}
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Verify exact registered provider gate
+        env:
+          GH_TOKEN: ${{ secrets.product_read_token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$CONTROL_SHA" = "$(git -C .approval/control rev-parse HEAD)"
+          test "$SOURCE_SHA" = "$(git -C .approval/product rev-parse HEAD)"
+          current="$(gh api "repos/$PRODUCT_REPOSITORY/branches/$TARGET_BRANCH" --jq '.commit.sha')"
+          test "$current" = "$SOURCE_SHA" || {
+            echo "::error::Product active branch moved after approval request."
+            exit 1
+          }
+
+          PROJECT="$PROJECT" GATE="$GATE" STATE_PATH="$STATE_PATH" ruby <<'RUBY'
+          require "yaml"
+
+          project = ENV.fetch("PROJECT")
+          gate = ENV.fetch("GATE")
+          state_path = ENV.fetch("STATE_PATH")
+
+          registry = YAML.safe_load(File.read(".approval/control/PROJECTS.yaml"), aliases: false)
+          product = registry.dig("projects", project)
+          abort("project is not active") unless product.is_a?(Hash) && product["status"] == "active"
+          execution = product["execution"]
+          abort("project is not Direct Worker") unless execution.is_a?(Hash) && execution["mode"] == "direct_worker"
+          abort("state path mismatch") unless execution["state_path"] == state_path
+          provider_gates = execution["provider_gates"]
+          config = provider_gates.is_a?(Hash) ? provider_gates[gate] : nil
+          abort("provider gate is not registered") unless config.is_a?(Hash)
+          abort("provider gate approval mode mismatch") unless config["approval_mode"] == "sanjinworks_owner_button"
+          abort("provider gate executor must remain approval_only") unless config["executor"] == "approval_only"
+          label = config["label"]
+          abort("provider gate label missing") unless label.is_a?(String) && !label.strip.empty?
+
+          state = YAML.safe_load(File.read(File.join(".approval/product", state_path)), aliases: false)
+          abort("product execution state project mismatch") unless state["project"] == project
+          action = state["next_action"]
+          abort("current product state is not PROVIDER_GATE") unless action.is_a?(Hash) && action["type"] == "PROVIDER_GATE"
+          abort("current product gate changed") unless action["gate"] == gate
+          abort("provider approval requires no source scope") unless action["source_scope"] == []
+
+          File.open(ENV.fetch("GITHUB_STEP_SUMMARY"), "a") do |summary|
+            summary.puts "## Provider Gate Approval"
+            summary.puts
+            summary.puts "- project: #{project}"
+            summary.puts "- source_sha: #{ENV.fetch('SOURCE_SHA')}"
+            summary.puts "- control_sha: #{ENV.fetch('CONTROL_SHA')}"
+            summary.puts "- gate: #{gate}"
+            summary.puts "- label: #{label}"
+            summary.puts "- result: APPROVED"
+            summary.puts "- provider mutation: NOT_RUN"
+          end
+          RUBY
+
+      - name: Record approval boundary
+        shell: bash
+        run: |
+          echo "Provider gate approval recorded for $PROJECT / $GATE / $SOURCE_SHA."
+          echo "No provider, database, deployment, credential, device or Production mutation was executed."
