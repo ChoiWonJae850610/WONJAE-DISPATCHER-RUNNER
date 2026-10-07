@@ -21,6 +21,7 @@ For every registered product, Direct Worker uses the same sequence:
 7. Require the product's exact PR-head validation to PASS.
 8. Merge that exact validated head.
 9. Require the exact integrated-SHA validation to PASS.
+10. Before advancing a source task directly into `MANUAL_QA`, require its structured `manual_qa` contract (`mode: owner_checkout`) and verify every declared Owner-executable path is a regular file that was actually changed by this source task. A task that still needs deployment, OTA/build, provider execution, credentials, or another source step must not transition directly to MANUAL_QA.
 
 There is no separate starting-head CI gate. A current remote/local HEAD equality
 check is sufficient to start source work.
