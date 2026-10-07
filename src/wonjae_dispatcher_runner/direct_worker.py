@@ -522,7 +522,9 @@ Authority and hard boundaries:
 Latest exact validation failure supplied for retry, if any:
 {failure}
 
-Finish with the structured result requested by the caller.
+Finish with the structured result requested by the caller. Set manual_action to exactly
+an empty string for CHANGED and NO_WORK. Use a non-empty manual_action only when status is
+MANUAL_REQUIRED.
 """
 
 
@@ -544,9 +546,11 @@ def _parse_result(response: str) -> tuple[str, str, str]:
         raise DirectWorkerError("Codex Direct Worker manual_action was invalid")
     if status == "MANUAL_REQUIRED" and not manual_action.strip():
         raise DirectWorkerError("MANUAL_REQUIRED requires one smallest Owner action")
-    if status != "MANUAL_REQUIRED" and manual_action.strip():
-        raise DirectWorkerError("manual_action is allowed only for MANUAL_REQUIRED")
-    return status, summary.strip(), manual_action.strip()
+    # manual_action is advisory metadata. For successful/non-manual outcomes, ignore any
+    # stray model text rather than discarding an otherwise valid source turn. A real gate
+    # must be expressed by the status itself as MANUAL_REQUIRED.
+    normalized_manual_action = manual_action.strip() if status == "MANUAL_REQUIRED" else ""
+    return status, summary.strip(), normalized_manual_action
 
 
 def run_direct_worker(

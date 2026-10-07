@@ -7,6 +7,7 @@ import pytest
 
 from wonjae_dispatcher_runner.direct_worker import (
     DirectWorkerError,
+    _parse_result,
     _prompt,
     changed_paths,
     git_metadata_snapshot,
@@ -172,6 +173,24 @@ def test_changed_paths_rejects_protected_authority_files(tmp_path):
         changed_paths(repo)
 
 
+def test_non_manual_result_ignores_stray_manual_action():
+    status, summary, manual_action = _parse_result(
+        '{"status":"CHANGED","summary":"Source task completed.",'
+        '"manual_action":"No Owner action is actually required."}'
+    )
+    assert status == "CHANGED"
+    assert summary == "Source task completed."
+    assert manual_action == ""
+
+
+def test_manual_required_still_requires_owner_action():
+    with pytest.raises(DirectWorkerError, match="requires one smallest Owner action"):
+        _parse_result(
+            '{"status":"MANUAL_REQUIRED","summary":"Provider credential is required.",'
+            '"manual_action":""}'
+        )
+
+
 def test_handoff_gates_next_source_work(tmp_path):
     sha = "a" * 40
     route = load_direct_worker_route(
@@ -298,6 +317,8 @@ def test_product_execution_state_prompt_is_authoritative(tmp_path):
     assert "Never advance or rewrite the protected product execution state" in prompt
     assert "trusted Runner deterministically advances the registered state_path" in prompt
     assert "never use .wonjae/execution-state.yaml" in prompt
+    assert "Set manual_action to exactly" in prompt
+    assert "empty string for CHANGED and NO_WORK" in prompt
 
 
 def test_changed_paths_rejects_product_execution_state_mutation(tmp_path):
