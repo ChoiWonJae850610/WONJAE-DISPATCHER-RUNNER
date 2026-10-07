@@ -24,7 +24,7 @@ def test_provider_gate_core_rechecks_identity_validation_and_registered_executor
     assert 'config["approval_mode"] == "sanjinworks_owner_button"' in raw
     assert (
         '["approval_only", "classmo_supabase_migration", '
-        '"classmo_eas_build", "wafl_supabase_hardening"].include?(executor)' in raw
+        '"classmo_eas_build", "classmo_eas_update", "wafl_supabase_hardening"].include?(executor)' in raw
     )
     assert 'action["type"] == "PROVIDER_GATE"' in raw
     assert 'action["gate"] == gate' in raw
@@ -75,3 +75,24 @@ def test_wafl_supabase_executor_is_bounded_to_stage4_hardening():
     assert "/database/query" in raw
     assert "/postgrest" in raw
     assert "data copy / identity mapping / Production / device" in raw
+
+def test_classmo_preview_ota_provider_gate_is_bounded_and_read_back():
+    with open(".github/workflows/provider-gate-approval-core.yml", encoding="utf-8") as handle:
+        raw = handle.read()
+    assert 'executor == "classmo_eas_update"' in raw
+    assert 'gate == "preview_ios_ota_update"' in raw
+    assert '"provider" => "eas_update"' in raw
+    assert '"working_directory" => "apps/mobile"' in raw
+    assert '"platform" => "ios"' in raw
+    assert '"environment" => "preview"' in raw
+    assert '"channel" => "preview"' in raw
+    assert '"runtime_version" => "0.0.11"' in raw
+    assert '"compatibility_base_sha" => "bc18af6cab37408643f3825e1137a75dd4b899f3"' in raw
+    assert 'merge-base --is-ancestor "$PROVIDER_COMPATIBILITY_BASE_SHA" "$SOURCE_SHA"' in raw
+    assert "provider_action.py check-ota" in raw
+    assert 'eas update \\' in raw
+    assert "parse-update-group" in raw
+    assert 'eas update:view "$EAS_UPDATE_GROUP_ID"' in raw
+    assert "parse-update-view" in raw
+    assert 'device receipt / physical QA: `NOT_RUN`' in raw
+
