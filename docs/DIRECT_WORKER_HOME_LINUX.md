@@ -3,7 +3,8 @@
 Status: **HOME-LINUX DEFAULT / MINIMAL EXECUTION FLOW**.
 
 The source of truth is GitHub. The home WSL2 runner is only an execution host; its
-working copy is never authoritative.
+working copy is never authoritative. This minimal execution path is the default for all
+present and future registered products.
 
 ## Production flow
 
