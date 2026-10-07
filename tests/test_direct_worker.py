@@ -350,3 +350,20 @@ def test_direct_worker_workflow_uses_head_match_and_advances_state():
     assert 'test "$start_head" = "$live_head"' in workflow
     assert "Advance product execution state on source success" in workflow
     assert "scripts/advance_execution_state.py" in workflow
+
+def test_direct_worker_pr_head_readback_waits_for_known_previous_sha():
+    root = Path(__file__).resolve().parents[1]
+    workflow = (root / ".github/workflows/direct-worker-core.yml").read_text(
+        encoding="utf-8"
+    )
+    section = workflow.split("      - name: Create or read Direct Worker PR", 1)[1].split(
+        "      - name: Preserve manual gate on existing Direct Worker PR", 1
+    )[0]
+    assert "for attempt in $(seq 1 18)" in section
+    assert 'if [ "$observed_head" = "$DIRECT_HEAD" ]; then' in section
+    assert 'if [ "$observed_head" != "$START_HEAD" ]; then' in section
+    assert "sleep 5" in section
+    assert "Direct Worker PR identity changed during head readback." in section
+    assert "Direct Worker PR head readback timed out:" in section
+    assert "gh pr view" not in section
+
