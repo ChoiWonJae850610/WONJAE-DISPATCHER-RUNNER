@@ -1,6 +1,6 @@
 name: Provider Gate Approval
 
-run-name: Provider Gate Approval ${{ inputs.project }} ${{ inputs.gate }} ${{ inputs.source_sha }}
+run-name: Provider Gate Approval ${{ inputs.project }} ${{ inputs.gate }} ${{ inputs.source_sha }} ${{ inputs.control_sha }}
 
 on:
   workflow_dispatch:
@@ -60,6 +60,7 @@ jobs:
     secrets:
       control_read_token: ${{ secrets.CONTROL_READ_TOKEN }}
       product_read_token: ${{ secrets.CLASSMO_WRITE_TOKEN }}
+      supabase_access_token: ${{ secrets.CLASSMO_SUPABASE_ACCESS_TOKEN }}
 
   esc:
     if: ${{ inputs.project == 'ESC' }}

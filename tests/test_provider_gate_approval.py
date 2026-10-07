@@ -1,4 +1,4 @@
-def test_provider_gate_approval_caller_is_owner_button_recording_only():
+def test_provider_gate_approval_caller_routes_exact_products_and_classmo_credential():
     with open(".github/workflows/provider-gate-approval.yml", encoding="utf-8") as handle:
         raw = handle.read()
     for value in ("project:", "control_sha:", "source_sha:", "gate:"):
@@ -8,21 +8,38 @@ def test_provider_gate_approval_caller_is_owner_button_recording_only():
     assert "Provider Gate Approval ${{ inputs.project }}" in raw
     assert "provider-gate-approval-core.yml" in raw
     assert "CONTROL_READ_TOKEN" in raw
+    assert "CLASSMO_SUPABASE_ACCESS_TOKEN" in raw
     assert "WAFL_WRITE_TOKEN" in raw
     assert "CLASSMO_WRITE_TOKEN" in raw
     assert "ESC_WRITE_TOKEN" in raw
     assert "MUVEL_WRITE_TOKEN" in raw
 
 
-def test_provider_gate_approval_core_has_exact_identity_guards_and_no_provider_mutation():
+def test_provider_gate_core_rechecks_identity_validation_and_registered_executor():
     with open(".github/workflows/provider-gate-approval-core.yml", encoding="utf-8") as handle:
         raw = handle.read()
     assert 'test "$current" = "$SOURCE_SHA"' in raw
     assert 'config["approval_mode"] == "sanjinworks_owner_button"' in raw
-    assert 'config["executor"] == "approval_only"' in raw
+    assert '["approval_only", "classmo_supabase_migration"].include?(executor)' in raw
     assert 'action["type"] == "PROVIDER_GATE"' in raw
     assert 'action["gate"] == gate' in raw
-    assert "provider mutation: NOT_RUN" in raw
-    assert "supabase" not in raw.lower()
-    assert "eas update" not in raw.lower()
-    assert "wrangler" not in raw.lower()
+    assert "Exact current source has no successful integrated validation" in raw
+    assert "Source-writing PR is open; provider execution refuses concurrent mutation" in raw
+    assert "CLASSMO_SUPABASE_ACCESS_TOKEN is not configured" in raw
+    assert "scripts/classmo_supabase_gate.py" in raw
+    assert "provider mutation: `NOT_RUN`" in raw
+
+
+def test_classmo_supabase_executor_is_bounded_to_migration_runtime_and_cleanup():
+    with open("scripts/classmo_supabase_gate.py", encoding="utf-8") as handle:
+        raw = handle.read()
+    assert 'API_ROOT = "https://api.supabase.com/v1/projects"' in raw
+    assert '"/database/migrations"' in raw
+    assert '"/database/query"' in raw
+    assert "migration checksum does not match SHA256SUMS" in raw
+    assert "live migration history advanced beyond the registered provider gate" in raw
+    assert "option_entry.value->>'id'" in raw
+    assert "COURSE_ZERO_RESIDUE" in raw
+    assert "independent concurrency verification" in raw
+    assert "NOT_RUN" in raw
+    assert "Production / EAS / OTA / device / physical" in raw
