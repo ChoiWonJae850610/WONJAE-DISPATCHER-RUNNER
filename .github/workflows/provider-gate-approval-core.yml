@@ -73,7 +73,7 @@ jobs:
           path: .approval/product
           token: ${{ secrets.product_read_token }}
           persist-credentials: false
-          fetch-depth: 1
+          fetch-depth: 0
 
       - name: Verify exact registered provider gate
         env:
@@ -107,7 +107,7 @@ jobs:
           abort("provider gate is not registered") unless config.is_a?(Hash)
           abort("provider gate approval mode mismatch") unless config["approval_mode"] == "sanjinworks_owner_button"
           executor = config["executor"]
-          abort("provider gate executor is unsupported") unless ["approval_only", "classmo_supabase_migration", "classmo_eas_build", "wafl_supabase_hardening"].include?(executor)
+          abort("provider gate executor is unsupported") unless ["approval_only", "classmo_supabase_migration", "classmo_eas_build", "classmo_eas_update", "wafl_supabase_hardening"].include?(executor)
           label = config["label"]
           abort("provider gate label missing") unless label.is_a?(String) && !label.strip.empty?
 
@@ -174,6 +174,30 @@ jobs:
               "PROVIDER_BUILD_PROFILE" => config["profile"],
               "PROVIDER_APP_VERSION" => config["app_version"],
               "PROVIDER_BUILD_NUMBER" => config["build_number"],
+            )
+          elsif executor == "classmo_eas_update"
+            abort("CLASSMO EAS update executor routed to another project") unless project == "CLASSMO"
+            abort("CLASSMO EAS update provider gate mismatch") unless gate == "preview_ios_ota_update"
+            expected = {
+              "provider" => "eas_update",
+              "working_directory" => "apps/mobile",
+              "platform" => "ios",
+              "environment" => "preview",
+              "channel" => "preview",
+              "runtime_version" => "0.0.11",
+              "compatibility_base_sha" => "bc18af6cab37408643f3825e1137a75dd4b899f3",
+            }
+            expected.each do |key, value|
+              abort("CLASSMO EAS update executor #{key} mismatch") unless config[key] == value
+            end
+            values.merge!(
+              "PROVIDER_WORKING_DIRECTORY" => config["working_directory"],
+              "PROVIDER_PLATFORM" => config["platform"],
+              "PROVIDER_ENVIRONMENT" => config["environment"],
+              "PROVIDER_CHANNEL" => config["channel"],
+              "PROVIDER_RUNTIME_VERSION" => config["runtime_version"],
+              "PROVIDER_COMPATIBILITY_BASE_SHA" => config["compatibility_base_sha"],
+              "PROVIDER_MESSAGE" => "#{label} #{ENV.fetch('SOURCE_SHA')[0,12]}",
             )
           end
 
@@ -264,7 +288,7 @@ jobs:
           retention-days: 30
 
       - name: CLASSMO · require scoped Expo credential
-        if: env.PROVIDER_EXECUTOR == 'classmo_eas_build'
+        if: env.PROVIDER_EXECUTOR == 'classmo_eas_build' || env.PROVIDER_EXECUTOR == 'classmo_eas_update'
         env:
           CLASSMO_EXPO_TOKEN: ${{ secrets.expo_token }}
         shell: bash
@@ -300,13 +324,13 @@ jobs:
           PY
 
       - name: CLASSMO · set up EAS CLI
-        if: env.PROVIDER_EXECUTOR == 'classmo_eas_build'
+        if: env.PROVIDER_EXECUTOR == 'classmo_eas_build' || env.PROVIDER_EXECUTOR == 'classmo_eas_update'
         uses: actions/setup-node@v7
         with:
           node-version: "24"
 
       - name: CLASSMO · install pinned EAS CLI and app dependencies
-        if: env.PROVIDER_EXECUTOR == 'classmo_eas_build'
+        if: env.PROVIDER_EXECUTOR == 'classmo_eas_build' || env.PROVIDER_EXECUTOR == 'classmo_eas_update'
         env:
           CLASSMO_EXPO_TOKEN: ${{ secrets.expo_token }}
         shell: bash
@@ -370,6 +394,109 @@ jobs:
             printf -- '- distribution: `%s`\n' "$EAS_BUILD_DISTRIBUTION"
             echo '- build result: `PASS`'
             echo '- device install / physical QA: `NOT_RUN`'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: CLASSMO · verify preview OTA compatibility
+        if: env.PROVIDER_EXECUTOR == 'classmo_eas_update'
+        shell: bash
+        run: |
+          set -euo pipefail
+          git -C .approval/product merge-base --is-ancestor "$PROVIDER_COMPATIBILITY_BASE_SHA" "$SOURCE_SHA"
+          python scripts/provider_action.py check-ota \
+            --repo "$GITHUB_WORKSPACE/.approval/product" \
+            --project CLASSMO \
+            --base "$PROVIDER_COMPATIBILITY_BASE_SHA" \
+            --head "$SOURCE_SHA" \
+            --working-directory "$PROVIDER_WORKING_DIRECTORY"
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          root = Path(".approval/product") / os.environ["PROVIDER_WORKING_DIRECTORY"]
+          app = json.loads((root / "app.json").read_text(encoding="utf-8"))["expo"]
+          if app.get("version") != os.environ["PROVIDER_RUNTIME_VERSION"]:
+              raise SystemExit("CLASSMO preview OTA app/runtime version mismatch")
+          if app.get("runtimeVersion") != {"policy": "appVersion"}:
+              raise SystemExit("CLASSMO preview OTA runtimeVersion policy changed")
+          PY
+
+      - name: CLASSMO · publish compatible preview OTA
+        if: env.PROVIDER_EXECUTOR == 'classmo_eas_update'
+        env:
+          EXPO_TOKEN: ${{ secrets.expo_token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd ".approval/product/$PROVIDER_WORKING_DIRECTORY"
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          eas update \
+            --channel "$PROVIDER_CHANNEL" \
+            --environment "$PROVIDER_ENVIRONMENT" \
+            --platform "$PROVIDER_PLATFORM" \
+            --message "$PROVIDER_MESSAGE" \
+            --json \
+            --non-interactive > "$RUNNER_TEMP/classmo-eas-update.json"
+
+      - name: CLASSMO · resolve preview OTA group
+        if: env.PROVIDER_EXECUTOR == 'classmo_eas_update'
+        env:
+          EXPO_TOKEN: ${{ secrets.expo_token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd ".approval/product/$PROVIDER_WORKING_DIRECTORY"
+          eas update:list \
+            --all \
+            --platform "$PROVIDER_PLATFORM" \
+            --runtime-version "$PROVIDER_RUNTIME_VERSION" \
+            --limit 25 \
+            --json \
+            --non-interactive > "$RUNNER_TEMP/classmo-eas-update-list.json"
+          cd "$GITHUB_WORKSPACE"
+          update_env="$RUNNER_TEMP/classmo-eas-update.env"
+          : > "$update_env"
+          python scripts/provider_action.py parse-update-group \
+            --input "$RUNNER_TEMP/classmo-eas-update-list.json" \
+            --message "$PROVIDER_MESSAGE" \
+            --runtime-version "$PROVIDER_RUNTIME_VERSION" \
+            --platform "$PROVIDER_PLATFORM" \
+            --github-env "$update_env"
+          cat "$update_env" >> "$GITHUB_ENV"
+
+      - name: CLASSMO · verify preview OTA platform update
+        if: env.PROVIDER_EXECUTOR == 'classmo_eas_update'
+        env:
+          EXPO_TOKEN: ${{ secrets.expo_token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${EAS_UPDATE_GROUP_ID:-}"
+          cd ".approval/product/$PROVIDER_WORKING_DIRECTORY"
+          eas update:view "$EAS_UPDATE_GROUP_ID" --json > "$RUNNER_TEMP/classmo-eas-update-view.json"
+          cd "$GITHUB_WORKSPACE"
+          update_view_env="$RUNNER_TEMP/classmo-eas-update-view.env"
+          : > "$update_view_env"
+          python scripts/provider_action.py parse-update-view \
+            --input "$RUNNER_TEMP/classmo-eas-update-view.json" \
+            --group-id "$EAS_UPDATE_GROUP_ID" \
+            --message "$PROVIDER_MESSAGE" \
+            --runtime-version "$PROVIDER_RUNTIME_VERSION" \
+            --platform "$PROVIDER_PLATFORM" \
+            --github-env "$update_view_env"
+          set -a
+          . "$update_view_env"
+          set +a
+          cat "$update_view_env" >> "$GITHUB_ENV"
+          test -n "$EAS_UPDATE_ID"
+          {
+            echo "## CLASSMO preview iOS OTA"
+            echo
+            printf -- '- source SHA: `%s`\n' "$SOURCE_SHA"
+            printf -- '- compatibility baseline: `%s`\n' "$PROVIDER_COMPATIBILITY_BASE_SHA"
+            printf -- '- runtime/channel: `%s` / `%s`\n' "$PROVIDER_RUNTIME_VERSION" "$PROVIDER_CHANNEL"
+            printf -- '- update group: `%s`\n' "$EAS_UPDATE_GROUP_ID"
+            printf -- '- iOS update: `%s`\n' "$EAS_UPDATE_ID"
+            echo '- OTA publication: `PASS`'
+            echo '- device receipt / physical QA: `NOT_RUN`'
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: CLASSMO · require scoped Supabase credential
