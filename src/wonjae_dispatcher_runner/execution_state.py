@@ -27,7 +27,7 @@ class ExecutionAction:
     owner_action: str | None
     source_scope: tuple[str, ...]
     gate: str | None
-    manual_qa: ManualQaContract | None
+    manual_qa: ManualQaContract | None = None
 
 
 @dataclass(frozen=True)
