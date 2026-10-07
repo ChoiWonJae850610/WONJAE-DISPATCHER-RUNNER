@@ -371,9 +371,30 @@ jobs:
             PR_NUMBER="$(gh pr view "$pr_url" --repo "$PRODUCT_REPOSITORY" --json number --jq '.number')"
             echo "PR_NUMBER=$PR_NUMBER" >> "$GITHUB_ENV"
           fi
-          actual_head="$(gh pr view "$PR_NUMBER" --repo "$PRODUCT_REPOSITORY" --json headRefOid --jq '.headRefOid')"
-          test "$actual_head" = "$DIRECT_HEAD" || {
-            echo "::error::Direct Worker PR head readback mismatch."
+          observed_head=""
+          for attempt in $(seq 1 18); do
+            live_pr="$(gh api "repos/$PRODUCT_REPOSITORY/pulls/$PR_NUMBER")"
+            identity_ok="$(printf '%s' "$live_pr" | jq -r --arg branch "$DIRECT_BRANCH" --arg base "$TARGET_BRANCH" \
+              '(.state == "open" and .merged == false and .head.ref == $branch and .base.ref == $base)')"
+            test "$identity_ok" = "true" || {
+              echo "::error::Direct Worker PR identity changed during head readback."
+              exit 1
+            }
+            observed_head="$(printf '%s' "$live_pr" | jq -r '.head.sha')"
+            if [ "$observed_head" = "$DIRECT_HEAD" ]; then
+              break
+            fi
+            if [ "$observed_head" != "$START_HEAD" ]; then
+              echo "::error::Direct Worker PR head changed to unexpected SHA $observed_head while waiting for $DIRECT_HEAD."
+              exit 1
+            fi
+            if [ "$attempt" -lt 18 ]; then
+              echo "::notice::Direct Worker PR head still shows prior SHA $observed_head; waiting for GitHub readback propagation ($attempt/18)."
+              sleep 5
+            fi
+          done
+          test "$observed_head" = "$DIRECT_HEAD" || {
+            echo "::error::Direct Worker PR head readback timed out: expected $DIRECT_HEAD, observed ${observed_head:-missing}."
             exit 1
           }
 
