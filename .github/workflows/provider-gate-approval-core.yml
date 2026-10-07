@@ -107,7 +107,7 @@ jobs:
           abort("provider gate is not registered") unless config.is_a?(Hash)
           abort("provider gate approval mode mismatch") unless config["approval_mode"] == "sanjinworks_owner_button"
           executor = config["executor"]
-          abort("provider gate executor is unsupported") unless ["approval_only", "classmo_supabase_migration", "classmo_eas_build", "classmo_eas_update", "wafl_supabase_hardening"].include?(executor)
+          abort("provider gate executor is unsupported") unless ["approval_only", "classmo_supabase_migration", "classmo_eas_build", "classmo_eas_update", "wafl_supabase_hardening", "wafl_eas_update"].include?(executor)
           label = config["label"]
           abort("provider gate label missing") unless label.is_a?(String) && !label.strip.empty?
 
@@ -200,6 +200,32 @@ jobs:
               "PROVIDER_MESSAGE" => "#{label} #{ENV.fetch('SOURCE_SHA')[0,12]}",
             )
           end
+          elsif executor == "wafl_eas_update"
+            abort("WAFL EAS update executor routed to another project") unless project == "WAFL"
+            abort("WAFL EAS update provider gate mismatch") unless gate == "preview_ios_ota_update"
+            expected = {
+              "provider" => "eas_update",
+              "working_directory" => "apps/mobile",
+              "platform" => "ios",
+              "environment" => "development",
+              "channel" => "alpha83-p5",
+              "runtime_version" => "2.0.0-alpha.80-p5",
+              "compatibility_base_sha" => "bc727f87876949214b9fa29444a5a516909a5ea2",
+            }
+            expected.each do |key, value|
+              abort("WAFL EAS update executor #{key} mismatch") unless config[key] == value
+            end
+            values.merge!(
+              "PROVIDER_WORKING_DIRECTORY" => config["working_directory"],
+              "PROVIDER_PLATFORM" => config["platform"],
+              "PROVIDER_ENVIRONMENT" => config["environment"],
+              "PROVIDER_CHANNEL" => config["channel"],
+              "PROVIDER_RUNTIME_VERSION" => config["runtime_version"],
+              "PROVIDER_COMPATIBILITY_BASE_SHA" => config["compatibility_base_sha"],
+              "PROVIDER_MESSAGE" => "#{label} #{ENV.fetch('SOURCE_SHA')[0,12]}",
+              "PROVIDER_APP_VARIANT" => "development",
+            )
+          end
 
           File.open(ENV.fetch("GITHUB_ENV"), "a", encoding: "UTF-8") do |env|
             values.each do |key, value|
@@ -287,15 +313,15 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
-      - name: CLASSMO · require scoped Expo credential
-        if: env.PROVIDER_EXECUTOR == 'classmo_eas_build' || env.PROVIDER_EXECUTOR == 'classmo_eas_update'
+      - name: EAS · require scoped Expo credential
+        if: env.PROVIDER_EXECUTOR == 'classmo_eas_build' || env.PROVIDER_EXECUTOR == 'classmo_eas_update' || env.PROVIDER_EXECUTOR == 'wafl_eas_update'
         env:
-          CLASSMO_EXPO_TOKEN: ${{ secrets.expo_token }}
+          PROVIDER_EXPO_TOKEN: ${{ secrets.expo_token }}
         shell: bash
         run: |
           set -euo pipefail
-          test -n "$CLASSMO_EXPO_TOKEN" || {
-            echo "::error::CLASSMO_EXPO_TOKEN is not configured in the trusted Runner repository."
+          test -n "$PROVIDER_EXPO_TOKEN" || {
+            echo "::error::Project-scoped Expo token is not configured in the trusted Runner repository."
             exit 1
           }
 
@@ -323,16 +349,16 @@ jobs:
               raise SystemExit("CLASSMO preview build must target physical iOS devices")
           PY
 
-      - name: CLASSMO · set up EAS CLI
-        if: env.PROVIDER_EXECUTOR == 'classmo_eas_build' || env.PROVIDER_EXECUTOR == 'classmo_eas_update'
+      - name: EAS · set up EAS CLI
+        if: env.PROVIDER_EXECUTOR == 'classmo_eas_build' || env.PROVIDER_EXECUTOR == 'classmo_eas_update' || env.PROVIDER_EXECUTOR == 'wafl_eas_update'
         uses: actions/setup-node@v7
         with:
           node-version: "24"
 
-      - name: CLASSMO · install pinned EAS CLI and app dependencies
-        if: env.PROVIDER_EXECUTOR == 'classmo_eas_build' || env.PROVIDER_EXECUTOR == 'classmo_eas_update'
+      - name: EAS · install pinned EAS CLI and app dependencies
+        if: env.PROVIDER_EXECUTOR == 'classmo_eas_build' || env.PROVIDER_EXECUTOR == 'classmo_eas_update' || env.PROVIDER_EXECUTOR == 'wafl_eas_update'
         env:
-          CLASSMO_EXPO_TOKEN: ${{ secrets.expo_token }}
+          PROVIDER_EXPO_TOKEN: ${{ secrets.expo_token }}
         shell: bash
         run: |
           set -euo pipefail
@@ -396,8 +422,8 @@ jobs:
             echo '- device install / physical QA: `NOT_RUN`'
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: CLASSMO · verify preview OTA compatibility
-        if: env.PROVIDER_EXECUTOR == 'classmo_eas_update'
+      - name: EAS · verify preview OTA compatibility
+        if: env.PROVIDER_EXECUTOR == 'classmo_eas_update' || env.PROVIDER_EXECUTOR == 'wafl_eas_update'
         shell: bash
         run: |
           set -euo pipefail
@@ -419,8 +445,8 @@ jobs:
               raise SystemExit("CLASSMO preview OTA runtimeVersion policy changed")
           PY
 
-      - name: CLASSMO · publish compatible preview OTA
-        if: env.PROVIDER_EXECUTOR == 'classmo_eas_update'
+      - name: EAS · publish compatible preview OTA
+        if: env.PROVIDER_EXECUTOR == 'classmo_eas_update' || env.PROVIDER_EXECUTOR == 'wafl_eas_update'
         env:
           EXPO_TOKEN: ${{ secrets.expo_token }}
         shell: bash
@@ -436,8 +462,8 @@ jobs:
             --json \
             --non-interactive > "$RUNNER_TEMP/classmo-eas-update.json"
 
-      - name: CLASSMO · resolve preview OTA group
-        if: env.PROVIDER_EXECUTOR == 'classmo_eas_update'
+      - name: EAS · resolve preview OTA group
+        if: env.PROVIDER_EXECUTOR == 'classmo_eas_update' || env.PROVIDER_EXECUTOR == 'wafl_eas_update'
         env:
           EXPO_TOKEN: ${{ secrets.expo_token }}
         shell: bash
@@ -462,8 +488,8 @@ jobs:
             --github-env "$update_env"
           cat "$update_env" >> "$GITHUB_ENV"
 
-      - name: CLASSMO · verify preview OTA platform update
-        if: env.PROVIDER_EXECUTOR == 'classmo_eas_update'
+      - name: EAS · verify preview OTA platform update
+        if: env.PROVIDER_EXECUTOR == 'classmo_eas_update' || env.PROVIDER_EXECUTOR == 'wafl_eas_update'
         env:
           EXPO_TOKEN: ${{ secrets.expo_token }}
         shell: bash
