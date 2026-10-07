@@ -6,10 +6,17 @@ from pathlib import Path
 import yaml
 
 ACTION_TYPES = {"SOURCE_READY", "MANUAL_QA", "PROVIDER_GATE", "DECISION_REQUIRED", "NONE"}
+MANUAL_QA_MODES = {"owner_checkout"}
 
 
 class ExecutionStateError(RuntimeError):
     """Raised when a product execution-state file violates the trusted contract."""
+
+
+@dataclass(frozen=True)
+class ManualQaContract:
+    mode: str
+    required_paths: tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -20,6 +27,7 @@ class ExecutionAction:
     owner_action: str | None
     source_scope: tuple[str, ...]
     gate: str | None
+    manual_qa: ManualQaContract | None = None
 
 
 @dataclass(frozen=True)
@@ -36,6 +44,27 @@ def _safe_relative(path: str) -> None:
         raise ExecutionStateError("execution state path is unsafe")
 
 
+def _parse_manual_qa(value: object, label: str) -> ManualQaContract:
+    if not isinstance(value, dict):
+        raise ExecutionStateError(f"{label}.manual_qa must be a mapping")
+    mode = value.get("mode")
+    required_paths = value.get("required_paths")
+    if mode not in MANUAL_QA_MODES:
+        raise ExecutionStateError(f"{label}.manual_qa.mode is invalid")
+    if not isinstance(required_paths, list) or not required_paths or not all(
+        isinstance(item, str) and item.strip() for item in required_paths
+    ):
+        raise ExecutionStateError(f"{label}.manual_qa.required_paths is invalid")
+    normalized: list[str] = []
+    for item in required_paths:
+        path = item.strip()
+        _safe_relative(path)
+        normalized.append(path)
+    if len(set(normalized)) != len(normalized):
+        raise ExecutionStateError(f"{label}.manual_qa.required_paths contains duplicates")
+    return ManualQaContract(mode=mode, required_paths=tuple(normalized))
+
+
 def _parse_action(value: object, label: str) -> ExecutionAction:
     if not isinstance(value, dict):
         raise ExecutionStateError(f"{label} must be a mapping")
@@ -45,6 +74,7 @@ def _parse_action(value: object, label: str) -> ExecutionAction:
     owner_action = value.get("owner_action")
     source_scope = value.get("source_scope", [])
     gate = value.get("gate")
+    manual_qa_value = value.get("manual_qa")
 
     if action_type not in ACTION_TYPES:
         raise ExecutionStateError(f"{label}.type is invalid")
@@ -66,6 +96,17 @@ def _parse_action(value: object, label: str) -> ExecutionAction:
         raise ExecutionStateError(f"{label}.source_scope is invalid")
     if action_type == "SOURCE_READY" and not source_scope:
         raise ExecutionStateError(f"{label} SOURCE_READY requires source_scope")
+    if action_type != "MANUAL_QA" and manual_qa_value is not None:
+        raise ExecutionStateError(f"{label}.manual_qa is valid only for MANUAL_QA")
+    if action_type == "MANUAL_QA" and label == "after_source_success" and manual_qa_value is None:
+        raise ExecutionStateError(
+            "after_source_success MANUAL_QA requires a manual_qa actionability contract"
+        )
+    manual_qa = (
+        _parse_manual_qa(manual_qa_value, label)
+        if manual_qa_value is not None
+        else None
+    )
 
     return ExecutionAction(
         type=action_type,
@@ -74,6 +115,7 @@ def _parse_action(value: object, label: str) -> ExecutionAction:
         owner_action=owner_action.strip() if isinstance(owner_action, str) else None,
         source_scope=tuple(item.strip() for item in source_scope),
         gate=gate.strip() if isinstance(gate, str) else None,
+        manual_qa=manual_qa,
     )
 
 
@@ -114,16 +156,47 @@ def load_product_execution_state(
     )
 
 
+def _verify_manual_qa_actionability(
+    repo_path: Path,
+    action: ExecutionAction,
+    changed_paths: tuple[str, ...],
+) -> None:
+    if action.type != "MANUAL_QA":
+        return
+    contract = action.manual_qa
+    if contract is None:
+        raise ExecutionStateError("MANUAL_QA transition is missing actionability contract")
+    if contract.mode != "owner_checkout":
+        raise ExecutionStateError("MANUAL_QA transition mode is not directly actionable")
+    changed = set(changed_paths)
+    for relative in contract.required_paths:
+        path = repo_path / relative
+        if path.is_symlink() or not path.is_file():
+            raise ExecutionStateError(
+                f"MANUAL_QA required execution path is not a regular file: {relative}"
+            )
+        if relative not in changed:
+            raise ExecutionStateError(
+                f"MANUAL_QA required execution path was not changed by this source task: {relative}"
+            )
+
+
 def advance_product_execution_state(
     repo_path: Path,
     state_path: str,
     project: str,
+    changed_paths: tuple[str, ...] = (),
 ) -> ProductExecutionState:
     state = load_product_execution_state(repo_path, state_path, project)
     if state.next_action.type != "SOURCE_READY":
         raise ExecutionStateError("only SOURCE_READY execution state may advance on source success")
     if state.after_source_success is None:
         raise ExecutionStateError("SOURCE_READY execution state has no success transition")
+    _verify_manual_qa_actionability(
+        repo_path,
+        state.after_source_success,
+        changed_paths,
+    )
 
     path = repo_path / state_path
     payload = yaml.safe_load(path.read_text(encoding="utf-8"))

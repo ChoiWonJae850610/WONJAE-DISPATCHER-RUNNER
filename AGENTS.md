@@ -135,6 +135,7 @@ Direct Worker is a separate source-writing route from Dispatcher v2.
 - Production/provider/deployment/payment/credential/signing/device/physical/destructive
   actions are outside Direct Worker source authority. A real gate is reported as
   MANUAL_REQUIRED and source progress is preserved when applicable.
+- A `SOURCE_READY` task may predeclare `after_source_success: MANUAL_QA` only with a structured `manual_qa` contract using `mode: owner_checkout` and nonempty `required_paths`. On source success the trusted Runner requires every declared path to be a real regular file and part of that task's actual changed-path set before it advances the protected state. If Owner QA still needs a provider action, deployment, OTA/build, device-only wiring, credential step, or another source task, the product must use `PROVIDER_GATE` or another `SOURCE_READY` stage instead of claiming MANUAL_QA readiness.
 - Failed PR-head validation keeps the same Direct Worker PR open for `retry`; it is not
   terminal-cleaned merely to start a new attempt.
 - Reconciliation PRs that only synchronize human canonical docs and the protected
