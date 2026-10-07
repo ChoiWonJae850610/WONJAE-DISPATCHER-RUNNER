@@ -112,10 +112,16 @@ def test_wafl_preview_ota_provider_gate_is_bounded_and_read_back():
     assert '"environment" => "development"' in raw
     assert '"channel" => "alpha83-p5"' in raw
     assert '"runtime_version" => "2.0.0-alpha.80-p5"' in raw
-    assert '"compatibility_base_sha" => "bc727f87876949214b9fa29444a5a516909a5ea2"' in raw
+    assert (
+        '"compatibility_base_sha" => '
+        '"bc727f87876949214b9fa29444a5a516909a5ea2"' in raw
+    )
     assert '"PROVIDER_APP_VARIANT" => "development"' in raw
     assert '--project "$PROJECT"' in raw
-    assert 'if [ -n "${PROVIDER_APP_VARIANT:-}" ]; then export APP_VARIANT="$PROVIDER_APP_VARIANT"; fi' in raw
+    assert (
+        'if [ -n "${PROVIDER_APP_VARIANT:-}" ]; then '
+        'export APP_VARIANT="$PROVIDER_APP_VARIANT"; fi' in raw
+    )
     assert 'preview.get("environment") != "development"' in raw
     assert 'preview.get("channel") != "alpha83-p5"' in raw
     assert 'echo "## $PROJECT preview iOS OTA"' in raw
