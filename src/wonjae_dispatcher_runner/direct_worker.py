@@ -560,8 +560,18 @@ def run_direct_worker(
     git_metadata = git_metadata_snapshot(repo_path)
 
     home_isolation = os.environ.get("DIRECT_WORKER_HOME_ISOLATION") == "1"
+    denied_roots: tuple[Path, ...] = ()
     if home_isolation:
         require_linux_host()
+        candidates = [codex_home]
+        for name in ("DW_STATE_ROOT", "GITHUB_WORKSPACE", "DW_JOB_ROOT"):
+            value = os.environ.get(name)
+            if value:
+                candidates.append(Path(value))
+        denied_roots = tuple(
+            Path(value)
+            for value in dict.fromkeys(str(path) for path in candidates)
+        )
     safe_path = os.environ.get("PATH", "/usr/local/bin:/usr/bin:/bin")
     safe_home = os.environ.get("HOME", str(Path.home()))
     safe_lang = os.environ.get("LANG", "C.UTF-8")
@@ -630,9 +640,10 @@ def run_direct_worker(
         os.environ.clear()
         os.environ.update(safe)
         config.env = safe
-        # Named profile inherits the same workspace-write baseline and narrows reads.
-        # Sending a legacy sandbox override would discard the split read restrictions.
-        thread_config.update(permission_config(repo_path))
+        # The named profile reopens only the product checkout for writes and
+        # explicitly denies auth/trusted workspace roots. A legacy sandbox override
+        # would discard these split restrictions.
+        thread_config.update(permission_config(repo_path, denied_roots))
         thread_config["shell_environment_policy"]["set"] = {
             key: safe[key] for key in ("PATH", "HOME", "LANG", "TZ")
         }
