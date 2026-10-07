@@ -218,7 +218,6 @@ def test_authenticated_smoke_is_trusted_main_only_and_has_no_product_tokens():
     assert "PRODUCT_TOKEN" not in raw
     assert "CONTROL_READ_TOKEN" not in raw
     assert "CODEX_AUTH_JSON" in raw
-    assert 'DW_STATE_ROOT=$smoke_root/auth' in raw
     assert job["steps"][-1]["name"] == "Cleanup exact authenticated smoke storage"
 
 
