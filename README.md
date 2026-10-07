@@ -383,6 +383,8 @@ Windows validation routes remain separate. Actual runner labels, smoke results,
 exact routing validation and bootstrap reference are recorded in
 [`DIRECT_WORKER_HOME_LINUX.md`](docs/DIRECT_WORKER_HOME_LINUX.md).
 
+The authenticated Provider Gate button also supports CLASSMO's registered preview iOS OTA correction path. It is limited to the existing signed 0.0.11 (3) preview compatibility baseline, checks the source delta with the shared OTA compatibility guard, publishes only to the preview/preview iOS target, reads back the exact EAS update group/platform update, and leaves device receipt/physical QA separate.
+
 Direct Worker remains source-only. Provider/Production/deployment/payment/credential/signing/
 device/physical/destructive actions remain separate gates. WAFL, CLASSMO, ESC and MUVEL are
 registered Direct Worker products; KDN remains excluded. A registered
