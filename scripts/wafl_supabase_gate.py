@@ -136,7 +136,7 @@ where ns.nspname = 'public'
     return {
         "retained_unique": bool(row.get("retained_unique")),
         "duplicate_index": bool(row.get("duplicate_index")),
-        "wafl_indexes": set(str(value) for value in raw),
+        "wafl_indexes": {str(value) for value in raw},
     }
 
 
@@ -190,7 +190,10 @@ def run(args: argparse.Namespace) -> None:
         if not before_ledger or before_names[-1] != EXPECTED_PRIOR_MIGRATION:
             fail("WAFL live migration history does not end at the expected prior migration")
         if not before_state["retained_unique"] or not before_state["duplicate_index"]:
-            fail("WAFL hardening preflight catalog state does not match the registered source contract")
+            fail(
+                "WAFL hardening preflight catalog state does not match "
+                "the registered source contract"
+            )
         if EXPECTED_INDEXES.intersection(before_state["wafl_indexes"]):
             fail("WAFL hardening preflight found one or more target indexes already present")
         request_json(
