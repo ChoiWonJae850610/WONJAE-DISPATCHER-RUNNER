@@ -70,7 +70,7 @@ def source_environment(codex_home: Path, shell_home: Path) -> dict[str, str]:
     }
 
 
-def permission_config(repo: Path) -> dict:
+def permission_config(repo: Path, denied_roots: tuple[Path, ...] = ()) -> dict:
     root = repo.resolve(strict=True)
     if repo.is_symlink() or not (root / ".git").is_dir() or (root / ".git").is_symlink():
         raise ValueError("home worker requires an independent non-symlink checkout")
@@ -80,7 +80,16 @@ def permission_config(repo: Path) -> dict:
         ":root": "deny", ":minimal": "read", ":tmpdir": "deny", ":slash_tmp": "deny",
         str(root): "write",
     }
+    for denied_root in denied_roots:
+        if denied_root.is_symlink():
+            raise ValueError("trusted deny root must not be a symlink")
+        denied = denied_root.resolve(strict=True)
+        if denied == root or denied.is_relative_to(root) or root.is_relative_to(denied):
+            raise ValueError("trusted deny root must be disjoint from product checkout")
+        filesystem[str(denied)] = "deny"
     # Only the pinned public runtime binaries/resources, never the whole venv/cache.
+    # A specific read below a denied trusted-state ancestor is required only for
+    # the pinned sandbox helper binary; it does not reopen sibling auth/result paths.
     filesystem[str(bundled_codex_path().parent.resolve())] = "read"
     # Product instructions and integration authority are readable, never model-writable.
     for relative in (*PROTECTED_DIRECTORIES, *PROTECTED_FILES):
@@ -102,16 +111,19 @@ def permission_config(repo: Path) -> dict:
     }
 
 
-def cli_overrides(repo: Path) -> tuple[str, ...]:
+def cli_overrides(repo: Path, denied_roots: tuple[Path, ...] = ()) -> tuple[str, ...]:
     def toml(value):
         if isinstance(value, dict):
             return "{" + ",".join(f"{json.dumps(k)}={toml(v)}" for k, v in value.items()) + "}"
         return json.dumps(value)
 
-    return tuple(f"{key}={toml(value)}" for key, value in permission_config(repo).items())
+    return tuple(
+        f"{key}={toml(value)}"
+        for key, value in permission_config(repo, denied_roots).items()
+    )
 
 
-def sandbox_cli_args(repo: Path) -> list[str]:
+def sandbox_cli_args(repo: Path, denied_roots: tuple[Path, ...] = ()) -> list[str]:
     """Build an explicit sandbox invocation for the exact product checkout.
 
     The debug sandbox CLI supports a named permission profile and explicit cwd.
@@ -119,7 +131,7 @@ def sandbox_cli_args(repo: Path) -> list[str]:
     runner workspace or another fallback cwd.
     """
     args = [str(bundled_codex_path())]
-    for override in cli_overrides(repo):
+    for override in cli_overrides(repo, denied_roots):
         args += ["--config", override]
     args += ["sandbox", "--permission-profile", PROFILE, "--cd", str(repo), "--"]
     return args
