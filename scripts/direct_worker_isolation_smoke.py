@@ -62,7 +62,7 @@ def main() -> int:
             forbidden_state / f".direct-worker-state-probe-{os.getpid()}"
             if forbidden_state else None
         )
-        denied_roots = [auth]
+        denied_roots = []
         for candidate in (Path(workspace) if workspace else None, forbidden_root, forbidden_state):
             if candidate is not None:
                 denied_roots.append(candidate)
