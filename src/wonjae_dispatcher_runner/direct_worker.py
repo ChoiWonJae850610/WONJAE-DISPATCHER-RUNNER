@@ -563,7 +563,7 @@ def run_direct_worker(
     denied_roots: tuple[Path, ...] = ()
     if home_isolation:
         require_linux_host()
-        candidates = [codex_home]
+        candidates = []
         for name in ("DW_STATE_ROOT", "GITHUB_WORKSPACE", "DW_JOB_ROOT"):
             value = os.environ.get(name)
             if value:
