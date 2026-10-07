@@ -31,6 +31,8 @@ on:
         required: true
       supabase_access_token:
         required: false
+      expo_token:
+        required: false
 
 permissions:
   contents: read
@@ -38,7 +40,7 @@ permissions:
 jobs:
   approve:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
     env:
       PROJECT: ${{ inputs.project }}
       PRODUCT_REPOSITORY: ${{ inputs.product_repository }}
@@ -105,7 +107,7 @@ jobs:
           abort("provider gate is not registered") unless config.is_a?(Hash)
           abort("provider gate approval mode mismatch") unless config["approval_mode"] == "sanjinworks_owner_button"
           executor = config["executor"]
-          abort("provider gate executor is unsupported") unless ["approval_only", "classmo_supabase_migration", "wafl_supabase_hardening"].include?(executor)
+          abort("provider gate executor is unsupported") unless ["approval_only", "classmo_supabase_migration", "classmo_eas_build", "wafl_supabase_hardening"].include?(executor)
           label = config["label"]
           abort("provider gate label missing") unless label.is_a?(String) && !label.strip.empty?
 
@@ -151,6 +153,27 @@ jobs:
               "PROVIDER_RUNTIME_PATH" => config["runtime_path"],
               "PROVIDER_CLEANUP_PATH" => config["cleanup_path"],
               "PROVIDER_EXPECTED_PRIOR_MIGRATION" => config["expected_prior_migration_name"],
+            )
+          elsif executor == "classmo_eas_build"
+            abort("CLASSMO EAS executor routed to another project") unless project == "CLASSMO"
+            abort("CLASSMO EAS provider gate mismatch") unless gate == "preview_ios_build"
+            expected = {
+              "provider" => "eas_build",
+              "working_directory" => "apps/mobile",
+              "platform" => "ios",
+              "profile" => "preview",
+              "app_version" => "0.0.11",
+              "build_number" => "3",
+            }
+            expected.each do |key, value|
+              abort("CLASSMO EAS executor #{key} mismatch") unless config[key] == value
+            end
+            values.merge!(
+              "PROVIDER_WORKING_DIRECTORY" => config["working_directory"],
+              "PROVIDER_PLATFORM" => config["platform"],
+              "PROVIDER_BUILD_PROFILE" => config["profile"],
+              "PROVIDER_APP_VERSION" => config["app_version"],
+              "PROVIDER_BUILD_NUMBER" => config["build_number"],
             )
           end
 
@@ -239,6 +262,109 @@ jobs:
           path: ${{ runner.temp }}/wafl-provider-evidence.json
           if-no-files-found: error
           retention-days: 30
+
+      - name: CLASSMO · require scoped Expo credential
+        if: env.PROVIDER_EXECUTOR == 'classmo_eas_build'
+        env:
+          CLASSMO_EXPO_TOKEN: ${{ secrets.expo_token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CLASSMO_EXPO_TOKEN" || {
+            echo "::error::CLASSMO_EXPO_TOKEN is not configured in the trusted Runner repository."
+            exit 1
+          }
+
+      - name: CLASSMO · verify preview build source contract
+        if: env.PROVIDER_EXECUTOR == 'classmo_eas_build'
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          root = Path(".approval/product") / os.environ["PROVIDER_WORKING_DIRECTORY"]
+          app = json.loads((root / "app.json").read_text(encoding="utf-8"))["expo"]
+          eas = json.loads((root / "eas.json").read_text(encoding="utf-8"))
+          if app.get("version") != os.environ["PROVIDER_APP_VERSION"]:
+              raise SystemExit("CLASSMO preview app version mismatch")
+          if str(app.get("ios", {}).get("buildNumber")) != os.environ["PROVIDER_BUILD_NUMBER"]:
+              raise SystemExit("CLASSMO preview build number mismatch")
+          if app.get("runtimeVersion") != {"policy": "appVersion"}:
+              raise SystemExit("CLASSMO preview runtimeVersion policy changed")
+          preview = eas.get("build", {}).get("preview", {})
+          if preview.get("distribution") != "internal" or preview.get("channel") != "preview":
+              raise SystemExit("CLASSMO preview EAS profile mismatch")
+          if preview.get("ios", {}).get("simulator") is not False:
+              raise SystemExit("CLASSMO preview build must target physical iOS devices")
+          PY
+
+      - name: CLASSMO · set up EAS CLI
+        if: env.PROVIDER_EXECUTOR == 'classmo_eas_build'
+        uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+
+      - name: CLASSMO · install pinned EAS CLI and app dependencies
+        if: env.PROVIDER_EXECUTOR == 'classmo_eas_build'
+        env:
+          CLASSMO_EXPO_TOKEN: ${{ secrets.expo_token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm install --global "eas-cli@24.8.0"
+          cd ".approval/product/$PROVIDER_WORKING_DIRECTORY"
+          npm ci --ignore-scripts --no-audit --no-fund
+
+      - name: CLASSMO · build signed internal preview
+        if: env.PROVIDER_EXECUTOR == 'classmo_eas_build'
+        env:
+          EXPO_TOKEN: ${{ secrets.expo_token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd ".approval/product/$PROVIDER_WORKING_DIRECTORY"
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          eas build \
+            --platform "$PROVIDER_PLATFORM" \
+            --profile "$PROVIDER_BUILD_PROFILE" \
+            --freeze-credentials \
+            --json \
+            --non-interactive > "$RUNNER_TEMP/classmo-eas-build.json"
+          cd "$GITHUB_WORKSPACE"
+          python scripts/provider_action.py parse-eas-build-launch \
+            --input "$RUNNER_TEMP/classmo-eas-build.json" \
+            --github-env "$GITHUB_ENV"
+
+      - name: CLASSMO · verify signed preview build result
+        if: env.PROVIDER_EXECUTOR == 'classmo_eas_build'
+        env:
+          EXPO_TOKEN: ${{ secrets.expo_token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${EAS_BUILD_ID:-}"
+          cd ".approval/product/$PROVIDER_WORKING_DIRECTORY"
+          eas build:view "$EAS_BUILD_ID" --json > "$RUNNER_TEMP/classmo-eas-build-view.json"
+          cd "$GITHUB_WORKSPACE"
+          python scripts/provider_action.py parse-eas-build-view \
+            --input "$RUNNER_TEMP/classmo-eas-build-view.json" \
+            --expected-id "$EAS_BUILD_ID" \
+            --github-env "$GITHUB_ENV"
+          test "$PROVIDER_STATUS" = "SUCCESS"
+          test "$EAS_BUILD_APP_VERSION" = "$PROVIDER_APP_VERSION"
+          test "$EAS_BUILD_APP_BUILD_VERSION" = "$PROVIDER_BUILD_NUMBER"
+          test "$EAS_BUILD_DISTRIBUTION" = "internal"
+          {
+            echo "## CLASSMO preview iOS build"
+            echo
+            printf -- '- source SHA: `%s`\n' "$SOURCE_SHA"
+            printf -- '- build ID: `%s`\n' "$EAS_BUILD_ID"
+            printf -- '- app/build: `%s (%s)`\n' "$EAS_BUILD_APP_VERSION" "$EAS_BUILD_APP_BUILD_VERSION"
+            printf -- '- distribution: `%s`\n' "$EAS_BUILD_DISTRIBUTION"
+            echo '- build result: `PASS`'
+            echo '- device install / physical QA: `NOT_RUN`'
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: CLASSMO · require scoped Supabase credential
         if: env.PROVIDER_EXECUTOR == 'classmo_supabase_migration'
