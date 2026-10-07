@@ -26,14 +26,14 @@ def test_external_validation_has_dispatch_identity_and_fallback_scope() -> None:
     assert "External Product Validation {0} {1}" in workflow
 
 
-def test_direct_worker_uses_validation_gate_for_all_exact_sha_stages() -> None:
+def test_direct_worker_uses_validation_gate_only_after_source_changes() -> None:
     root = Path(__file__).resolve().parents[1]
     caller = (root / ".github/workflows/direct-worker.yml").read_text(encoding="utf-8")
     core = (root / ".github/workflows/direct-worker-core.yml").read_text(encoding="utf-8")
     assert "actions: write" in caller
     assert "actions: write" in core
-    assert core.count("scripts/validation_gate.py") == 3
-    assert "--output-prefix START" in core
+    assert core.count("scripts/validation_gate.py") == 2
+    assert "--output-prefix START" not in core
     assert "--output-prefix PR_HEAD" in core
     assert "--output-prefix INTEGRATED" in core
     assert "pr_head_validation_mode" in core
