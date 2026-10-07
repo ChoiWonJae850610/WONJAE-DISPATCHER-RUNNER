@@ -291,7 +291,10 @@ def test_product_execution_state_prompt_is_authoritative(tmp_path):
     assert "Current product-state task" in prompt
     assert "execution-state file is protected from model mutation" in prompt
     assert "AGENTS.md, PROJECT_RULES.md, .gitmodules, .github/**, and .wonjae/**" in prompt
-    assert '"Canonical documents" for this turn means only the explicit canonical-doc list above' in prompt
+    assert (
+        '"Canonical documents" for this turn means only the explicit canonical-doc list above'
+        in prompt
+    )
     assert "Never advance or rewrite the protected product execution state" in prompt
     assert "trusted Runner deterministically advances the registered state_path" in prompt
     assert "never use .wonjae/execution-state.yaml" in prompt
