@@ -139,7 +139,10 @@ def changed_paths(repo_path: Path) -> tuple[str, ...]:
         or any(path.startswith(prefix) for prefix in PROTECTED_SOURCE_PREFIXES)
     ]
     if protected:
-        raise DirectWorkerError("Direct Worker attempted to change a protected source path")
+        raise DirectWorkerError(
+            "Direct Worker attempted to change protected source path(s): "
+            + json.dumps(protected, ensure_ascii=True)
+        )
     return paths
 
 
@@ -488,6 +491,20 @@ GitHub checkout state and repository safety/approval rules are authoritative; ch
 Authority and hard boundaries:
 - Work only inside this repository checkout.
 - Make source/test/document changes needed for that one already-decided task.
+- The following authority surfaces are read-only and MUST remain byte-identical:
+  AGENTS.md, PROJECT_RULES.md, .gitmodules, .github/**, and .wonjae/**. Never create,
+  edit, delete, rename, chmod, symlink, stage, or otherwise mutate those paths.
+- "Canonical documents" for this turn means only the explicit canonical-doc list above.
+  Reading the startup entry or project rules never grants write authority to them.
+- Never advance or rewrite the protected product execution state. After a successful source
+  turn, the trusted Runner deterministically advances the registered state_path from
+  next_action to its already-declared after_source_success inside the same source PR.
+- If the task says to record, expose, or leave the next provider/credential/manual gate
+  explicit, do that only in an authorized non-protected source or canonical-document path;
+  never use .wonjae/execution-state.yaml, PROJECT_RULES.md, AGENTS.md, or a workflow file.
+- Before returning the structured result, inspect the worktree path list and ensure no
+  protected path above was changed or newly created. A protected-path change is a security
+  boundary failure, not acceptable task progress.
 - Do not invent a new feature, policy, architecture direction, or product scope.
 - Do not commit, push, merge, create releases/tags, or modify Git history.
 - Do not perform provider, deployment, Production, credential, payment, signing, device,
