@@ -347,10 +347,16 @@ jobs:
           cd ".approval/product/$PROVIDER_WORKING_DIRECTORY"
           eas build:view "$EAS_BUILD_ID" --json > "$RUNNER_TEMP/classmo-eas-build-view.json"
           cd "$GITHUB_WORKSPACE"
+          build_env="$RUNNER_TEMP/classmo-eas-build.env"
+          : > "$build_env"
           python scripts/provider_action.py parse-eas-build-view \
             --input "$RUNNER_TEMP/classmo-eas-build-view.json" \
             --expected-id "$EAS_BUILD_ID" \
-            --github-env "$GITHUB_ENV"
+            --github-env "$build_env"
+          set -a
+          . "$build_env"
+          set +a
+          cat "$build_env" >> "$GITHUB_ENV"
           test "$PROVIDER_STATUS" = "SUCCESS"
           test "$EAS_BUILD_APP_VERSION" = "$PROVIDER_APP_VERSION"
           test "$EAS_BUILD_APP_BUILD_VERSION" = "$PROVIDER_BUILD_NUMBER"
