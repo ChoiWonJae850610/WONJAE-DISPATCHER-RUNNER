@@ -72,15 +72,21 @@ model service. Source tool commands have no network or access to that credential
 The pinned SDK's `Sandbox.workspace_write` legacy override permits broader host
 reads and a `:workspace` parent can reopen surrounding runtime workspace roots.
 Home execution therefore uses the `direct_source` named profile inherited from
-`:read-only`, then reopens exactly one product checkout for writes: root deny,
-minimal public runtime read, protected Git/instruction/state paths read-only, and
-network disabled. The debug preflight also pins the named profile and exact product
-cwd. Runner Validation executes the smoke once with normal temporary storage and
+`:read-only`, then reopens exactly one product checkout for writes. In addition
+to root deny and protected Git/instruction/state paths, the profile receives
+explicit absolute-path deny entries for the per-run Codex auth/trusted-state root
+and trusted GitHub workflow root before the app-server starts. The only carve-out
+below a denied trusted-state ancestor is the pinned public Codex sandbox-helper
+binary directory required to launch enforcement; sibling auth/result paths stay
+denied. Network remains disabled. The debug preflight pins the same named profile,
+exact product cwd and explicit trusted-root denies. Runner Validation executes the smoke once with normal temporary storage and
 again with the same per-user, non-`_work`, non-temporary source-parent topology
 and the same locked-parent boundary used by production. The smoke explicitly verifies that writes cannot escape the synthetic product
 root, cannot create a file in the locked production-style source parent, cannot
 write the locked trusted `GITHUB_WORKSPACE`, and cannot write the separate
-mutable trusted-state root. Product source and trusted state are intentionally
+mutable trusted-state root. These trusted roots are denied by sandbox policy as
+well as protected by host filesystem permissions, so either layer failing closed
+still prevents source authority from reaching auth/control state. Product source and trusted state are intentionally
 not placed under `TMPDIR` or `RUNNER_TEMP`, because temporary-directory
 semantics are a separate sandbox capability and must not broaden source authority. A legacy
 `sandbox=workspace_write` thread or turn override would discard those split read
