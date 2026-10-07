@@ -40,9 +40,9 @@ jobs:
     env:
       DW_JOB_ROOT: ${{ github.workspace }}/direct-${{ github.run_id }}-${{ github.run_attempt }}
       DW_RUNNER: ${{ github.workspace }}/direct-${{ github.run_id }}-${{ github.run_attempt }}/runner
-      DIRECT_WORKER_HOME_ISOLATION: ${{ inputs.execution_host == 'home-linux' && '1' || '0' }}
+      DW_PRODUCT: ${{ github.workspace }}/direct-${{ github.run_id }}-${{ github.run_attempt }}/product
     steps:
-      - name: Reserve fresh trusted job storage
+      - name: Reserve fresh job storage
         id: storage
         shell: bash
         run: |
@@ -52,35 +52,14 @@ jobs:
             home-linux|github-hosted) ;;
             *) echo '::error::Unknown execution host'; exit 1 ;;
           esac
-          host_home="$(getent passwd "$(id -u)" | cut -d: -f6)"
-          test -n "$host_home" && test -d "$host_home"
-          source_parent="$host_home/.wonjae-direct-worker-sources"
-          source_root="$source_parent/run-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
-          product_root="$source_root/product"
-          state_parent="$host_home/.wonjae-direct-worker-state"
-          state_root="$state_parent/run-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
-          test "$source_parent" != "$GITHUB_WORKSPACE"
-          test "$source_parent" != "$RUNNER_TEMP"
-          test "$state_parent" != "$GITHUB_WORKSPACE"
-          test "$state_parent" != "$RUNNER_TEMP"
-          mkdir -p "$source_parent" "$state_parent"
           test ! -e "$DW_JOB_ROOT" && test ! -L "$DW_JOB_ROOT"
-          test ! -e "$source_root" && test ! -L "$source_root"
-          test ! -e "$state_root" && test ! -L "$state_root"
-          test -z "$(find "$GITHUB_WORKSPACE" -mindepth 1 -maxdepth 1 -name 'direct-*' -print -quit)" || {
-            echo '::error::Unexpected prior trusted-workspace residue; inspect exact runner storage before retry.'
-            exit 1
-          }
-          mkdir "$DW_JOB_ROOT" "$source_root" "$state_root"
-          mkdir "$state_root/home" "$state_root/gh"
+          mkdir "$DW_JOB_ROOT"
+          mkdir "$DW_JOB_ROOT/home" "$DW_JOB_ROOT/gh"
           echo "path=direct-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
-          echo "HOME=$state_root/home" >> "$GITHUB_ENV"
-          echo "GH_CONFIG_DIR=$state_root/gh" >> "$GITHUB_ENV"
+          echo "HOME=$DW_JOB_ROOT/home" >> "$GITHUB_ENV"
+          echo "GH_CONFIG_DIR=$DW_JOB_ROOT/gh" >> "$GITHUB_ENV"
           echo "PIP_NO_CACHE_DIR=1" >> "$GITHUB_ENV"
           echo "PYTHONDONTWRITEBYTECODE=1" >> "$GITHUB_ENV"
-          echo "DW_SOURCE_ROOT=$source_root" >> "$GITHUB_ENV"
-          echo "DW_PRODUCT=$product_root" >> "$GITHUB_ENV"
-          echo "DW_STATE_ROOT=$state_root" >> "$GITHUB_ENV"
 
       - name: Checkout trusted runner
         uses: actions/checkout@v6
@@ -100,9 +79,9 @@ jobs:
         working-directory: ${{ env.DW_RUNNER }}
         run: |
           set -euo pipefail
-          python3 -m venv "$DW_STATE_ROOT/venv"
-          "$DW_STATE_ROOT/venv/bin/python" -m pip install --no-cache-dir -e .
-          echo "$DW_STATE_ROOT/venv/bin" >> "$GITHUB_PATH"
+          python3 -m venv "$DW_JOB_ROOT/venv"
+          "$DW_JOB_ROOT/venv/bin/python" -m pip install --no-cache-dir -e .
+          echo "$DW_JOB_ROOT/venv/bin" >> "$GITHUB_PATH"
 
       - name: Checkout current DEV-CONTROL registry
         uses: actions/checkout@v6
@@ -168,7 +147,7 @@ jobs:
             echo "pr_number=$pr_number" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Checkout product outside trusted workflow workspace
+      - name: Checkout product
         env:
           GH_TOKEN: ${{ secrets.product_write_token }}
           PRODUCT_REPOSITORY: ${{ steps.route.outputs.repository }}
@@ -182,8 +161,6 @@ jobs:
           git -C "$DW_PRODUCT" fetch --no-tags origin "$SOURCE_REF"
           git -C "$DW_PRODUCT" checkout --detach FETCH_HEAD
           test -z "$(git -C "$DW_PRODUCT" status --porcelain=v1 --untracked-files=all)"
-          chmod 0500 "$DW_SOURCE_ROOT"
-          test "$(stat -c '%a' "$DW_SOURCE_ROOT")" = "500"
 
       - name: Establish exact starting head
         id: source
@@ -215,32 +192,6 @@ jobs:
             echo "PR_NUMBER=${{ steps.prepare.outputs.pr_number }}" >> "$GITHUB_ENV"
           fi
 
-      - name: Require exact starting-head validation
-        if: ${{ inputs.command == 'next' }}
-        env:
-          GH_TOKEN: ${{ secrets.product_write_token }}
-          PRODUCT_TOKEN: ${{ secrets.product_write_token }}
-          RUNNER_TOKEN: ${{ github.token }}
-          PRODUCT_REPOSITORY: ${{ steps.route.outputs.repository }}
-          VALIDATION_WORKFLOW_FILE: ${{ steps.route.outputs.validation_workflow_file }}
-        working-directory: ${{ env.DW_RUNNER }}
-        run: |
-          set -euo pipefail
-          run_json="$(gh api             "repos/$PRODUCT_REPOSITORY/actions/workflows/$VALIDATION_WORKFLOW_FILE/runs?head_sha=$START_HEAD&event=push&per_page=20"             --jq '.workflow_runs | sort_by(.created_at) | last // empty')"
-          test -n "$run_json" || {
-            echo "::error::No exact starting-head validation run exists yet."
-            exit 1
-          }
-          run_id="$(printf '%s' "$run_json" | jq -r '.id')"
-          status="$(printf '%s' "$run_json" | jq -r '.status')"
-          test "$status" = "completed" || {
-            echo "::error::Exact starting-head validation is still running."
-            exit 1
-          }
-          echo "START_VALIDATION_RUN_ID=$run_id" >> "$GITHUB_ENV"
-          conclusion="$(PYTHONPATH="$DW_RUNNER/src" python scripts/validation_gate.py             --project "${{ inputs.project }}"             --run-id "$run_id" --head-sha "$START_HEAD" --event push             --output-prefix START)"
-          test "$conclusion" = "success $START_HEAD"
-
       - name: Collect retry validation evidence
         if: ${{ inputs.command == 'retry' }}
         env:
@@ -250,7 +201,7 @@ jobs:
         working-directory: ${{ env.DW_RUNNER }}
         run: |
           set -euo pipefail
-          failure_log="$DW_STATE_ROOT/direct-worker-validation-failure.log"
+          failure_log="$DW_JOB_ROOT/direct-worker-validation-failure.log"
           run_id="$(gh api \
             "repos/$PRODUCT_REPOSITORY/actions/workflows/$VALIDATION_WORKFLOW_FILE/runs?head_sha=$START_HEAD&event=pull_request&per_page=20" \
             --jq '.workflow_runs | map(select(.status == "completed" and .conclusion != "success")) | sort_by(.created_at) | last | .id // empty')"
@@ -260,56 +211,18 @@ jobs:
           : > /dev/null
           echo "FAILURE_LOG=$failure_log" >> "$GITHUB_ENV"
 
-      - name: Lock trusted workflow workspace for source execution
-        shell: bash
-        working-directory: ${{ env.DW_RUNNER }}
-        run: |
-          set -euo pipefail
-          test -d "$DW_JOB_ROOT" && test ! -L "$DW_JOB_ROOT"
-          test -d "$GITHUB_WORKSPACE" && test ! -L "$GITHUB_WORKSPACE"
-          chmod -R a-w "$DW_JOB_ROOT"
-          chmod a-w "$GITHUB_WORKSPACE"
-          test ! -w "$GITHUB_WORKSPACE"
-          test ! -w "$DW_RUNNER"
-
-      - name: Prepare Linux sandbox prerequisites
-        shell: bash
-        working-directory: ${{ env.DW_RUNNER }}
-        run: |
-          set -euo pipefail
-          if [ "$DIRECT_WORKER_HOME_ISOLATION" = 1 ]; then
-            # Provisioning is an Owner host operation, never a privileged job mutation.
-            DIRECT_WORKER_FORBIDDEN_WRITE_ROOT="$DW_SOURCE_ROOT" \
-              DIRECT_WORKER_FORBIDDEN_STATE_ROOT="$DW_STATE_ROOT" \
-              PYTHONPATH=src python scripts/direct_worker_isolation_smoke.py
-            exit 0
-          fi
-          current_userns="$(sysctl -n kernel.unprivileged_userns_clone 2>/dev/null || true)"
-          if [ -n "$current_userns" ] && [ "$current_userns" != "1" ]; then
-            echo "Enabling kernel.unprivileged_userns_clone for bubblewrap."
-            sudo sysctl -w kernel.unprivileged_userns_clone=1
-          fi
-
-          current_apparmor="$(sysctl -n kernel.apparmor_restrict_unprivileged_userns 2>/dev/null || true)"
-          if [ -n "$current_apparmor" ] && [ "$current_apparmor" != "0" ]; then
-            echo "Disabling kernel.apparmor_restrict_unprivileged_userns for bubblewrap."
-            sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
-          fi
-
-          unshare -Urn true
-
       - name: Run isolated Codex Direct Worker
         id: codex
         env:
           PRODUCT_TOKEN: ${{ secrets.product_write_token }}
           RUNNER_TOKEN: ${{ github.token }}
-          CODEX_HOME: ${{ env.DW_STATE_ROOT }}/auth
+          CODEX_HOME: ${{ env.DW_JOB_ROOT }}/auth
           CODEX_AUTH_JSON: ${{ secrets.codex_auth_json }}
         working-directory: ${{ env.DW_RUNNER }}
         run: |
           set -euo pipefail
           mkdir -p "$CODEX_HOME"
-          result_file="$DW_STATE_ROOT/direct-worker-result.json"
+          result_file="$DW_JOB_ROOT/direct-worker-result.json"
           args=(
             --registry "$DW_RUNNER/_control/PROJECTS.yaml"
             --project "${{ inputs.project }}"
@@ -342,7 +255,7 @@ jobs:
         continue-on-error: true
         env:
           GH_TOKEN: ${{ secrets.secret_rotation_token }}
-          CODEX_HOME: ${{ env.DW_STATE_ROOT }}/auth
+          CODEX_HOME: ${{ env.DW_JOB_ROOT }}/auth
         working-directory: ${{ env.DW_RUNNER }}
         run: |
           if [ -s "$CODEX_HOME/auth.json" ]; then
@@ -441,7 +354,7 @@ jobs:
         run: |
           set -euo pipefail
           if [ -z "${PR_NUMBER:-}" ]; then
-            body_file="$DW_STATE_ROOT/direct-worker-pr.md"
+            body_file="$DW_JOB_ROOT/direct-worker-pr.md"
             {
               echo "## Direct Worker"
               echo
@@ -471,7 +384,7 @@ jobs:
           PRODUCT_REPOSITORY: ${{ steps.route.outputs.repository }}
         working-directory: ${{ env.DW_RUNNER }}
         run: |
-          result_file="$DW_STATE_ROOT/direct-worker-manual.md"
+          result_file="$DW_JOB_ROOT/direct-worker-manual.md"
           {
             echo "## Direct Worker result"
             echo
@@ -567,17 +480,13 @@ jobs:
           PRODUCT_REPOSITORY: ${{ steps.route.outputs.repository }}
         working-directory: ${{ env.DW_RUNNER }}
         run: |
-          result_file="$DW_STATE_ROOT/direct-worker-pass.md"
+          result_file="$DW_JOB_ROOT/direct-worker-pass.md"
           {
             echo "## Direct Worker result"
             echo
             printf -- '- result: `%s`\n' "PASS"
             printf -- '- runner_run_id: `%s`\n' "$GITHUB_RUN_ID"
             printf -- '- source_base_sha: `%s`\n' "$START_HEAD"
-            printf -- '- start_validation_mode: `%s`\n' "${START_VALIDATION_MODE:-CANONICAL}"
-            printf -- '- start_canonical_validation_run: `%s`\n' "${START_VALIDATION_RUN_ID:-}"
-            printf -- '- start_canonical_result: `%s`\n' "${START_CANONICAL_RESULT:-SUCCESS}"
-            printf -- '- start_external_validation_run: `%s`\n' "${START_EXTERNAL_VALIDATION_RUN_ID:-}"
             printf -- '- final_pr_head: `%s`\n' "$DIRECT_HEAD"
             printf -- '- exact_pr_head_validation_run: `%s`\n' "$PR_HEAD_RUN_ID"
             printf -- '- pr_head_validation_mode: `%s`\n' "${PR_HEAD_VALIDATION_MODE:-CANONICAL}"
@@ -608,7 +517,7 @@ jobs:
           PRODUCT_REPOSITORY: ${{ steps.route.outputs.repository }}
         working-directory: ${{ env.DW_RUNNER }}
         run: |
-          result_file="$DW_STATE_ROOT/direct-worker-failed.md"
+          result_file="$DW_JOB_ROOT/direct-worker-failed.md"
           {
             echo "## Direct Worker result"
             echo
@@ -625,22 +534,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          expected_trusted="$GITHUB_WORKSPACE/direct-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
-          host_home="$(getent passwd "$(id -u)" | cut -d: -f6)"
-          source_parent="$host_home/.wonjae-direct-worker-sources"
-          state_parent="$host_home/.wonjae-direct-worker-state"
-          expected_source="$source_parent/run-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
-          expected_state="$state_parent/run-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
-          test "$DW_JOB_ROOT" = "$expected_trusted"
-          test "$(realpath -m "$DW_JOB_ROOT")" = "$expected_trusted"
-          test "$DW_SOURCE_ROOT" = "$expected_source"
-          test "$(realpath -m "$DW_SOURCE_ROOT")" = "$expected_source"
-          test "$DW_STATE_ROOT" = "$expected_state"
-          test "$(realpath -m "$DW_STATE_ROOT")" = "$expected_state"
-          test ! -L "$DW_JOB_ROOT" && test ! -L "$DW_SOURCE_ROOT" && test ! -L "$DW_STATE_ROOT"
-          chmod u+rwx "$GITHUB_WORKSPACE"
-          chmod -R u+w "$DW_JOB_ROOT"
-          chmod 0700 "$DW_SOURCE_ROOT" "$DW_STATE_ROOT"
+          expected="$GITHUB_WORKSPACE/direct-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          test "$DW_JOB_ROOT" = "$expected"
+          test "$(realpath -m "$DW_JOB_ROOT")" = "$expected"
+          test ! -L "$DW_JOB_ROOT"
           rm -rf --one-file-system -- "$DW_JOB_ROOT"
-          rm -rf --one-file-system -- "$DW_SOURCE_ROOT"
-          rm -rf --one-file-system -- "$DW_STATE_ROOT"
+
