@@ -24,7 +24,8 @@ def test_provider_gate_core_rechecks_identity_validation_and_registered_executor
     assert 'config["approval_mode"] == "sanjinworks_owner_button"' in raw
     assert (
         '["approval_only", "classmo_supabase_migration", '
-        '"classmo_eas_build", "classmo_eas_update", "wafl_supabase_hardening"].include?(executor)' in raw
+        '"classmo_eas_build", "classmo_eas_update", '
+        '"wafl_supabase_hardening"].include?(executor)' in raw
     )
     assert 'action["type"] == "PROVIDER_GATE"' in raw
     assert 'action["gate"] == gate' in raw
