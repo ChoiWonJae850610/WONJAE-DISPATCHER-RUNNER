@@ -3,7 +3,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from wonjae_dispatcher_runner.direct_worker import load_direct_worker_route
+from wonjae_dispatcher_runner.direct_worker import changed_paths, load_direct_worker_route
 from wonjae_dispatcher_runner.execution_state import (
     ExecutionStateError,
     advance_product_execution_state,
@@ -23,10 +23,12 @@ def main() -> int:
         return 0
 
     try:
+        product_checkout = Path(args.product_checkout).resolve()
         state = advance_product_execution_state(
-            Path(args.product_checkout).resolve(),
+            product_checkout,
             route.state_path,
             route.project,
+            changed_paths=changed_paths(product_checkout),
         )
     except ExecutionStateError as exc:
         raise SystemExit(str(exc)) from exc
