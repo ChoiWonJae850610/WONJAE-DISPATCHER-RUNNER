@@ -191,7 +191,8 @@ select
     )
     if len(rows) != 1:
         fail("CLASSMO zero-residue readback returned unexpected rows")
-    if any(int(rows[0].get(key) or 0) != 0 for key in ("auth_users", "workspaces", "receipts", "events")):
+    residue_keys = ("auth_users", "workspaces", "receipts", "events")
+    if any(int(rows[0].get(key) or 0) != 0 for key in residue_keys):
         fail("CLASSMO course-operations runtime left synthetic residue")
 
 
