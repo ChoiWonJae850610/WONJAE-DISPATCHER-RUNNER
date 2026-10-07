@@ -37,18 +37,24 @@ def test_actual_source_sdk_receives_no_secrets_and_retains_split_profile(tmp_pat
     git(repo, "add", ".")
     git(repo, "commit", "-m", "fixture")
     route = worker.load_direct_worker_route(registry(tmp_path), "ESC")
+    auth = tmp_path / "auth"
+    auth.mkdir()
+    trusted = tmp_path / "trusted"
+    trusted.mkdir()
     environment = dict(os.environ)
     environment.update({
         "DIRECT_WORKER_HOME_ISOLATION": "1", "PRODUCT_TOKEN": "synthetic-secret",
         "RUNNER_TOKEN": "synthetic-secret", "GH_TOKEN": "synthetic-secret",
         "CODEX_AUTH_JSON": "synthetic-secret", "PROVIDER_TOKEN": "synthetic-secret",
+        "DW_STATE_ROOT": str(auth), "GITHUB_WORKSPACE": str(trusted),
     })
+    environment.pop("DW_JOB_ROOT", None)
     monkeypatch.setattr(worker.os, "environ", environment)
 
     class FakeCodex:
         def __init__(self, config):
             assert "synthetic-secret" not in json.dumps(dict(worker.os.environ))
-            assert config.env == source_environment(tmp_path / "auth", Path("/nonexistent"))
+            assert config.env == source_environment(auth, Path("/nonexistent"))
 
         def __enter__(self):
             return self
@@ -63,7 +69,8 @@ def test_actual_source_sdk_receives_no_secrets_and_retains_split_profile(tmp_pat
             assert kwargs["approval_mode"] == worker.ApprovalMode.deny_all
             assert kwargs["sandbox"] is None  # Legacy override must not drop read restrictions.
             assert kwargs["config"]["default_permissions"] == PROFILE
-            assert kwargs["config"]["permissions"] == permission_config(repo)["permissions"]
+            expected = permission_config(repo, (auth, trusted))
+            assert kwargs["config"]["permissions"] == expected["permissions"]
             assert kwargs["config"]["shell_environment_policy"]["inherit"] == "none"
             return self
 
@@ -76,7 +83,7 @@ def test_actual_source_sdk_receives_no_secrets_and_retains_split_profile(tmp_pat
             }))
 
     monkeypatch.setattr(worker, "Codex", FakeCodex)
-    assert worker.run_direct_worker(repo, route, "next", tmp_path / "auth").status == "CHANGED"
+    assert worker.run_direct_worker(repo, route, "next", auth).status == "CHANGED"
 
 
 def checkout(tmp_path):
@@ -102,6 +109,20 @@ def test_profile_denies_host_reads_and_preserves_workspace_boundary(tmp_path):
         assert filesystem[str(repo.resolve() / name)] == "read"
     decoded = tomllib.loads("\n".join(cli_overrides(repo)))
     assert decoded == config
+
+
+def test_profile_explicitly_denies_disjoint_trusted_roots(tmp_path):
+    repo = checkout(tmp_path)
+    auth = tmp_path / "auth"
+    auth.mkdir()
+    trusted = tmp_path / "trusted"
+    trusted.mkdir()
+    config = permission_config(repo, (auth, trusted))
+    filesystem = config["permissions"][PROFILE]["filesystem"]
+    assert filesystem[str(auth.resolve())] == "deny"
+    assert filesystem[str(trusted.resolve())] == "deny"
+    with pytest.raises(ValueError, match="disjoint"):
+        permission_config(repo, (tmp_path,))
 
 
 def test_sandbox_cli_pins_named_profile_and_product_cwd(tmp_path):

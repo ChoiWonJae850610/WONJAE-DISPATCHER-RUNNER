@@ -62,6 +62,10 @@ def main() -> int:
             forbidden_state / f".direct-worker-state-probe-{os.getpid()}"
             if forbidden_state else None
         )
+        denied_roots = []
+        for candidate in (Path(workspace) if workspace else None, forbidden_root, forbidden_state):
+            if candidate is not None:
+                denied_roots.append(candidate)
         # These must be absent inside the actual sandbox, regardless of parent secrets.
         script = r'''
 set -eu
@@ -94,7 +98,7 @@ test -n "$source_network_namespace"
 test "$source_network_namespace" != "$2"
 printf 'network: PASS\n'
 '''
-        args = sandbox_cli_args(product)
+        args = sandbox_cli_args(product, tuple(denied_roots))
         args += [
             "/bin/bash", "-c", script, "smoke", str(root),
             os.readlink("/proc/self/ns/net"),
