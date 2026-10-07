@@ -9,6 +9,7 @@ def test_provider_gate_approval_caller_routes_exact_products_and_classmo_credent
     assert "provider-gate-approval-core.yml" in raw
     assert "CONTROL_READ_TOKEN" in raw
     assert "CLASSMO_SUPABASE_ACCESS_TOKEN" in raw
+    assert "CLASSMO_EXPO_TOKEN" in raw
     assert "WAFL_SUPABASE_ACCESS_TOKEN" in raw
     assert "WAFL_WRITE_TOKEN" in raw
     assert "CLASSMO_WRITE_TOKEN" in raw
@@ -23,7 +24,7 @@ def test_provider_gate_core_rechecks_identity_validation_and_registered_executor
     assert 'config["approval_mode"] == "sanjinworks_owner_button"' in raw
     assert (
         '["approval_only", "classmo_supabase_migration", '
-        '"wafl_supabase_hardening"].include?(executor)' in raw
+        '"classmo_eas_build", "wafl_supabase_hardening"].include?(executor)' in raw
     )
     assert 'action["type"] == "PROVIDER_GATE"' in raw
     assert 'action["gate"] == gate' in raw
@@ -32,6 +33,11 @@ def test_provider_gate_core_rechecks_identity_validation_and_registered_executor
     assert "CLASSMO_SUPABASE_ACCESS_TOKEN is not configured" in raw
     assert "scripts/classmo_supabase_gate.py" in raw
     assert "scripts/wafl_supabase_gate.py" in raw
+    assert 'executor == "classmo_eas_build"' in raw
+    assert "CLASSMO_EXPO_TOKEN is not configured" in raw
+    assert 'eas build \\\\' in raw
+    assert 'parse-eas-build-view' in raw
+    assert 'device install / physical QA: \`NOT_RUN\`' in raw
     assert "provider mutation: `NOT_RUN`" in raw
 
 
