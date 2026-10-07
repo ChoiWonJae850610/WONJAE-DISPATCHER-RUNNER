@@ -29,6 +29,8 @@ on:
         required: true
       product_read_token:
         required: true
+      supabase_access_token:
+        required: false
 
 permissions:
   contents: read
@@ -36,7 +38,7 @@ permissions:
 jobs:
   approve:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 15
     env:
       PROJECT: ${{ inputs.project }}
       PRODUCT_REPOSITORY: ${{ inputs.product_repository }}
@@ -102,7 +104,8 @@ jobs:
           config = provider_gates.is_a?(Hash) ? provider_gates[gate] : nil
           abort("provider gate is not registered") unless config.is_a?(Hash)
           abort("provider gate approval mode mismatch") unless config["approval_mode"] == "sanjinworks_owner_button"
-          abort("provider gate executor must remain approval_only") unless config["executor"] == "approval_only"
+          executor = config["executor"]
+          abort("provider gate executor is unsupported") unless ["approval_only", "classmo_supabase_migration"].include?(executor)
           label = config["label"]
           abort("provider gate label missing") unless label.is_a?(String) && !label.strip.empty?
 
@@ -113,21 +116,119 @@ jobs:
           abort("current product gate changed") unless action["gate"] == gate
           abort("provider approval requires no source scope") unless action["source_scope"] == []
 
-          File.open(ENV.fetch("GITHUB_STEP_SUMMARY"), "a") do |summary|
-            summary.puts "## Provider Gate Approval"
+          validation_path = product.dig("ci", "validation", "path")
+          abort("validation workflow is not registered") unless validation_path.is_a?(String) && validation_path.start_with?(".github/workflows/")
+
+          values = {
+            "PROVIDER_EXECUTOR" => executor,
+            "VALIDATION_WORKFLOW_FILE" => File.basename(validation_path),
+            "PROVIDER_LABEL" => label,
+          }
+
+          if executor == "classmo_supabase_migration"
+            abort("CLASSMO executor routed to another project") unless project == "CLASSMO"
+            expected = {
+              "provider" => "supabase_management_api",
+              "project_ref" => "hfclkbqzxiqhcckwknih",
+              "migration_name" => "015_course_configuration_ambiguity",
+              "migration_path" => "supabase/migrations/20261007001500_015_course_configuration_ambiguity.sql",
+              "checksum_path" => "supabase/migrations/SHA256SUMS",
+              "runtime_path" => "supabase/tests/course-operations-runtime.sql",
+              "cleanup_path" => "supabase/tests/course-operations-cleanup.sql",
+              "expected_prior_migration_name" => "014_course_operations_persistence",
+            }
+            expected.each do |key, value|
+              abort("CLASSMO provider executor #{key} mismatch") unless config[key] == value
+            end
+            values.merge!(
+              "SUPABASE_PROJECT_REF" => config["project_ref"],
+              "PROVIDER_MIGRATION_NAME" => config["migration_name"],
+              "PROVIDER_MIGRATION_PATH" => config["migration_path"],
+              "PROVIDER_CHECKSUM_PATH" => config["checksum_path"],
+              "PROVIDER_RUNTIME_PATH" => config["runtime_path"],
+              "PROVIDER_CLEANUP_PATH" => config["cleanup_path"],
+              "PROVIDER_EXPECTED_PRIOR_MIGRATION" => config["expected_prior_migration_name"],
+            )
+          end
+
+          File.open(ENV.fetch("GITHUB_ENV"), "a", encoding: "UTF-8") do |env|
+            values.each do |key, value|
+              abort("unsafe provider environment value") if value.include?("\n") || value.include?("\r")
+              env.puts "#{key}=#{value}"
+            end
+          end
+
+          File.open(ENV.fetch("GITHUB_STEP_SUMMARY"), "a", encoding: "UTF-8") do |summary|
+            summary.puts "## Provider Gate Owner Approval"
             summary.puts
             summary.puts "- project: #{project}"
             summary.puts "- source_sha: #{ENV.fetch('SOURCE_SHA')}"
             summary.puts "- control_sha: #{ENV.fetch('CONTROL_SHA')}"
             summary.puts "- gate: #{gate}"
             summary.puts "- label: #{label}"
-            summary.puts "- result: APPROVED"
-            summary.puts "- provider mutation: NOT_RUN"
+            summary.puts "- executor: #{executor}"
+            summary.puts "- approval: APPROVED"
           end
           RUBY
 
-      - name: Record approval boundary
+      - name: Verify exact integrated source validation and no source writer
+        env:
+          GH_TOKEN: ${{ secrets.product_read_token }}
         shell: bash
         run: |
+          set -euo pipefail
+          validation_run="$(gh api             "repos/$PRODUCT_REPOSITORY/actions/workflows/$VALIDATION_WORKFLOW_FILE/runs?head_sha=$SOURCE_SHA&event=push&per_page=20"             --jq '.workflow_runs | map(select(.head_sha == env.SOURCE_SHA and .status == "completed" and .conclusion == "success")) | sort_by(.id) | last | .id // empty')"
+          test -n "$validation_run" || {
+            echo "::error::Exact current source has no successful integrated validation."
+            exit 1
+          }
+          conflicts="$(gh pr list --repo "$PRODUCT_REPOSITORY" --state open --base "$TARGET_BRANCH"             --json number,headRefName             --jq '.[] | select(.headRefName | startswith("direct/") or startswith("job/")) | "\(.number) \(.headRefName)"')"
+          test -z "$conflicts" || {
+            echo "::error::Source-writing PR is open; provider execution refuses concurrent mutation."
+            echo "$conflicts"
+            exit 1
+          }
+          echo "SOURCE_VALIDATION_RUN_ID=$validation_run" >> "$GITHUB_ENV"
+          {
+            echo "- source validation run: `$validation_run`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Record approval-only boundary
+        if: env.PROVIDER_EXECUTOR == 'approval_only'
+        shell: bash
+        run: |
+          {
+            echo "- result: `APPROVED`"
+            echo "- provider mutation: `NOT_RUN`"
+          } >> "$GITHUB_STEP_SUMMARY"
           echo "Provider gate approval recorded for $PROJECT / $GATE / $SOURCE_SHA."
-          echo "No provider, database, deployment, credential, device or Production mutation was executed."
+
+      - name: CLASSMO · require scoped Supabase credential
+        if: env.PROVIDER_EXECUTOR == 'classmo_supabase_migration'
+        env:
+          CLASSMO_SUPABASE_ACCESS_TOKEN: ${{ secrets.supabase_access_token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CLASSMO_SUPABASE_ACCESS_TOKEN" || {
+            echo "::error::CLASSMO_SUPABASE_ACCESS_TOKEN is not configured in the trusted Runner repository."
+            exit 1
+          }
+
+      - name: CLASSMO · apply migration 015 and verify runtime
+        if: env.PROVIDER_EXECUTOR == 'classmo_supabase_migration'
+        env:
+          CLASSMO_SUPABASE_ACCESS_TOKEN: ${{ secrets.supabase_access_token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python scripts/classmo_supabase_gate.py             --repo "$GITHUB_WORKSPACE/.approval/product"             --project-ref "$SUPABASE_PROJECT_REF"             --migration-name "$PROVIDER_MIGRATION_NAME"             --migration-path "$PROVIDER_MIGRATION_PATH"             --checksum-path "$PROVIDER_CHECKSUM_PATH"             --runtime-path "$PROVIDER_RUNTIME_PATH"             --cleanup-path "$PROVIDER_CLEANUP_PATH"             --expected-prior-migration-name "$PROVIDER_EXPECTED_PRIOR_MIGRATION"             --source-sha "$SOURCE_SHA"             --evidence "$RUNNER_TEMP/classmo-provider-evidence.json"             --summary "$GITHUB_STEP_SUMMARY"
+
+      - name: CLASSMO · upload provider evidence
+        if: env.PROVIDER_EXECUTOR == 'classmo_supabase_migration' && success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: classmo-provider-evidence-${{ inputs.source_sha }}
+          path: ${{ runner.temp }}/classmo-provider-evidence.json
+          if-no-files-found: error
+          retention-days: 30
