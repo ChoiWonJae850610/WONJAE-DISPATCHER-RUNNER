@@ -82,3 +82,86 @@ def test_manual_state_does_not_require_transition(tmp_path: Path) -> None:
     )
     assert state.next_action.type == "MANUAL_QA"
     assert state.after_source_success is None
+
+
+def manual_after_source(path: Path, *, with_contract: bool = True) -> None:
+    payload = yaml.safe_load(path.read_text(encoding="utf-8"))
+    payload["after_source_success"] = {
+        "type": "MANUAL_QA",
+        "title": "Verify the integrated source on the Owner device",
+        "source_task_id": None,
+        "owner_action": "Run the exact integrated source through the declared Owner checkout path.",
+        "source_scope": [],
+        "gate": "physical_owner_checkout",
+    }
+    if with_contract:
+        payload["after_source_success"]["manual_qa"] = {
+            "mode": "owner_checkout",
+            "required_paths": ["qa/manual-owner-entrypoint.txt"],
+        }
+    path.write_text(yaml.safe_dump(payload, sort_keys=False), encoding="utf-8")
+
+
+def test_source_ready_rejects_manual_qa_without_actionability_contract(tmp_path: Path) -> None:
+    path = write_state(tmp_path)
+    manual_after_source(path, with_contract=False)
+    with pytest.raises(ExecutionStateError, match="actionability contract"):
+        load_product_execution_state(
+            tmp_path, ".wonjae/execution-state.yaml", "WAFL"
+        )
+
+
+def test_manual_qa_transition_requires_real_changed_execution_paths(tmp_path: Path) -> None:
+    path = write_state(tmp_path)
+    manual_after_source(path)
+
+    state = load_product_execution_state(
+        tmp_path, ".wonjae/execution-state.yaml", "WAFL"
+    )
+    assert state.after_source_success is not None
+    assert state.after_source_success.manual_qa is not None
+    assert state.after_source_success.manual_qa.mode == "owner_checkout"
+    assert state.after_source_success.manual_qa.required_paths == (
+        "qa/manual-owner-entrypoint.txt",
+    )
+
+    with pytest.raises(ExecutionStateError, match="not a regular file"):
+        advance_product_execution_state(
+            tmp_path,
+            ".wonjae/execution-state.yaml",
+            "WAFL",
+            changed_paths=("qa/manual-owner-entrypoint.txt",),
+        )
+
+    entry = tmp_path / "qa" / "manual-owner-entrypoint.txt"
+    entry.parent.mkdir(parents=True)
+    entry.write_text("owner executable surface\n", encoding="utf-8")
+
+    with pytest.raises(ExecutionStateError, match="was not changed"):
+        advance_product_execution_state(
+            tmp_path,
+            ".wonjae/execution-state.yaml",
+            "WAFL",
+            changed_paths=("other.txt",),
+        )
+
+    advanced = advance_product_execution_state(
+        tmp_path,
+        ".wonjae/execution-state.yaml",
+        "WAFL",
+        changed_paths=("qa/manual-owner-entrypoint.txt",),
+    )
+    assert advanced.next_action.type == "MANUAL_QA"
+    assert advanced.next_action.manual_qa is not None
+
+
+def test_manual_qa_transition_rejects_non_direct_mode(tmp_path: Path) -> None:
+    path = write_state(tmp_path)
+    manual_after_source(path)
+    payload = yaml.safe_load(path.read_text(encoding="utf-8"))
+    payload["after_source_success"]["manual_qa"]["mode"] = "provider_required"
+    path.write_text(yaml.safe_dump(payload, sort_keys=False), encoding="utf-8")
+    with pytest.raises(ExecutionStateError, match="manual_qa.mode"):
+        load_product_execution_state(
+            tmp_path, ".wonjae/execution-state.yaml", "WAFL"
+        )
