@@ -168,7 +168,7 @@ def test_changed_paths_rejects_protected_authority_files(tmp_path):
     git(repo, "commit", "-m", "base")
 
     (repo / "AGENTS.md").write_text("changed\n", encoding="utf-8")
-    with pytest.raises(DirectWorkerError, match="protected source path"):
+    with pytest.raises(DirectWorkerError, match=r'protected source path\(s\).*AGENTS\.md'):
         changed_paths(repo)
 
 
@@ -290,6 +290,11 @@ def test_product_execution_state_prompt_is_authoritative(tmp_path):
     assert ".wonjae/execution-state.yaml" in prompt
     assert "Current product-state task" in prompt
     assert "execution-state file is protected from model mutation" in prompt
+    assert "AGENTS.md, PROJECT_RULES.md, .gitmodules, .github/**, and .wonjae/**" in prompt
+    assert '"Canonical documents" for this turn means only the explicit canonical-doc list above' in prompt
+    assert "Never advance or rewrite the protected product execution state" in prompt
+    assert "trusted Runner deterministically advances the registered state_path" in prompt
+    assert "never use .wonjae/execution-state.yaml" in prompt
 
 
 def test_changed_paths_rejects_product_execution_state_mutation(tmp_path):
@@ -304,7 +309,10 @@ def test_changed_paths_rejects_product_execution_state_mutation(tmp_path):
     git(repo, "add", ".wonjae/execution-state.yaml")
     git(repo, "commit", "-m", "base")
     state.write_text("schema_version: 2\n", encoding="utf-8")
-    with pytest.raises(DirectWorkerError, match="protected source path"):
+    with pytest.raises(
+        DirectWorkerError,
+        match=r'protected source path\(s\).*\.wonjae/execution-state\.yaml',
+    ):
         changed_paths(repo)
 
 
