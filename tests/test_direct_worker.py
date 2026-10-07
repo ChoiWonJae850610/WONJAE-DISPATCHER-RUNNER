@@ -365,5 +365,5 @@ def test_direct_worker_pr_head_readback_waits_for_known_previous_sha():
     assert "sleep 5" in section
     assert "Direct Worker PR identity changed during head readback." in section
     assert "Direct Worker PR head readback timed out:" in section
-    assert "gh pr view" not in section
+    assert "--json headRefOid" not in section
 
