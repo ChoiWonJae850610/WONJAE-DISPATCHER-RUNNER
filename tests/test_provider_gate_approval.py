@@ -35,9 +35,9 @@ def test_provider_gate_core_rechecks_identity_validation_and_registered_executor
     assert "scripts/wafl_supabase_gate.py" in raw
     assert 'executor == "classmo_eas_build"' in raw
     assert "CLASSMO_EXPO_TOKEN is not configured" in raw
-    assert 'eas build \\\\' in raw
+    assert 'eas build \\' in raw
     assert 'parse-eas-build-view' in raw
-    assert 'device install / physical QA: \`NOT_RUN\`' in raw
+    assert 'device install / physical QA: `NOT_RUN`' in raw
     assert "provider mutation: `NOT_RUN`" in raw
 
 
