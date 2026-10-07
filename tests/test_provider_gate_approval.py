@@ -1,11 +1,6 @@
-from pathlib import Path
-
-
-ROOT = Path(__file__).resolve().parents[1]
-
-
 def test_provider_gate_approval_caller_is_owner_button_recording_only():
-    raw = (ROOT / ".github/workflows/provider-gate-approval.yml").read_text(encoding="utf-8")
+    with open(".github/workflows/provider-gate-approval.yml", encoding="utf-8") as handle:
+        raw = handle.read()
     for value in ("project:", "control_sha:", "source_sha:", "gate:"):
         assert value in raw
     for job in ("wafl:", "classmo:", "esc:", "muvel:"):
@@ -20,9 +15,8 @@ def test_provider_gate_approval_caller_is_owner_button_recording_only():
 
 
 def test_provider_gate_approval_core_has_exact_identity_guards_and_no_provider_mutation():
-    raw = (ROOT / ".github/workflows/provider-gate-approval-core.yml").read_text(
-        encoding="utf-8"
-    )
+    with open(".github/workflows/provider-gate-approval-core.yml", encoding="utf-8") as handle:
+        raw = handle.read()
     assert 'test "$current" = "$SOURCE_SHA"' in raw
     assert 'config["approval_mode"] == "sanjinworks_owner_button"' in raw
     assert 'config["executor"] == "approval_only"' in raw
