@@ -369,9 +369,12 @@ tasks-v2 control records, wake issues, persistent source queues and Gmail lifecy
 project keeps a dedicated write credential and the reusable core receives only the selected
 project's token. The workflow reads the current DEV-CONTROL registry, checks out the selected
 product, runs Codex in a network-disabled workspace-write sandbox with a scrubbed environment,
-then lets trusted workflow code publish the branch/PR. A successful exact PR-head validation
-is merged to the registered active development branch and followed by exact integrated-SHA
-validation. A failed validation leaves the PR open for the `retry` command.
+then lets trusted workflow code publish the branch/PR. After a branch push, PR-head
+readback treats only the known previous head as transient GitHub propagation and waits at
+5-second intervals for at most 90 seconds; a different unexpected head or changed PR identity
+still fails immediately. A successful exact PR-head validation is merged to the registered
+active development branch and followed by exact integrated-SHA validation. A failed validation
+leaves the PR open for the `retry` command.
 
 All four source callers use the verified repository-scoped WSL2 Linux home runner
 through `home-linux`; offline home jobs have no automatic hosted source fallback.
