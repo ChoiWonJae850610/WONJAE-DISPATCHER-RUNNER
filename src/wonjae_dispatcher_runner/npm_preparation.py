@@ -221,6 +221,7 @@ def prepare_npm(repo: Path, preparation: NpmPreparation | None) -> bool:
         _verify_lock(stage / "package-lock.json")
         # An online install can leave partially populated cache entries. Explicitly
         # consume every locked tarball before claiming the offline cache is complete.
+        npm("cache", "verify")
         lock = json.loads((stage / "package-lock.json").read_text())
         tarballs = sorted({package["resolved"] for package in lock["packages"].values()
                            if package.get("resolved") and not package.get("link")})
