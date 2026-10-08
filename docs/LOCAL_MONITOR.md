@@ -31,7 +31,7 @@ This module is a liveness supplement for the registered Direct Worker Codex step
 
 See [RESTRICTED_MONITOR_BRIDGE.md](RESTRICTED_MONITOR_BRIDGE.md) for the opt-in
 Unix-socket process-health relay. The installed local watcher remains
-\`PrivateNetwork=true\`; the separate signer uses a fixed HTTPS destination,
+`PrivateNetwork=true`; the separate signer uses a fixed HTTPS destination,
 an exact Linux UID gate and a protected systemd credential. This stage does not
 configure secrets, register services or perform an actual Production check.
 Application-level fixed-host egress must not be represented as a kernel-level
