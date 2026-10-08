@@ -10,15 +10,22 @@ from pathlib import Path
 
 import pytest
 
-from scripts.local_monitor import (
-    atomic_write,
-    inspect_job,
-    private_directory,
-    proc_start_ticks,
-    same_process,
-    signed_body,
-    snapshot,
+from importlib.util import module_from_spec, spec_from_file_location
+
+_spec = spec_from_file_location(
+    "local_monitor", Path(__file__).resolve().parents[1] / "scripts" / "local_monitor.py",
 )
+assert _spec is not None and _spec.loader is not None
+_module = module_from_spec(_spec)
+_spec.loader.exec_module(_module)
+
+atomic_write = _module.atomic_write
+inspect_job = _module.inspect_job
+private_directory = _module.private_directory
+proc_start_ticks = _module.proc_start_ticks
+same_process = _module.same_process
+signed_body = _module.signed_body
+snapshot = _module.snapshot
 
 
 def test_private_directory_rejects_symlink_and_world_readable(tmp_path: Path):
