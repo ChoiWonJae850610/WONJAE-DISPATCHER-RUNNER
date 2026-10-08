@@ -44,6 +44,31 @@ workflow code performs commit, push, PR creation, merge, and exact-SHA validatio
 
 ## Home runner
 
+### Locked npm source dependencies
+
+The trusted workflow supplies Node 24 before source execution. For an npm product with
+tracked root and workspace manifests and a modern lockfile, the trusted parent prepares
+dependencies in a temporary manifest-only checkout. It uses public registry tarballs with
+lockfile integrity, no inherited credentials/configuration, and `--ignore-scripts`.
+
+A SOURCE_READY action may declare `npm_preparation` with a relative `workspace` and a
+bounded `packages` list of exact npm versions. This declaration belongs to protected
+product state; the public runner contains no product package list. The parent installs
+the declared packages only in temporary storage, then verifies `npm ci --offline`.
+Product manifests and lockfiles remain byte-identical until the source worker performs
+its genuine offline installation.
+
+Installed artifacts, a standalone Node/npm toolchain and the verified cache are copied
+into ignored `node_modules/.direct-worker` storage. Codex receives only explicit safe
+npm variables; offline mode and lifecycle-script suppression remain enabled. It uses
+`npm install --offline --ignore-scripts --save-exact` in the authorized workspace and
+does not delete `node_modules` or run `npm ci`, which would remove its prepared tools.
+Temporary preparation does not prove committed installation, source completion or export.
+Exact product PR-head and integrated validation remain required.
+
+Every timeout replacement prepares the fresh committed checkout again. Preparation
+failure stops before Codex and never enables source network access or provider authority.
+
 The verified repository-scoped runner is:
 
 - name: `WONJAE-HOME-DIRECT-WORKER`

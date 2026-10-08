@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -20,6 +21,12 @@ class ManualQaContract:
 
 
 @dataclass(frozen=True)
+class NpmPreparation:
+    workspace: str
+    packages: tuple[str, ...]
+
+
+@dataclass(frozen=True)
 class ExecutionAction:
     type: str
     title: str
@@ -28,6 +35,7 @@ class ExecutionAction:
     source_scope: tuple[str, ...]
     gate: str | None
     manual_qa: ManualQaContract | None = None
+    npm_preparation: NpmPreparation | None = None
 
 
 @dataclass(frozen=True)
@@ -75,6 +83,7 @@ def _parse_action(value: object, label: str) -> ExecutionAction:
     source_scope = value.get("source_scope", [])
     gate = value.get("gate")
     manual_qa_value = value.get("manual_qa")
+    npm_value = value.get("npm_preparation")
 
     if action_type not in ACTION_TYPES:
         raise ExecutionStateError(f"{label}.type is invalid")
@@ -107,6 +116,25 @@ def _parse_action(value: object, label: str) -> ExecutionAction:
         if manual_qa_value is not None
         else None
     )
+    npm_preparation = None
+    if npm_value is not None:
+        if action_type != "SOURCE_READY" or not isinstance(npm_value, dict):
+            raise ExecutionStateError(f"{label}.npm_preparation requires SOURCE_READY mapping")
+        if set(npm_value) != {"workspace", "packages"}:
+            raise ExecutionStateError(f"{label}.npm_preparation fields are invalid")
+        workspace = npm_value.get("workspace")
+        packages = npm_value.get("packages")
+        if not isinstance(workspace, str) or workspace != workspace.strip():
+            raise ExecutionStateError(f"{label}.npm_preparation.workspace is invalid")
+        _safe_relative(workspace)
+        if workspace == "." or workspace.startswith("."):
+            raise ExecutionStateError(f"{label}.npm_preparation.workspace is invalid")
+        pattern = r"(?:@[a-z0-9][a-z0-9._-]*/)?[a-z0-9][a-z0-9._-]*@\d+\.\d+\.\d+"
+        if not isinstance(packages, list) or not packages or len(packages) > 20 or not all(
+            isinstance(item, str) and re.fullmatch(pattern, item) for item in packages
+        ) or len(set(packages)) != len(packages):
+            raise ExecutionStateError(f"{label}.npm_preparation requires exact npm versions")
+        npm_preparation = NpmPreparation(workspace, tuple(packages))
 
     return ExecutionAction(
         type=action_type,
@@ -116,6 +144,7 @@ def _parse_action(value: object, label: str) -> ExecutionAction:
         source_scope=tuple(item.strip() for item in source_scope),
         gate=gate.strip() if isinstance(gate, str) else None,
         manual_qa=manual_qa,
+        npm_preparation=npm_preparation,
     )
 
 

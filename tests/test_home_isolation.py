@@ -23,7 +23,10 @@ from wonjae_dispatcher_runner.home_isolation import (
 
 
 @pytest.mark.skipif(os.name != "posix", reason="actual source runtime requires Linux")
-def test_actual_source_sdk_receives_no_secrets_and_retains_split_profile(tmp_path, monkeypatch):
+@pytest.mark.parametrize("prepared", [False, True])
+def test_actual_source_sdk_receives_no_secrets_and_retains_split_profile(
+    tmp_path, monkeypatch, prepared,
+):
     from test_direct_worker import git, registry
 
     from wonjae_dispatcher_runner import direct_worker as worker
@@ -36,6 +39,15 @@ def test_actual_source_sdk_receives_no_secrets_and_retains_split_profile(tmp_pat
     (repo / "source.txt").write_text("before\n")
     git(repo, "add", ".")
     git(repo, "commit", "-m", "fixture")
+    from wonjae_dispatcher_runner.npm_preparation import ARTIFACT_ROOT, source_npm_environment
+    if prepared:
+        for relative in ("ready.json", "user.npmrc", "global.npmrc", "tools/bin/node",
+                         "tools/lib/node_modules/npm/bin/npm-cli.js"):
+            target = repo / ARTIFACT_ROOT / relative
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.touch()
+        (repo / ARTIFACT_ROOT / "cache").mkdir()
+        (repo / ".git/info/exclude").write_text("node_modules/\n")
     route = worker.load_direct_worker_route(registry(tmp_path), "ESC")
     auth = tmp_path / "auth"
     auth.mkdir()
@@ -54,7 +66,11 @@ def test_actual_source_sdk_receives_no_secrets_and_retains_split_profile(tmp_pat
     class FakeCodex:
         def __init__(self, config):
             assert "synthetic-secret" not in json.dumps(dict(worker.os.environ))
-            assert config.env == source_environment(auth, Path("/nonexistent"))
+            expected = source_environment(auth, Path("/nonexistent"))
+            if prepared:
+                expected["PATH"] = str(repo / ARTIFACT_ROOT / "tools/bin") + ":" + expected["PATH"]
+                expected.update(source_npm_environment(repo))
+            assert config.env == expected
 
         def __enter__(self):
             return self
@@ -72,6 +88,10 @@ def test_actual_source_sdk_receives_no_secrets_and_retains_split_profile(tmp_pat
             expected = permission_config(repo, (auth, trusted))
             assert kwargs["config"]["permissions"] == expected["permissions"]
             assert kwargs["config"]["shell_environment_policy"]["inherit"] == "none"
+            if prepared:
+                assert kwargs["config"]["shell_environment_policy"]["set"][
+                    "NPM_CONFIG_OFFLINE"] == "true"
+            assert expected["permissions"][PROFILE]["network"] == {"enabled": False}
             return self
 
         def run(self, *args, **kwargs):
