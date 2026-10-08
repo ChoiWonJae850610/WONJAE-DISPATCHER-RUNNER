@@ -64,7 +64,8 @@ def validate_frame(payload: bytes) -> list[dict]:
                 or not 0 < run_id <= 9007199254740991 or type(attempt) is not int
                 or not 0 < attempt <= 9007199254740991
                 or not isinstance(source, str) or not VALID_SHA.fullmatch(source)
-                or job["phase"] != "CODEX" or job["state"] not in STATES):
+                or job["phase"] != "CODEX" or not isinstance(job["state"], str)
+                or job["state"] not in STATES):
             raise ValueError("invalid monitor job identity")
         identity = (project, run_id, attempt)
         if identity in seen:
