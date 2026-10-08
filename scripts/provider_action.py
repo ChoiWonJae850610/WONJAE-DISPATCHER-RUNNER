@@ -32,6 +32,44 @@ FORBIDDEN_OTA_NAMES = {
 }
 
 
+# This narrowly permits the audited, JavaScript-only CLASSMO 019 form-library
+# additions against the existing signed preview baseline. It is NOT permission
+# for arbitrary package.json changes or for future/native dependency updates.
+CLASSMO_019_JS_DEPENDENCIES = {
+    "@hookform/resolvers": "5.9.1",
+    "react-hook-form": "7.89.0",
+    "zod": "4.6.5",
+}
+# Locked public npm tarballs from the real 019 npm install; pin integrity, not
+# just names/versions, so another package artifact cannot use this exception.
+CLASSMO_019_JS_LOCK_PACKAGES = {
+    "apps/mobile/node_modules/@hookform/resolvers": (
+        "5.9.1",
+        "https://registry.npmjs.org/@hookform/resolvers/-/resolvers-5.9.1.tgz",
+        "sha512-7b7vsbraJxKgjVSA1Nur9tLwj539WGJUBLA7QNvXnFoT2pM5Z7G+6rlukk4B2/QrTZy6huRtH6wKeESPKuIr6w==",
+    ),
+    "apps/mobile/node_modules/zod": (
+        "4.6.5",
+        "https://registry.npmjs.org/zod/-/zod-4.6.5.tgz",
+        "sha512-v5l/aFXZQeai4awLbOpSoHecE9UiMrnfx75tEXLjNonXVARxQ5mOeipTjROUchszUNCqnE+hqAMujRsRHsut2Q==",
+    ),
+    "node_modules/@standard-schema/utils": (
+        "0.3.0",
+        "https://registry.npmjs.org/@standard-schema/utils/-/utils-0.3.0.tgz",
+        "sha512-e7Mew686owMaPJVNNLs55PUvgz371nKgwsc4vxE49zsODpJEnxgxRo2y/OKrqueavXgZNMDVj3DdHFlaSAeU8g==",
+    ),
+    "node_modules/react-hook-form": (
+        "7.89.0",
+        "https://registry.npmjs.org/react-hook-form/-/react-hook-form-7.89.0.tgz",
+        "sha512-vKcoCfy8RKZDrhSdqsRFp0uEOdS1AhLjOL6hR7Wmfzg1akNxEhaPf5WORx8SgEQPVXakdDyDkqQp+KNxVnnPHg==",
+    ),
+}
+_CLASSMO_JS_LOCK_FIELDS = {
+    "version", "resolved", "integrity", "license", "dependencies",
+    "peerDependencies", "peerDependenciesMeta", "funding", "engines",
+}
+
+
 def fail(message: str) -> None:
     raise SystemExit(message)
 
@@ -282,6 +320,110 @@ def _is_safe_wafl_app_variant_only_delta(
     return not removed and added == [WAFL_SAFE_APP_VARIANT_LINE]
 
 
+
+def _json_at_commit(repo: Path, sha: str, path: str) -> dict[str, Any] | None:
+    try:
+        value = json.loads(git_output(repo, "show", f"{sha}:{path}"))
+    except (subprocess.CalledProcessError, json.JSONDecodeError):
+        return None
+    return value if isinstance(value, dict) else None
+
+
+def _is_safe_classmo_019_js_only_dependency_delta(
+    repo: Path, base: str, head: str
+) -> bool:
+    """Only the exact additive 019 JS dependency + genuine lockfile delta.
+
+    Signed-preview compatibility must fail closed on any native/config change,
+    any changed pre-existing package, unpinned/missing tarball, or extra package.
+    """
+    before = _json_at_commit(repo, base, "apps/mobile/package.json")
+    after = _json_at_commit(repo, head, "apps/mobile/package.json")
+    before_lock = _json_at_commit(repo, base, "package-lock.json")
+    after_lock = _json_at_commit(repo, head, "package-lock.json")
+    if not all(isinstance(item, dict) for item in (before, after, before_lock, after_lock)):
+        return False
+
+    previous_deps = before.get("dependencies")
+    current_deps = after.get("dependencies")
+    if not isinstance(previous_deps, dict) or not isinstance(current_deps, dict):
+        return False
+    if any(name in previous_deps for name in CLASSMO_019_JS_DEPENDENCIES):
+        return False
+    if any(
+        current_deps.get(name) != version
+        for name, version in CLASSMO_019_JS_DEPENDENCIES.items()
+    ):
+        return False
+    original_manifest = dict(after)
+    original_manifest["dependencies"] = {
+        name: version
+        for name, version in current_deps.items()
+        if name not in CLASSMO_019_JS_DEPENDENCIES
+    }
+    if original_manifest != before:
+        return False
+
+    if before_lock.get("lockfileVersion") != 3 or after_lock.get("lockfileVersion") != 3:
+        return False
+    previous_packages = before_lock.get("packages")
+    current_packages = after_lock.get("packages")
+    if not isinstance(previous_packages, dict) or not isinstance(current_packages, dict):
+        return False
+    old_mobile = previous_packages.get("apps/mobile")
+    new_mobile = current_packages.get("apps/mobile")
+    if not isinstance(old_mobile, dict) or not isinstance(new_mobile, dict):
+        return False
+    if old_mobile.get("dependencies") != previous_deps:
+        return False
+    if new_mobile.get("dependencies") != current_deps:
+        return False
+
+    for path, (version, resolved, integrity) in CLASSMO_019_JS_LOCK_PACKAGES.items():
+        package = current_packages.get(path)
+        if path in previous_packages or not isinstance(package, dict):
+            return False
+        if (
+            package.get("version") != version
+            or package.get("resolved") != resolved
+            or package.get("integrity") != integrity
+            or set(package) - _CLASSMO_JS_LOCK_FIELDS
+        ):
+            return False
+        expected_dependencies = (
+            {"@standard-schema/utils": "^0.3.0"}
+            if path == "apps/mobile/node_modules/@hookform/resolvers"
+            else {}
+        )
+        if package.get("dependencies", {}) != expected_dependencies:
+            return False
+        peers = package.get("peerDependencies", {})
+        if not isinstance(peers, dict) or any(
+            name == "react-native"
+            or name == "expo"
+            or name.startswith(("@react-native/", "@expo/"))
+            for name in peers
+        ):
+            return False
+
+    # Reverse ONLY the approved seven lockfile JSON additions. Exact equality
+    # proves that all pre-existing lock metadata and every other workspace are
+    # unchanged (not merely that the new package names appear somewhere).
+    original_lock = dict(after_lock)
+    original_packages = dict(current_packages)
+    for path in CLASSMO_019_JS_LOCK_PACKAGES:
+        del original_packages[path]
+    original_mobile = dict(new_mobile)
+    original_mobile["dependencies"] = {
+        name: version
+        for name, version in new_mobile["dependencies"].items()
+        if name not in CLASSMO_019_JS_DEPENDENCIES
+    }
+    original_packages["apps/mobile"] = original_mobile
+    original_lock["packages"] = original_packages
+    return original_lock == before_lock
+
+
 def check_ota(args: argparse.Namespace) -> None:
     repo = Path(args.repo).resolve()
     base = args.base
@@ -291,16 +433,33 @@ def check_ota(args: argparse.Namespace) -> None:
     git_output(repo, "cat-file", "-e", f"{base}^{{commit}}")
     git_output(repo, "cat-file", "-e", f"{head}^{{commit}}")
     changed = git_output(repo, "diff", "--name-only", f"{base}..{head}")
+    changed_paths = {path.replace("\\", "/") for path in changed.splitlines()}
     root = safe_rel(args.working_directory, "working_directory").rstrip("/") + "/"
+    classmo_mobile = args.project == "CLASSMO" and root == "apps/mobile/"
+    classmo_019_safe = (
+        classmo_mobile
+        and "apps/mobile/package.json" in changed_paths
+        and "package-lock.json" in changed_paths
+        and _is_safe_classmo_019_js_only_dependency_delta(repo, base, head)
+    )
     blocked: list[str] = []
-    for raw in changed.splitlines():
-        path = raw.replace("\\", "/")
+    if classmo_mobile:
+        # The original check was scoped to apps/mobile and missed root-level
+        # workspace dependency changes. Never silently ignore a root manifest.
+        for path in ("package.json", "yarn.lock", "pnpm-lock.yaml", "npm-shrinkwrap.json"):
+            if path in changed_paths:
+                blocked.append(path)
+        if "package-lock.json" in changed_paths and not classmo_019_safe:
+            blocked.append("package-lock.json")
+    for path in sorted(changed_paths):
         if not path.startswith(root):
             continue
         relative = path[len(root) :]
         name = Path(relative).name
         parts = Path(relative).parts
         if name in FORBIDDEN_OTA_NAMES:
+            if path == "apps/mobile/package.json" and classmo_019_safe:
+                continue
             blocked.append(path)
             continue
         if parts and parts[0] in {"ios", "android", "plugins"}:
