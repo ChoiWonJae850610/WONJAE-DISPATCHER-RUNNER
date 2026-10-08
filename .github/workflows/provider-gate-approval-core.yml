@@ -162,8 +162,11 @@ jobs:
               "working_directory" => "apps/mobile",
               "platform" => "ios",
               "profile" => "preview",
-              "app_version" => "0.0.11",
-              "build_number" => "3",
+              "app_version" => "0.0.12",
+              "build_number" => "4",
+              "runtime_version" => "0.0.12",
+              "environment" => "preview",
+              "channel" => "preview",
             }
             expected.each do |key, value|
               abort("CLASSMO EAS executor #{key} mismatch") unless config[key] == value
@@ -174,6 +177,9 @@ jobs:
               "PROVIDER_BUILD_PROFILE" => config["profile"],
               "PROVIDER_APP_VERSION" => config["app_version"],
               "PROVIDER_BUILD_NUMBER" => config["build_number"],
+              "PROVIDER_RUNTIME_VERSION" => config["runtime_version"],
+              "PROVIDER_ENVIRONMENT" => config["environment"],
+              "PROVIDER_CHANNEL" => config["channel"],
             )
           elsif executor == "wafl_eas_build"
             abort("WAFL signed Preview build executor routed to another project") unless project == "WAFL"
@@ -391,15 +397,40 @@ jobs:
           root = Path(".approval/product") / os.environ["PROVIDER_WORKING_DIRECTORY"]
           app = json.loads((root / "app.json").read_text(encoding="utf-8"))["expo"]
           eas = json.loads((root / "eas.json").read_text(encoding="utf-8"))
+          # Fail before any EAS provider call if npm manifests/lock version drift.
+          source_root = Path(".approval/product")
+          app_package = json.loads((root / "package.json").read_text(encoding="utf-8"))
+          root_package = json.loads((source_root / "package.json").read_text(encoding="utf-8"))
+          lock = json.loads((source_root / "package-lock.json").read_text(encoding="utf-8"))
+          declared = os.environ["PROVIDER_APP_VERSION"]
+          versions = (
+              app_package.get("version"),
+              root_package.get("version"),
+              lock.get("version"),
+              lock.get("packages", {}).get("", {}).get("version"),
+              lock.get("packages", {}).get("apps/mobile", {}).get("version"),
+          )
+          if any(version != declared for version in versions):
+              raise SystemExit("CLASSMO package/lock app version mismatch")
           if app.get("version") != os.environ["PROVIDER_APP_VERSION"]:
               raise SystemExit("CLASSMO preview app version mismatch")
           if str(app.get("ios", {}).get("buildNumber")) != os.environ["PROVIDER_BUILD_NUMBER"]:
               raise SystemExit("CLASSMO preview build number mismatch")
           if app.get("runtimeVersion") != {"policy": "appVersion"}:
               raise SystemExit("CLASSMO preview runtimeVersion policy changed")
+          # With appVersion policy the native runtime is the declared app version.
+          if app.get("version") != os.environ["PROVIDER_RUNTIME_VERSION"]:
+              raise SystemExit("CLASSMO preview appVersion/runtime mismatch")
+          if app.get("ios", {}).get("bundleIdentifier") != "com.sanjinworks.classmo":
+              raise SystemExit("CLASSMO preview bundle identifier changed")
+          if eas.get("cli", {}).get("appVersionSource") != "local":
+              raise SystemExit("CLASSMO preview build must use tracked local versions")
           preview = eas.get("build", {}).get("preview", {})
-          if preview.get("distribution") != "internal" or preview.get("channel") != "preview":
-              raise SystemExit("CLASSMO preview EAS profile mismatch")
+          if (preview.get("distribution") != "internal"
+              or preview.get("environment") != os.environ["PROVIDER_ENVIRONMENT"]
+              or preview.get("channel") != os.environ["PROVIDER_CHANNEL"]
+              or preview.get("autoIncrement") is not None):
+              raise SystemExit("CLASSMO preview EAS profile/version policy mismatch")
           if preview.get("ios", {}).get("simulator") is not False:
               raise SystemExit("CLASSMO preview build must target physical iOS devices")
           PY
