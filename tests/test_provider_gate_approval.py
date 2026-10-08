@@ -25,7 +25,7 @@ def test_provider_gate_core_rechecks_identity_validation_and_registered_executor
     assert (
         '["approval_only", "classmo_supabase_migration", '
         '"classmo_eas_build", "classmo_eas_update", '
-        '"wafl_supabase_hardening", "wafl_eas_update"].include?(executor)' in raw
+        '"wafl_supabase_hardening", "wafl_eas_update", "wafl_eas_build"].include?(executor)' in raw
     )
     assert 'action["type"] == "PROVIDER_GATE"' in raw
     assert 'action["gate"] == gate' in raw
@@ -126,3 +126,26 @@ def test_wafl_preview_ota_provider_gate_is_bounded_and_read_back():
     assert 'preview.get("channel") != "alpha83-p5"' in raw
     assert 'echo "## $PROJECT preview iOS OTA"' in raw
     assert 'device receipt / physical QA: `NOT_RUN`' in raw
+
+def test_wafl_signed_preview_icon_build_is_credential_frozen_exact_gate_only():
+    with open(".github/workflows/provider-gate-approval.yml", encoding="utf-8") as handle:
+        caller = handle.read()
+    with open(".github/workflows/provider-gate-approval-core.yml", encoding="utf-8") as handle:
+        workflow = handle.read()
+    assert "WAFL_EXPO_TOKEN" in caller
+    assert 'executor == "wafl_eas_build"' in workflow
+    assert 'gate == "preview_ios_build"' in workflow
+    assert '"provider" => "eas_build"' in workflow
+    assert '"runtime_version" => "2.0.0-alpha.80-p5"' in workflow
+    assert '"channel" => "alpha83-p5"' in workflow
+    assert '"icon_path" => "assets/branding/wafl-fabric-w.png"' in workflow
+    assert 'app.get("icon") != "./" + os.environ["PROVIDER_ICON_PATH"]' in workflow
+    assert 'preview.get("autoIncrement") is not True' in workflow
+    assert "WAFL · verify fabric W signed Preview build source" in workflow
+    assert "WAFL · build signed internal Preview with fabric W" in workflow
+    assert 'env.PROVIDER_EXECUTOR == \'wafl_eas_build\'' in workflow
+    assert "--freeze-credentials" in workflow
+    assert '--expected-id "$EAS_BUILD_ID"' in workflow
+    assert 'test "$EAS_BUILD_DISTRIBUTION" = "internal"' in workflow
+    assert "Owner iPhone/iPad install & physical acceptance: `NOT_RUN`" in workflow
+    assert "APP_STORE_CONNECT_API_KEY" not in workflow
