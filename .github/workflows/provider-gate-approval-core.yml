@@ -397,6 +397,21 @@ jobs:
           root = Path(".approval/product") / os.environ["PROVIDER_WORKING_DIRECTORY"]
           app = json.loads((root / "app.json").read_text(encoding="utf-8"))["expo"]
           eas = json.loads((root / "eas.json").read_text(encoding="utf-8"))
+          # Fail before any EAS provider call if npm manifests/lock version drift.
+          source_root = Path(".approval/product")
+          app_package = json.loads((root / "package.json").read_text(encoding="utf-8"))
+          root_package = json.loads((source_root / "package.json").read_text(encoding="utf-8"))
+          lock = json.loads((source_root / "package-lock.json").read_text(encoding="utf-8"))
+          declared = os.environ["PROVIDER_APP_VERSION"]
+          versions = (
+              app_package.get("version"),
+              root_package.get("version"),
+              lock.get("version"),
+              lock.get("packages", {}).get("", {}).get("version"),
+              lock.get("packages", {}).get("apps/mobile", {}).get("version"),
+          )
+          if any(version != declared for version in versions):
+              raise SystemExit("CLASSMO package/lock app version mismatch")
           if app.get("version") != os.environ["PROVIDER_APP_VERSION"]:
               raise SystemExit("CLASSMO preview app version mismatch")
           if str(app.get("ios", {}).get("buildNumber")) != os.environ["PROVIDER_BUILD_NUMBER"]:
