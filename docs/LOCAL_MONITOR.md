@@ -25,3 +25,14 @@ This module is a liveness supplement for the registered Direct Worker Codex step
 5. No home Ubuntu service registration or Cloudflare Production deploy is part of this PR.
 
 **Note:** This first wrapper intentionally only observes the source-Codex step. Product repository Windows validation and GitHub-hosted Provider Gates are still observed through their separate official GitHub Actions evidence. A heartbeat cannot prove source progress or job completion.
+
+
+## Restricted egress bridge (Stage 6 source proposal)
+
+See [RESTRICTED_MONITOR_BRIDGE.md](RESTRICTED_MONITOR_BRIDGE.md) for the opt-in
+Unix-socket process-health relay. The installed local watcher remains
+`PrivateNetwork=true`; the separate signer uses a fixed HTTPS destination,
+an exact Linux UID gate and a protected systemd credential. This stage does not
+configure secrets, register services or perform an actual Production check.
+Application-level fixed-host egress must not be represented as a kernel-level
+DNS allowlist; a stricter outbound policy requires separate verification.
