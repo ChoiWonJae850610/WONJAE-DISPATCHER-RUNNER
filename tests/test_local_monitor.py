@@ -6,11 +6,10 @@ import os
 import subprocess
 import sys
 import time
+from importlib.util import module_from_spec, spec_from_file_location
 from pathlib import Path
 
 import pytest
-
-from importlib.util import module_from_spec, spec_from_file_location
 
 _spec = spec_from_file_location(
     "local_monitor", Path(__file__).resolve().parents[1] / "scripts" / "local_monitor.py",
