@@ -1,9 +1,6 @@
 """Credential-free guard tests for the Owner-selected CLASSMO 0.0.12 (4) Preview build."""
 from pathlib import Path
 
-import pytest
-import yaml
-
 CORE = Path(".github/workflows/provider-gate-approval-core.yml")
 CALLER = Path(".github/workflows/provider-gate-approval.yml")
 
