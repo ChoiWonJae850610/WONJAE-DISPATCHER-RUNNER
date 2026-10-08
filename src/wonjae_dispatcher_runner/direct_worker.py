@@ -389,7 +389,11 @@ def _prompt(
     docs = "\n".join(f"- {path}" for path in route.canonical_docs)
     failure = validation_failure[-80_000:] if validation_failure else "(none)"
     handoff = route.handoff
-    if command in {"next", "retry", "resume"} and execution_state is not None and execution_state.next_action.type == "SOURCE_READY":
+    if (
+        command in {"next", "retry", "resume"}
+        and execution_state is not None
+        and execution_state.next_action.type == "SOURCE_READY"
+    ):
         action = execution_state.next_action
         scope = "\n".join(f"- {item}" for item in action.source_scope)
         if action.npm_preparation:
