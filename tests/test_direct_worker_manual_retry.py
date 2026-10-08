@@ -52,7 +52,7 @@ def _write_registry(root: Path) -> Path:
         "        path: .github/workflows/validate.yml\n"
         "    execution:\n      mode: direct_worker\n"
         "      source_writer_concurrency: 1\n      cross_project_parallel: true\n"
-        "      runner_repository: example/runner\n"
+        "      runner_repository: ChoiWonJae850610/WONJAE-DISPATCHER-RUNNER\n"
         "      runner_workflow: .github/workflows/direct-worker.yml\n"
         "      state_path: .wonjae/execution-state.yaml\n"
     )
@@ -109,6 +109,16 @@ def test_trusted_retry_state_advance_then_idempotent_noop(tmp_path: Path):
     repo = tmp_path / "repo"
     repo.mkdir()
     state = _write_state(repo)
+    (repo / "synthetic.txt").write_text("one\n", encoding="utf-8")
+    for args in (
+        ["init"],
+        ["config", "user.email", "runner-test@example.invalid"],
+        ["config", "user.name", "Runner Test"],
+        ["add", "."],
+        ["commit", "-m", "synthetic base"],
+    ):
+        subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True)
+    (repo / "synthetic.txt").write_text("two\n", encoding="utf-8")
     registry = _write_registry(tmp_path)
     command = [
         sys.executable, str(ROOT / "scripts/advance_execution_state.py"),
