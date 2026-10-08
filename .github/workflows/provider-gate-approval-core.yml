@@ -107,7 +107,7 @@ jobs:
           abort("provider gate is not registered") unless config.is_a?(Hash)
           abort("provider gate approval mode mismatch") unless config["approval_mode"] == "sanjinworks_owner_button"
           executor = config["executor"]
-          abort("provider gate executor is unsupported") unless ["approval_only", "classmo_supabase_migration", "classmo_eas_build", "classmo_eas_update", "wafl_supabase_hardening", "wafl_eas_update"].include?(executor)
+          abort("provider gate executor is unsupported") unless ["approval_only", "classmo_supabase_migration", "classmo_eas_build", "classmo_eas_update", "wafl_supabase_hardening", "wafl_eas_update", "wafl_eas_build"].include?(executor)
           label = config["label"]
           abort("provider gate label missing") unless label.is_a?(String) && !label.strip.empty?
 
@@ -174,6 +174,33 @@ jobs:
               "PROVIDER_BUILD_PROFILE" => config["profile"],
               "PROVIDER_APP_VERSION" => config["app_version"],
               "PROVIDER_BUILD_NUMBER" => config["build_number"],
+            )
+          elsif executor == "wafl_eas_build"
+            abort("WAFL signed Preview build executor routed to another project") unless project == "WAFL"
+            abort("WAFL build gate mismatch") unless gate == "preview_ios_build"
+            expected = {
+              "provider" => "eas_build",
+              "working_directory" => "apps/mobile",
+              "platform" => "ios",
+              "profile" => "preview",
+              "environment" => "development",
+              "channel" => "alpha83-p5",
+              "runtime_version" => "2.0.0-alpha.80-p5",
+              "app_version" => "2.0.0",
+              "icon_path" => "assets/branding/wafl-fabric-w.png",
+            }
+            expected.each do |key, value|
+              abort("WAFL signed Preview build #{key} mismatch") unless config[key] == value
+            end
+            values.merge!(
+              "PROVIDER_WORKING_DIRECTORY" => config["working_directory"],
+              "PROVIDER_PLATFORM" => config["platform"],
+              "PROVIDER_BUILD_PROFILE" => config["profile"],
+              "PROVIDER_ENVIRONMENT" => config["environment"],
+              "PROVIDER_CHANNEL" => config["channel"],
+              "PROVIDER_RUNTIME_VERSION" => config["runtime_version"],
+              "PROVIDER_APP_VERSION" => config["app_version"],
+              "PROVIDER_ICON_PATH" => config["icon_path"],
             )
           elsif executor == "classmo_eas_update"
             abort("CLASSMO EAS update executor routed to another project") unless project == "CLASSMO"
@@ -313,7 +340,7 @@ jobs:
           retention-days: 30
 
       - name: EAS · require scoped Expo credential
-        if: env.PROVIDER_EXECUTOR == 'classmo_eas_build' || env.PROVIDER_EXECUTOR == 'classmo_eas_update' || env.PROVIDER_EXECUTOR == 'wafl_eas_update'
+        if: env.PROVIDER_EXECUTOR == 'classmo_eas_build' || env.PROVIDER_EXECUTOR == 'classmo_eas_update' || env.PROVIDER_EXECUTOR == 'wafl_eas_update' || env.PROVIDER_EXECUTOR == 'wafl_eas_build'
         env:
           PROVIDER_EXPO_TOKEN: ${{ secrets.expo_token }}
         shell: bash
@@ -323,6 +350,35 @@ jobs:
             echo "::error::Project-scoped Expo token is not configured in the trusted Runner repository."
             exit 1
           }
+
+      - name: WAFL · verify fabric W signed Preview build source
+        if: env.PROVIDER_EXECUTOR == 'wafl_eas_build'
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          root = Path(".approval/product") / os.environ["PROVIDER_WORKING_DIRECTORY"]
+          app = json.loads((root / "app.json").read_text(encoding="utf-8"))["expo"]
+          eas = json.loads((root / "eas.json").read_text(encoding="utf-8"))
+          preview = eas.get("build", {}).get("preview", {})
+          if app.get("version") != os.environ["PROVIDER_APP_VERSION"]:
+              raise SystemExit("WAFL signed preview app version mismatch")
+          if app.get("runtimeVersion") != os.environ["PROVIDER_RUNTIME_VERSION"]:
+              raise SystemExit("WAFL signed preview runtimeVersion mismatch")
+          if app.get("ios", {}).get("bundleIdentifier") != "com.wafl.app" or app.get("ios", {}).get("usesAppleSignIn") is not True:
+              raise SystemExit("WAFL signed preview bundle/auth identity changed")
+          if app.get("icon") != "./" + os.environ["PROVIDER_ICON_PATH"]:
+              raise SystemExit("WAFL app icon path mismatch")
+          icon = (root / os.environ["PROVIDER_ICON_PATH"]).read_bytes()
+          if icon[:8] != bytes((137,80,78,71,13,10,26,10)) or int.from_bytes(icon[16:20],"big") != 1024 or int.from_bytes(icon[20:24],"big") != 1024:
+              raise SystemExit("WAFL signed preview icon must be 1024x1024 PNG")
+          if (preview.get("distribution") != "internal" or preview.get("channel") != os.environ["PROVIDER_CHANNEL"]
+              or preview.get("environment") != os.environ["PROVIDER_ENVIRONMENT"] or preview.get("autoIncrement") is not True
+              or preview.get("developmentClient") is not False or preview.get("env", {}).get("APP_VARIANT") != "development"):
+              raise SystemExit("WAFL preview EAS profile identity/signed-version policy mismatch")
+          PY
 
       - name: CLASSMO · verify preview build source contract
         if: env.PROVIDER_EXECUTOR == 'classmo_eas_build'
@@ -349,13 +405,13 @@ jobs:
           PY
 
       - name: EAS · set up EAS CLI
-        if: env.PROVIDER_EXECUTOR == 'classmo_eas_build' || env.PROVIDER_EXECUTOR == 'classmo_eas_update' || env.PROVIDER_EXECUTOR == 'wafl_eas_update'
+        if: env.PROVIDER_EXECUTOR == 'classmo_eas_build' || env.PROVIDER_EXECUTOR == 'classmo_eas_update' || env.PROVIDER_EXECUTOR == 'wafl_eas_update' || env.PROVIDER_EXECUTOR == 'wafl_eas_build'
         uses: actions/setup-node@v7
         with:
           node-version: "24"
 
       - name: EAS · install pinned EAS CLI and app dependencies
-        if: env.PROVIDER_EXECUTOR == 'classmo_eas_build' || env.PROVIDER_EXECUTOR == 'classmo_eas_update' || env.PROVIDER_EXECUTOR == 'wafl_eas_update'
+        if: env.PROVIDER_EXECUTOR == 'classmo_eas_build' || env.PROVIDER_EXECUTOR == 'classmo_eas_update' || env.PROVIDER_EXECUTOR == 'wafl_eas_update' || env.PROVIDER_EXECUTOR == 'wafl_eas_build'
         env:
           PROVIDER_EXPO_TOKEN: ${{ secrets.expo_token }}
         shell: bash
@@ -419,6 +475,61 @@ jobs:
             printf -- '- distribution: `%s`\n' "$EAS_BUILD_DISTRIBUTION"
             echo '- build result: `PASS`'
             echo '- device install / physical QA: `NOT_RUN`'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: WAFL · build signed internal Preview with fabric W
+        if: env.PROVIDER_EXECUTOR == 'wafl_eas_build'
+        env:
+          EXPO_TOKEN: ${{ secrets.expo_token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd ".approval/product/$PROVIDER_WORKING_DIRECTORY"
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          eas build \
+            --platform "$PROVIDER_PLATFORM" \
+            --profile "$PROVIDER_BUILD_PROFILE" \
+            --freeze-credentials \
+            --json \
+            --non-interactive > "$RUNNER_TEMP/wafl-eas-build.json"
+          cd "$GITHUB_WORKSPACE"
+          python scripts/provider_action.py parse-eas-build-launch \
+            --input "$RUNNER_TEMP/wafl-eas-build.json" \
+            --github-env "$GITHUB_ENV"
+
+      - name: WAFL · verify signed internal Preview build
+        if: env.PROVIDER_EXECUTOR == 'wafl_eas_build'
+        env:
+          EXPO_TOKEN: ${{ secrets.expo_token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${EAS_BUILD_ID:-}"
+          cd ".approval/product/$PROVIDER_WORKING_DIRECTORY"
+          eas build:view "$EAS_BUILD_ID" --json > "$RUNNER_TEMP/wafl-eas-build-view.json"
+          cd "$GITHUB_WORKSPACE"
+          build_env="$RUNNER_TEMP/wafl-eas-build.env"
+          : > "$build_env"
+          python scripts/provider_action.py parse-eas-build-view \
+            --input "$RUNNER_TEMP/wafl-eas-build-view.json" \
+            --expected-id "$EAS_BUILD_ID" \
+            --github-env "$build_env"
+          set -a
+          . "$build_env"
+          set +a
+          cat "$build_env" >> "$GITHUB_ENV"
+          test "$PROVIDER_STATUS" = "SUCCESS"
+          test "$EAS_BUILD_APP_VERSION" = "$PROVIDER_APP_VERSION"
+          test "$EAS_BUILD_DISTRIBUTION" = "internal"
+          {
+            echo "## WAFL signed internal iOS Preview"
+            echo
+            printf -- '- source SHA: `%s`\n' "$SOURCE_SHA"
+            printf -- '- build ID: `%s`\n' "$EAS_BUILD_ID"
+            printf -- '- app/build: `%s (%s)`\n' "$EAS_BUILD_APP_VERSION" "$EAS_BUILD_APP_BUILD_VERSION"
+            printf -- '- distribution: `%s`\n' "$EAS_BUILD_DISTRIBUTION"
+            echo '- signed Preview build: `PASS`'
+            echo '- Owner iPhone/iPad install & physical acceptance: `NOT_RUN`'
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: EAS · verify preview OTA compatibility
