@@ -52,6 +52,32 @@ def test_load_source_ready_product_state(tmp_path: Path) -> None:
     assert state.after_source_success.type == "PROVIDER_GATE"
 
 
+@pytest.mark.parametrize("packages", [
+    ["synthetic@latest"], ["synthetic@^1.0.0"], ["file:../private"],
+    ["--registry=example.invalid"], ["synthetic@1.0.0", "synthetic@1.0.0"], [],
+])
+def test_npm_preparation_requires_bounded_exact_versions(tmp_path, packages):
+    path = write_state(tmp_path)
+    payload = yaml.safe_load(path.read_text())
+    payload["next_action"]["npm_preparation"] = {"workspace": "apps/client", "packages": packages}
+    path.write_text(yaml.safe_dump(payload))
+    with pytest.raises(ExecutionStateError, match="exact npm versions"):
+        load_product_execution_state(tmp_path, ".wonjae/execution-state.yaml", "WAFL")
+
+
+def test_npm_preparation_is_task_bound_and_disappears_on_transition(tmp_path):
+    path = write_state(tmp_path)
+    payload = yaml.safe_load(path.read_text())
+    payload["next_action"]["npm_preparation"] = {
+        "workspace": "apps/client", "packages": ["synthetic@1.0.0"],
+    }
+    path.write_text(yaml.safe_dump(payload))
+    state = load_product_execution_state(tmp_path, ".wonjae/execution-state.yaml", "WAFL")
+    assert state.next_action.npm_preparation.packages == ("synthetic@1.0.0",)
+    state = advance_product_execution_state(tmp_path, ".wonjae/execution-state.yaml", "WAFL")
+    assert state.next_action.npm_preparation is None
+
+
 def test_source_ready_requires_declared_success_transition(tmp_path: Path) -> None:
     path = write_state(tmp_path)
     payload = yaml.safe_load(path.read_text(encoding="utf-8"))

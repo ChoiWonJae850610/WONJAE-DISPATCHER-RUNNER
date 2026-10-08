@@ -14,7 +14,9 @@ from wonjae_dispatcher_runner.direct_worker import (
     git_head,
     load_direct_worker_route,
 )
+from wonjae_dispatcher_runner.execution_state import load_product_execution_state
 from wonjae_dispatcher_runner.initial_turn_recovery import run_initial_turns
+from wonjae_dispatcher_runner.npm_preparation import prepare_npm
 
 
 def main() -> int:
@@ -78,6 +80,11 @@ def main() -> int:
         result_file = Path(args.result_file)
         if result_file.exists():
             raise DirectWorkerError("initial recovery result file already exists")
+        state = (load_product_execution_state(repo, route.state_path, route.project)
+                 if route.state_path else None)
+        preparation = state.next_action.npm_preparation if state else None
+        prepared = prepare_npm(repo, preparation)
+        print(f"SOURCE_DEPENDENCIES prepared={str(prepared).lower()} offline=true", flush=True)
         child_env = {key: value for key, value in os.environ.items()
                      if key not in {"GH_TOKEN", "PRODUCT_TOKEN", "RUNNER_TOKEN"}}
         return subprocess.run(

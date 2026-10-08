@@ -211,6 +211,11 @@ jobs:
           : > /dev/null
           echo "FAILURE_LOG=$failure_log" >> "$GITHUB_ENV"
 
+      - name: Set up source Node toolchain
+        uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+
       - name: Run isolated Codex Direct Worker
         id: codex
         env:

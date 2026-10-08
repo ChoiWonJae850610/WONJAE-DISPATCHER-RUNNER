@@ -22,6 +22,7 @@ from .home_isolation import (
     require_linux_host,
     source_environment,
 )
+from .npm_preparation import ARTIFACT_ROOT, source_npm_environment
 from .repair_timeout import RepairPlanTimeout, repair_plan_deadline
 
 RUNNER_REPOSITORY = "ChoiWonJae850610/WONJAE-DISPATCHER-RUNNER"
@@ -391,6 +392,12 @@ def _prompt(
     if command == "next" and execution_state is not None:
         action = execution_state.next_action
         scope = "\n".join(f"- {item}" for item in action.source_scope)
+        if action.npm_preparation:
+            scope += (
+                "\n- Prepared exact offline npm packages: "
+                + ", ".join(action.npm_preparation.packages)
+                + f"; install with --save-exact in workspace {action.npm_preparation.workspace}."
+            )
         retry_note = (
             "Trusted Runner product execution state snapshot "
             f"(read from protected {execution_state.path} at the exact starting checkout):\n"
@@ -516,8 +523,14 @@ Authority and hard boundaries:
   or the canonical state is ambiguous, do not fabricate progress. Return MANUAL_REQUIRED with
   the single smallest Owner action. Source changes already safely completed before discovering
   that gate may remain in the worktree.
-- Local tests may be run when dependencies are already present. Do not install dependencies
-  from the network. GitHub Actions remains the exact-SHA validation authority.
+- The trusted parent may provide Node/npm, installed dependencies and a genuine offline
+  npm cache. When NPM_CONFIG_OFFLINE=true is present, use npm install --offline
+  --ignore-scripts --save-exact for the task's explicitly approved packages/workspace.
+  Do not run npm ci or remove node_modules in this turn: it contains the prepared toolchain
+  and cache. Preserve genuine npm-generated lock metadata. Preparation alone is not a
+  committed library installation or source completion. Run relevant local checks with
+  the prepared tools. Never download dependencies or broaden network access.
+  GitHub Actions remains the exact-SHA validation authority.
 
 Latest exact validation failure supplied for retry, if any:
 {failure}
@@ -594,6 +607,9 @@ def run_direct_worker(
             for value in dict.fromkeys(str(path) for path in candidates)
         )
     safe_path = os.environ.get("PATH", "/usr/local/bin:/usr/bin:/bin")
+    npm_environment = source_npm_environment(repo_path)
+    if npm_environment:
+        safe_path = str(repo_path / ARTIFACT_ROOT / "tools/bin") + ":" + safe_path
     safe_home = os.environ.get("HOME", str(Path.home()))
     safe_lang = os.environ.get("LANG", "C.UTF-8")
     safe_ssl_file = os.environ.get("SSL_CERT_FILE")
@@ -616,6 +632,7 @@ def run_direct_worker(
         os.environ["SSL_CERT_FILE"] = safe_ssl_file
     if safe_ssl_dir:
         os.environ["SSL_CERT_DIR"] = safe_ssl_dir
+    os.environ.update(npm_environment)
 
     config = CodexConfig(
         cwd=str(repo_path),
@@ -656,8 +673,13 @@ def run_direct_worker(
         },
     }
     sandbox = Sandbox.workspace_write
+    config.env.update(npm_environment)
+    thread_config["shell_environment_policy"]["set"].update(npm_environment)
     if home_isolation:
         safe = source_environment(codex_home, Path("/nonexistent"))
+        if npm_environment:
+            safe["PATH"] = str(repo_path / ARTIFACT_ROOT / "tools/bin") + ":" + safe["PATH"]
+            safe.update(npm_environment)
         os.environ.clear()
         os.environ.update(safe)
         config.env = safe
@@ -668,6 +690,7 @@ def run_direct_worker(
         thread_config["shell_environment_policy"]["set"] = {
             key: safe[key] for key in ("PATH", "HOME", "LANG", "TZ")
         }
+        thread_config["shell_environment_policy"]["set"].update(npm_environment)
         sandbox = None
 
     try:
