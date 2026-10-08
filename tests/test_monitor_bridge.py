@@ -52,6 +52,8 @@ def test_reject_malformed_or_arbitrary_target(bad: bytes):
     {"sourceSha": "f" * 39},
     {"phase": "DEPLOY"},
     {"state": "FAILED"},
+    {"state": []},
+    {"state": {"nested": "untrusted"}},
     {"target": "https://attacker"},
 ])
 def test_reject_untrusted_job_fields(change: dict):
