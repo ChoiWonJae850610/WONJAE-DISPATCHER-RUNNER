@@ -389,7 +389,7 @@ def _prompt(
     docs = "\n".join(f"- {path}" for path in route.canonical_docs)
     failure = validation_failure[-80_000:] if validation_failure else "(none)"
     handoff = route.handoff
-    if command == "next" and execution_state is not None:
+    if command in {"next", "retry", "resume"} and execution_state is not None and execution_state.next_action.type == "SOURCE_READY":
         action = execution_state.next_action
         scope = "\n".join(f"- {item}" for item in action.source_scope)
         if action.npm_preparation:
@@ -411,15 +411,15 @@ def _prompt(
             f"Authorized source scope:\n{scope}"
         )
         authority_description = (
-            "For command next, the trusted Runner read the protected product-owned "
-            f"execution state at {execution_state.path} from this exact checkout and "
-            "independently verified the exact starting HEAD against the registered "
-            "GitHub Actions workflow before the sandbox started. The execution-state "
-            "file is protected from model mutation. Its next-action type, task title and "
-            "source scope supersede older sequencing prose retained in product documents. "
-            "A SOURCE_READY state authorizes source-only preparation inside that scope; "
-            "it never authorizes a live provider, Production, credential, device or "
-            "physical action."
+            f"For command {command}, the trusted Runner read the protected product-owned "
+            f"execution state at {execution_state.path} from this exact checkout. "
+            "On next the workflow verifies active HEAD; on retry/resume it verifies the "
+            "one existing Direct Worker PR branch and exact starting checkout. "
+            "The execution-state file is protected from model mutation. "
+            "Its next-action type, task title and source scope supersede older sequencing "
+            "prose retained in product documents. A SOURCE_READY state authorizes only "
+            "the already-decided source task; it never authorizes a live provider, "
+            "Production, credential, device or physical action."
         )
     elif command == "next" and handoff is not None:
         scope = "\n".join(f"- {item}" for item in handoff.source_scope)
@@ -465,6 +465,10 @@ def _prompt(
             "current canonical repository documents."
         )
         authority_description = (
+            "This existing PR has an already-advanced protected product execution state. "
+            "Do not change or re-advance it; repair only previously authorized task "
+            "source/tests and preserve exact original PR evidence."
+            if execution_state is not None else
             "This run uses the legacy repository-document fallback because no registered "
             "product execution-state path or execution handoff is available."
         )
