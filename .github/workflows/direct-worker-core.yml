@@ -238,7 +238,15 @@ jobs:
           if [ -n "${FAILURE_LOG:-}" ] && [ -s "${FAILURE_LOG:-}" ]; then
             args+=(--failure-log "$FAILURE_LOG")
           fi
-          PYTHONPATH="$DW_RUNNER/src" python scripts/run_direct_worker_recovery.py "${args[@]}"
+          # Local-only liveness wrapper. It never has the MONITOR_SECRET and does not
+          # dispatch work; GitHub Actions/SANJINWORKS remain the execution authority.
+          PYTHONPATH="$DW_RUNNER/src" python scripts/local_monitor.py supervise \
+            --project "${{ inputs.project }}" \
+            --run-id "$GITHUB_RUN_ID" \
+            --run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --source-sha "$START_HEAD" \
+            --root "${WONJAE_MONITOR_ROOT:-/var/tmp/wonjae-monitor}" \
+            -- python scripts/run_direct_worker_recovery.py "${args[@]}"
           status="$(jq -r '.status' "$result_file")"
           changed_count="$(jq '.changed_paths | length' "$result_file")"
           echo "status=$status" >> "$GITHUB_OUTPUT"
