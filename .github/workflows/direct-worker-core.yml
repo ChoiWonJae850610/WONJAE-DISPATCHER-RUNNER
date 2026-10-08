@@ -307,11 +307,15 @@ jobs:
           exit 1
 
       - name: Advance product execution state on source success
-        if: ${{ inputs.command == 'next' && steps.codex.outputs.status == 'CHANGED' }}
+        if: ${{ steps.codex.outputs.status == 'CHANGED' }}
         working-directory: ${{ env.DW_RUNNER }}
         run: |
           set -euo pipefail
-          PYTHONPATH="$DW_RUNNER/src" python scripts/advance_execution_state.py             --registry "$DW_RUNNER/_control/PROJECTS.yaml"             --project "${{ inputs.project }}"             --product-checkout "$DW_PRODUCT"
+          PYTHONPATH="$DW_RUNNER/src" python scripts/advance_execution_state.py \
+            --registry "$DW_RUNNER/_control/PROJECTS.yaml" \
+            --project "${{ inputs.project }}" \
+            --product-checkout "$DW_PRODUCT" \
+            --command "${{ inputs.command }}"
 
       - name: Commit Direct Worker changes
         if: ${{ steps.codex.outputs.changed_count != '0' }}
@@ -544,7 +548,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Record Direct Worker failure on open PR
-        if: ${{ failure() && env.PR_NUMBER != '' }}
+        if: ${{ failure() && steps.codex.outputs.status != 'MANUAL_REQUIRED' && env.PR_NUMBER != '' }}
         continue-on-error: true
         env:
           GH_TOKEN: ${{ secrets.product_write_token }}
