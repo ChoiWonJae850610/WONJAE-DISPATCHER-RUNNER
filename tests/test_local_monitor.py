@@ -11,8 +11,13 @@ from pathlib import Path
 import pytest
 
 from scripts.local_monitor import (
-    atomic_write, inspect_job, private_directory, proc_start_ticks,
-    same_process, signed_body, snapshot,
+    atomic_write,
+    inspect_job,
+    private_directory,
+    proc_start_ticks,
+    same_process,
+    signed_body,
+    snapshot,
 )
 
 
@@ -54,7 +59,9 @@ def test_abnormal_vs_completed_without_changing_official_result(tmp_path: Path):
     atomic_write(job / "heartbeat", str(now) + "\n")
     assert inspect_job(job, now)["state"] == "running"
     assert inspect_job(job, now + 16)["state"] == "abnormal"
-    atomic_write(job / "result.json", json.dumps({"state": "completed", "exitCode": 0, "completedAt": now}))
+    atomic_write(job / "result.json", json.dumps({
+        "state": "completed", "exitCode": 0, "completedAt": now,
+    }))
     assert inspect_job(job, now + 20)["state"] == "completed"
     assert inspect_job(job, now + 121) is None
     assert len(snapshot(tmp_path, now)) == 1
@@ -75,7 +82,9 @@ def test_supervised_process_records_bounded_meta_and_zero_exit(tmp_path: Path):
     assert meta["project"] == "WAFL"
     assert meta["sourceSha"] == "b" * 40
     assert meta["runAttempt"] == 1
-    assert result == pytest.approx({"state": "completed", "exitCode": 0, "completedAt": result["completedAt"]})
+    assert result["state"] == "completed"
+    assert result["exitCode"] == 0
+    assert isinstance(result["completedAt"], int)
     assert not (tmp_path / "private/456-1/auth.json").exists()
 
 
