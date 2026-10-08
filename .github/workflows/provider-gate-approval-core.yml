@@ -375,7 +375,7 @@ jobs:
           if icon[:8] != bytes((137,80,78,71,13,10,26,10)) or int.from_bytes(icon[16:20],"big") != 1024 or int.from_bytes(icon[20:24],"big") != 1024:
               raise SystemExit("WAFL signed preview icon must be 1024x1024 PNG")
           if (preview.get("distribution") != "internal" or preview.get("channel") != os.environ["PROVIDER_CHANNEL"]
-              or preview.get("environment") != os.environ["PROVIDER_ENVIRONMENT"] or preview.get("autoIncrement") is not True
+              or preview.get("environment") != os.environ["PROVIDER_ENVIRONMENT"] or preview.get("autoIncrement") is not None
               or preview.get("developmentClient") is not False or preview.get("env", {}).get("APP_VARIANT") != "development"):
               raise SystemExit("WAFL preview EAS profile identity/signed-version policy mismatch")
           PY
