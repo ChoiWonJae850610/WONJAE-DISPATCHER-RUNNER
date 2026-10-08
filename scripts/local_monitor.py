@@ -184,7 +184,8 @@ def inspect_job(folder: Path, now: int) -> dict | None:
             heartbeat = 0
         alive = same_process(meta.get("supervisorPid"), meta.get("supervisorStart"))
         child_alive = same_process(meta.get("childPid"), meta.get("childStart"))
-        status = "running" if alive and child_alive and 0 <= now - heartbeat <= STALE_SECONDS else "abnormal"
+        status = ("running" if alive and child_alive
+                  and 0 <= now - heartbeat <= STALE_SECONDS else "abnormal")
         if now - int(meta.get("startedAt") or now) > 3600 and status == "abnormal":
             return None
     return {
@@ -198,13 +199,15 @@ def snapshot(root: Path, now: int) -> list[dict]:
         return []
     jobs = []
     for folder in root.iterdir():
-        if folder.is_symlink() or not folder.is_dir() or not re.fullmatch(r"[1-9][0-9]*-[1-9][0-9]*", folder.name):
+        if (folder.is_symlink() or not folder.is_dir()
+                or not re.fullmatch(r"[1-9][0-9]*-[1-9][0-9]*", folder.name)):
             continue
         value = inspect_job(folder, now)
         if value:
             jobs.append(value)
     # One Linux Direct Worker at a time; protect the receiver from stray old dirs.
-    return sorted(jobs, key=lambda item: (item["runId"], item["runAttempt"]), reverse=True)[:MAX_JOBS]
+    jobs.sort(key=lambda item: (item["runId"], item["runAttempt"]), reverse=True)
+    return jobs[:MAX_JOBS]
 
 
 def signed_body(jobs: list[dict], secret: str, now: int) -> tuple[bytes, str]:
@@ -217,7 +220,9 @@ def signed_body(jobs: list[dict], secret: str, now: int) -> tuple[bytes, str]:
 
 def transmit(endpoint: str, secret: str, jobs: list[dict], now: int) -> bool:
     parsed = urllib.parse.urlparse(endpoint)
-    if parsed.scheme != "https" or parsed.path != "/api/monitor/report" or not parsed.hostname or parsed.username or parsed.password or parsed.query or parsed.fragment:
+    if (parsed.scheme != "https" or parsed.path != "/api/monitor/report"
+            or not parsed.hostname or parsed.username or parsed.password
+            or parsed.query or parsed.fragment):
         raise ValueError("monitor endpoint must be HTTPS /api/monitor/report")
     body, signature = signed_body(jobs, secret, now)
     request = urllib.request.Request(
@@ -240,7 +245,7 @@ def watch(args: argparse.Namespace) -> int:
     secret = os.environ.get("WONJAE_MONITOR_SECRET", "").strip()
     relay = bool(endpoint and len(secret) >= 32)
     if not relay:
-        print("MONITOR_LOCAL_ONLY: remote relay disabled until separate Owner secret/config gate", flush=True)
+        print("MONITOR_LOCAL_ONLY: relay disabled until Owner configuration", flush=True)
     previous = ""
     last_report = 0.0
     while True:
