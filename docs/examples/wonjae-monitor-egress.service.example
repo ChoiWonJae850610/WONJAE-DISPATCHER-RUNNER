@@ -1,0 +1,39 @@
+# REVIEW-ONLY TEMPLATE: do not enable until separate Ubuntu Owner approval.
+# Requires a dedicated unprivileged account and root-owned 0600 credential file.
+# Install reviewed scripts under /opt/wonjae-monitor/scripts/.
+[Unit]
+Description=WONJAE signed heartbeat restricted HTTPS egress bridge
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=wonjae-monitor-egress
+Group=wonjae-monitor-egress
+ExecStart=/usr/bin/python3 /opt/wonjae-monitor/scripts/monitor_bridge.py --runner-user choi_won_jae
+LoadCredential=monitor_secret:/etc/wonjae-monitor/relay-secret
+RuntimeDirectory=wonjae-monitor-relay
+RuntimeDirectoryMode=0711
+Restart=on-failure
+RestartSec=3
+UMask=0077
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+CapabilityBoundingSet=
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+ReadWritePaths=/run/wonjae-monitor-relay
+Environment=PYTHONDONTWRITEBYTECODE=1
+IPAccounting=yes
+
+[Install]
+WantedBy=multi-user.target

@@ -13,6 +13,7 @@ import json
 import os
 import re
 import signal
+import socket
 import stat
 import subprocess
 import sys
@@ -33,6 +34,8 @@ REPORT_INTERVAL = 30.0
 STALE_SECONDS = 15
 HOST = "home-linux"
 MAX_JOBS = 16
+BRIDGE_SOCKET = "/run/wonjae-monitor-relay/relay.sock"
+MAX_BRIDGE_FRAME = 4096
 
 
 def private_directory(directory: Path) -> None:
@@ -237,6 +240,20 @@ def transmit(endpoint: str, secret: str, jobs: list[dict], now: int) -> bool:
         return False
 
 
+def publish_bridge_snapshot(jobs: list[dict], socket_path: str = BRIDGE_SOCKET) -> None:
+    """Send status-only data through a filesystem Unix socket, never IP."""
+    if not Path(socket_path).is_absolute() or len(os.fsencode(socket_path)) > 100:
+        raise ValueError("invalid local bridge socket")
+    frame = json.dumps({"version": 1, "host": HOST, "jobs": jobs},
+                       sort_keys=True, separators=(",", ":")).encode("utf-8")
+    if len(frame) > MAX_BRIDGE_FRAME:
+        raise ValueError("bridge frame exceeds fixed maximum")
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as channel:
+        channel.settimeout(2)
+        channel.connect(socket_path)
+        channel.sendall(frame)
+
+
 def watch(args: argparse.Namespace) -> int:
     os.umask(0o077)
     root = Path(args.root)
@@ -244,14 +261,28 @@ def watch(args: argparse.Namespace) -> int:
     endpoint = os.environ.get("WONJAE_MONITOR_ENDPOINT", "").strip()
     secret = os.environ.get("WONJAE_MONITOR_SECRET", "").strip()
     relay = bool(endpoint and len(secret) >= 32)
-    if not relay:
+    bridge_socket = os.environ.get("WONJAE_MONITOR_BRIDGE_SOCKET", "").strip()
+    if bridge_socket and (bridge_socket != BRIDGE_SOCKET or relay):
+        print("MONITOR_BRIDGE_CONFIG_INVALID", flush=True)
+        return 2
+    if bridge_socket:
+        print("MONITOR_LOCAL_BRIDGE_ENABLED", flush=True)
+    if not relay and not bridge_socket:
         print("MONITOR_LOCAL_ONLY: relay disabled until Owner configuration", flush=True)
     previous = ""
     last_report = 0.0
+    last_bridge_warning = 0.0
     while True:
         now = int(time.time())
         jobs = snapshot(root, now)
         changed = json.dumps(jobs, sort_keys=True)
+        if bridge_socket:
+            try:
+                publish_bridge_snapshot(jobs, bridge_socket)
+            except (OSError, ValueError):
+                if time.monotonic() - last_bridge_warning >= REPORT_INTERVAL:
+                    print("MONITOR_BRIDGE_UNAVAILABLE", flush=True)
+                    last_bridge_warning = time.monotonic()
         if relay and (changed != previous or time.monotonic() - last_report >= REPORT_INTERVAL):
             try:
                 if transmit(endpoint, secret, jobs, now):
