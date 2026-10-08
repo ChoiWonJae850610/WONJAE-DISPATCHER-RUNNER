@@ -140,7 +140,7 @@ def test_wafl_signed_preview_icon_build_is_credential_frozen_exact_gate_only():
     assert '"channel" => "alpha83-p5"' in workflow
     assert '"icon_path" => "assets/branding/wafl-fabric-w.png"' in workflow
     assert 'app.get("icon") != "./" + os.environ["PROVIDER_ICON_PATH"]' in workflow
-    assert 'preview.get("autoIncrement") is not True' in workflow
+    assert 'preview.get("autoIncrement") is not None' in workflow
     assert "WAFL · verify fabric W signed Preview build source" in workflow
     assert "WAFL · build signed internal Preview with fabric W" in workflow
     assert 'env.PROVIDER_EXECUTOR == \'wafl_eas_build\'' in workflow
