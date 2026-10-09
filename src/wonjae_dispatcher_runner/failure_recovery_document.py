@@ -7,8 +7,8 @@ trusted admission/publisher must verify the failed run and protected checkout.
 from __future__ import annotations
 
 import copy
-import re
 from dataclasses import dataclass
+import re
 
 import yaml
 
