@@ -191,6 +191,10 @@ def load_product_execution_state(
     queue = tuple(
         _parse_action(value, "after_source_success") for value in queued
     )
+    if after is not None and after.type == "SOURCE_READY" and not queue:
+        raise ExecutionStateError(
+            "SOURCE_READY successor requires a declared terminating source_success_queue"
+        )
     if queue:
         source_steps = (next_action, after, *queue[:-1])
         if any(step.type != "SOURCE_READY" for step in source_steps):
