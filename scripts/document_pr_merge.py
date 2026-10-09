@@ -96,6 +96,8 @@ def check_pr(pr: object, route: dict[str, str], pr_number: int,
         raise DocumentMergeError("PR base branch or base SHA changed")
     if pr_head.get("sha") != head:
         raise DocumentMergeError("PR head SHA changed")
+    if str(pr_head.get("ref", "")).startswith(("direct/", "job/")):
+        raise DocumentMergeError("source-worker PR may not use documentation merge")
     if pr_base.get("repo", {}).get("full_name") != route["repo"]:
         raise DocumentMergeError("PR base repository mismatch")
     if pr_head.get("repo", {}).get("full_name") != route["repo"]:
