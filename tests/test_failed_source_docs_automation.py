@@ -113,6 +113,47 @@ def test_unknown_or_protected_product_registry_rejected(corrupt):
         prep.checked_registry(value, "WAFL")
 
 
+@pytest.mark.parametrize("alias", [
+    "none", "state-directory", "state-file", "docs-directory",
+    "operations-directory", "documentation-file",
+])
+def test_product_recovery_paths_reject_symlink_aliases(tmp_path, alias):
+    root = tmp_path / "product"
+    outside = tmp_path / "outside"
+    root.mkdir()
+    outside.mkdir()
+    (outside / "target.yaml").write_text("no mutation", encoding="utf-8")
+    state_dir = root / ".wonjae"
+    state_file = state_dir / "execution-state.yaml"
+    docs_dir = root / "docs"
+    operations_dir = docs_dir / "operations"
+    doc = operations_dir / "RECOVERY-WAFL-CLOUD-RUNTIME-001-123.md"
+    if alias == "state-directory":
+        state_dir.symlink_to(outside, target_is_directory=True)
+    else:
+        state_dir.mkdir()
+        if alias == "state-file":
+            state_file.symlink_to(outside / "target.yaml")
+        else:
+            state_file.write_text("schema_version: 1", encoding="utf-8")
+    if alias == "docs-directory":
+        docs_dir.symlink_to(outside, target_is_directory=True)
+    else:
+        docs_dir.mkdir()
+        if alias == "operations-directory":
+            operations_dir.symlink_to(outside, target_is_directory=True)
+        else:
+            operations_dir.mkdir()
+            if alias == "documentation-file":
+                doc.symlink_to(outside / "target.yaml")
+    if alias == "none":
+        prep.checked_recovery_write_paths(root, state_file, doc)
+    else:
+        with pytest.raises(RecoveryPreparationError):
+            prep.checked_recovery_write_paths(root, state_file, doc)
+    assert (outside / "target.yaml").read_text(encoding="utf-8") == "no mutation"
+
+
 def test_recovery_workflow_is_not_a_new_source_or_merge_executor():
     top = yaml.safe_load((ROOT / ".github/workflows/automatic-source-recovery-docs.yml")
                          .read_text(encoding="utf-8"))

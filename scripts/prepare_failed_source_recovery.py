@@ -135,6 +135,31 @@ def clean_checkout(path: Path, sha: str) -> None:
         raise RecoveryPreparationError("product checkout not clean at exact active SHA")
 
 
+def checked_recovery_write_paths(
+    checkout: Path, state_path: Path, target: Path | None = None
+) -> None:
+    """Reject symlink aliases and non-regular paths before any product file mutation."""
+    if checkout.is_symlink() or not checkout.is_dir():
+        raise RecoveryPreparationError("untrusted product checkout path")
+    if state_path != checkout / ".wonjae/execution-state.yaml":
+        raise RecoveryPreparationError("unexpected execution-state write path")
+    state_dir = state_path.parent
+    if state_dir.is_symlink() or not state_dir.is_dir():
+        raise RecoveryPreparationError("execution-state directory alias")
+    if state_path.is_symlink() or not state_path.is_file():
+        raise RecoveryPreparationError("execution-state file alias")
+    if target is not None:
+        docs_dir = checkout / "docs"
+        operations_dir = docs_dir / "operations"
+        if target.parent != operations_dir:
+            raise RecoveryPreparationError("unexpected documentation write path")
+        for directory in (docs_dir, operations_dir):
+            if directory.is_symlink() or (directory.exists() and not directory.is_dir()):
+                raise RecoveryPreparationError("documentation directory alias")
+        if target.is_symlink() or target.exists():
+            raise RecoveryPreparationError("recovery documentation path already exists")
+
+
 def run_command(args: list[str], *, cwd: Path, token: str) -> str:
     env = dict(os.environ, GH_TOKEN=token)
     result = subprocess.run(args, cwd=cwd, check=True, capture_output=True,
@@ -219,6 +244,7 @@ def plan(event: dict, project: str, runner_token: str, product_token: str,
                 cwd=workdir, token=product_token)
     clean_checkout(product_checkout, original_sha)
     state_path = product_checkout / ".wonjae/execution-state.yaml"
+    checked_recovery_write_paths(product_checkout, state_path)
     state = yaml.safe_load(state_path.read_text(encoding="utf-8"))
     action = state.get("next_action") if isinstance(state, dict) else None
     if not isinstance(action, dict) or not isinstance(action.get("source_task_id"), str):
@@ -235,9 +261,9 @@ def plan(event: dict, project: str, runner_token: str, product_token: str,
     run_command(["git", "-C", str(product_checkout), "switch", "-c", rec_branch],
                 cwd=workdir, token=product_token)
     target = product_checkout / doc_path
+    checked_recovery_write_paths(product_checkout, state_path, target)
     target.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-    if target.exists() or target.is_symlink():
-        raise RecoveryPreparationError("recovery documentation file already exists")
+    checked_recovery_write_paths(product_checkout, state_path, target)
     target.write_text(doc, encoding="utf-8")
     state_path.write_text(state_text, encoding="utf-8")
     tracked = run_command(
