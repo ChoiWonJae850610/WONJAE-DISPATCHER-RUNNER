@@ -70,3 +70,14 @@ jobs:
             --event "$GITHUB_EVENT_PATH" \
             --registry "$GITHUB_WORKSPACE/_control/PROJECTS.yaml" \
             --workdir "$RECOVERY_ROOT/work"
+
+      - name: Cleanup only this ephemeral recovery workspace
+        if: ${{ always() && env.RECOVERY_ROOT != '' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected="$RUNNER_TEMP/wonjae-recovery-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          test "$RECOVERY_ROOT" = "$expected"
+          test ! -L "$RECOVERY_ROOT"
+          test "$(realpath -m "$RECOVERY_ROOT")" = "$expected"
+          rm -rf --one-file-system -- "$RECOVERY_ROOT"
