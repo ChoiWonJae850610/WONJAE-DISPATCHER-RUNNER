@@ -8,6 +8,7 @@ import yaml
 
 ACTION_TYPES = {"SOURCE_READY", "MANUAL_QA", "PROVIDER_GATE", "DECISION_REQUIRED", "NONE"}
 MANUAL_QA_MODES = {"owner_checkout"}
+MAX_SOURCE_SUCCESS_QUEUE = 8
 
 
 class ExecutionStateError(RuntimeError):
@@ -44,6 +45,7 @@ class ProductExecutionState:
     path: str
     next_action: ExecutionAction
     after_source_success: ExecutionAction | None
+    source_success_queue: tuple[ExecutionAction, ...] = ()
 
 
 def _safe_relative(path: str) -> None:
@@ -177,11 +179,34 @@ def load_product_execution_state(
             "SOURCE_READY product execution state requires after_source_success"
         )
 
+    # A bounded, product-authored, already-approved sequence removes the need
+    # for a documentation PR between consecutive source stages. A provider,
+    # physical, release or decision gate ALWAYS ends the source-only queue.
+    queued = payload.get("source_success_queue", [])
+    if not isinstance(queued, list) or len(queued) > MAX_SOURCE_SUCCESS_QUEUE:
+        raise ExecutionStateError("source_success_queue must be a bounded list")
+    if queued and (next_action.type != "SOURCE_READY" or after is None
+                   or after.type != "SOURCE_READY"):
+        raise ExecutionStateError("source_success_queue requires SOURCE_READY current and successor")
+    queue = tuple(
+        _parse_action(value, "after_source_success") for value in queued
+    )
+    if queue:
+        source_steps = (next_action, after, *queue[:-1])
+        if any(step.type != "SOURCE_READY" for step in source_steps):
+            raise ExecutionStateError("source_success_queue may only chain SOURCE_READY stages")
+        if queue[-1].type == "SOURCE_READY":
+            raise ExecutionStateError("source_success_queue must terminate at an explicit gate")
+        task_ids = [step.source_task_id for step in source_steps]
+        if any(not task_id for task_id in task_ids) or len(set(task_ids)) != len(task_ids):
+            raise ExecutionStateError("source_success_queue requires distinct source task IDs")
+
     return ProductExecutionState(
         project=project,
         path=state_path,
         next_action=next_action,
         after_source_success=after,
+        source_success_queue=queue,
     )
 
 
@@ -229,8 +254,11 @@ def advance_product_execution_state(
 
     path = repo_path / state_path
     payload = yaml.safe_load(path.read_text(encoding="utf-8"))
+    queue = state.source_success_queue
     payload["next_action"] = payload["after_source_success"]
-    payload["after_source_success"] = None
+    payload["after_source_success"] = queue and payload["source_success_queue"][0] or None
+    if queue:
+        payload["source_success_queue"] = payload["source_success_queue"][1:]
     path.write_text(
         yaml.safe_dump(payload, sort_keys=False, allow_unicode=True),
         encoding="utf-8",
