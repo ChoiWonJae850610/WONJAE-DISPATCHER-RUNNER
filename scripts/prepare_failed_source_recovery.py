@@ -63,6 +63,7 @@ def checked_run(run: object, expected_project: str, runner_sha: str) -> None:
             or run.get("status") != "completed"
             or run.get("conclusion") != "failure"
             or run.get("run_attempt") != 1
+            or run.get("actor", {}).get("login") != "ChoiWonJae850610"
             or not isinstance(run.get("id"), int) or run["id"] < 1):
         raise RecoveryPreparationError("failed run is not an exact eligible source next")
 
@@ -117,8 +118,10 @@ def checked_registry(value: object, project: str) -> dict:
     if execution.get("state_path") != ".wonjae/execution-state.yaml":
         raise RecoveryPreparationError("no expected product state path")
     branch = route.get("branch")
-    if not isinstance(branch, str) or branch in {"main", "master"}:
-        raise RecoveryPreparationError("protected main/master not allowed")
+    if (not isinstance(branch, str) or branch in {"main", "master"}
+            or not re.fullmatch(r"[a-z0-9][a-z0-9/_-]{1,90}", branch)
+            or ".." in branch or "//" in branch):
+        raise RecoveryPreparationError("unexpected product branch")
     return route
 
 
@@ -137,7 +140,7 @@ def run_command(args: list[str], *, cwd: Path, token: str) -> str:
     env = dict(os.environ, GH_TOKEN=token)
     result = subprocess.run(args, cwd=cwd, check=True, capture_output=True,
                             text=True, env=env, timeout=75)
-    return result.stdout.strip()
+    return result.stdout.rstrip("\n")
 
 
 def timestamp(value: str) -> float:
@@ -202,7 +205,6 @@ def plan(event: dict, project: str, runner_token: str, product_token: str,
     if any(x.get("id", 0) > run_id and x.get("display_title", "").startswith(
             f"Direct Worker {project} ") for x in rows):
         raise RecoveryPreparationError("later product source run supersedes this failure")
-    identity = TimeoutEvidence(project, repo, branch, original_sha, run_id, "")
     product_checkout = workdir / "product"
     if workdir.is_symlink() or workdir.exists():
         raise RecoveryPreparationError("recovery workspace must be new and isolated")
