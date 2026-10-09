@@ -143,7 +143,7 @@ def test_workflow_exact_source_preflight_precedes_any_build_and_reuses_on_match(
     assert "--freeze-credentials" in launch
     assert "eas build \\" in launch
     assert "eas build:list" in readback
-    assert "eas build:view" in readback  # negative reference in a comment only
+    assert "eas build:view" not in readback
     assert "--phase verify" in readback
     assert '--expected-id "$EAS_BUILD_ID"' in readback
     assert 'test "$EAS_BUILD_ARCHIVE_PRESENT" = "1"' in readback
