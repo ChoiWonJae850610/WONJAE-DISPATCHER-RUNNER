@@ -12,7 +12,6 @@ from dataclasses import dataclass
 
 import yaml
 
-from .execution_state import ExecutionStateError
 
 SHA = re.compile(r"^[0-9a-f]{40}$")
 TASK = re.compile(r"^[A-Z][A-Z0-9-]{2,100}$")
