@@ -553,7 +553,7 @@ jobs:
             printf -- '- distribution: %s\n' "$EAS_BUILD_DISTRIBUTION"
             printf -- '- previous EAS build reused (no new build): %s\n' "${EAS_EXISTING_BUILD:-0}"
             echo '- exact EAS build metadata and archive reference: PASS'
-            echo '- device install / physical QA: NOT_RUN'
+            echo '- device install / physical QA: `NOT_RUN`'
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: WAFL · build signed internal Preview with fabric W
