@@ -54,7 +54,7 @@ def pr():
         "mergeable": True,
         "changed_files": 3,
         "user": {"login": "ChoiWonJae850610"},
-        "head": {"sha": HEAD, "repo": {"full_name": route()["repo"]}},
+        "head": {"sha": HEAD, "ref": "docs/classmo-recovery", "repo": {"full_name": route()["repo"]}},
         "base": {"ref": "cloud-dev-v1", "sha": BASE,
                  "repo": {"full_name": route()["repo"]}},
     }
@@ -113,6 +113,14 @@ def test_non_open_or_unverified_pr_refused(attr, value):
     data = {**pr(), attr: value}
     with pytest.raises(guard.DocumentMergeError):
         guard.check_pr(data, route(), 110, HEAD, BASE)
+
+
+def test_direct_source_writer_pr_can_never_use_document_merge():
+    for prefix in ("direct/", "job/"):
+        wrong = pr()
+        wrong["head"]["ref"] = prefix + "source"
+        with pytest.raises(guard.DocumentMergeError):
+            guard.check_pr(wrong, route(), 110, HEAD, BASE)
 
 
 def test_changed_sha_owner_or_fork_refused():
