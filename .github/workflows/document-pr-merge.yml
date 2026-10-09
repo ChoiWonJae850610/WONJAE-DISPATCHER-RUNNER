@@ -1,0 +1,89 @@
+name: Document PR Merge
+
+run-name: "Document PR Merge ${{ inputs.project }} #${{ inputs.pr_number }} ${{ inputs.head_sha }} ${{ inputs.base_sha }} ${{ inputs.control_sha }}"
+
+on:
+  workflow_dispatch:
+    inputs:
+      project:
+        description: Exact DEV-CONTROL registered product
+        required: true
+        type: choice
+        options:
+          - WAFL
+          - CLASSMO
+          - ESC
+          - MUVEL
+      pr_number:
+        description: Exact prepared documentation PR number
+        required: true
+        type: string
+      head_sha:
+        description: Exact Owner-reviewed PR head commit
+        required: true
+        type: string
+      base_sha:
+        description: Exact active development branch HEAD
+        required: true
+        type: string
+      control_sha:
+        description: Exact DEV-CONTROL main routing SHA
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  wafl:
+    if: ${{ inputs.project == 'WAFL' && github.actor == github.repository_owner }}
+    uses: ./.github/workflows/document-pr-merge-core.yml
+    with:
+      project: WAFL
+      pr_number: ${{ inputs.pr_number }}
+      head_sha: ${{ inputs.head_sha }}
+      base_sha: ${{ inputs.base_sha }}
+      control_sha: ${{ inputs.control_sha }}
+    secrets:
+      control_read_token: ${{ secrets.CONTROL_READ_TOKEN }}
+      product_write_token: ${{ secrets.WAFL_WRITE_TOKEN }}
+
+  classmo:
+    if: ${{ inputs.project == 'CLASSMO' && github.actor == github.repository_owner }}
+    uses: ./.github/workflows/document-pr-merge-core.yml
+    with:
+      project: CLASSMO
+      pr_number: ${{ inputs.pr_number }}
+      head_sha: ${{ inputs.head_sha }}
+      base_sha: ${{ inputs.base_sha }}
+      control_sha: ${{ inputs.control_sha }}
+    secrets:
+      control_read_token: ${{ secrets.CONTROL_READ_TOKEN }}
+      product_write_token: ${{ secrets.CLASSMO_WRITE_TOKEN }}
+
+  esc:
+    if: ${{ inputs.project == 'ESC' && github.actor == github.repository_owner }}
+    uses: ./.github/workflows/document-pr-merge-core.yml
+    with:
+      project: ESC
+      pr_number: ${{ inputs.pr_number }}
+      head_sha: ${{ inputs.head_sha }}
+      base_sha: ${{ inputs.base_sha }}
+      control_sha: ${{ inputs.control_sha }}
+    secrets:
+      control_read_token: ${{ secrets.CONTROL_READ_TOKEN }}
+      product_write_token: ${{ secrets.ESC_WRITE_TOKEN }}
+
+  muvel:
+    if: ${{ inputs.project == 'MUVEL' && github.actor == github.repository_owner }}
+    uses: ./.github/workflows/document-pr-merge-core.yml
+    with:
+      project: MUVEL
+      pr_number: ${{ inputs.pr_number }}
+      head_sha: ${{ inputs.head_sha }}
+      base_sha: ${{ inputs.base_sha }}
+      control_sha: ${{ inputs.control_sha }}
+    secrets:
+      control_read_token: ${{ secrets.CONTROL_READ_TOKEN }}
+      product_write_token: ${{ secrets.MUVEL_WRITE_TOKEN }}
+
