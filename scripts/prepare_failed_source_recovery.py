@@ -8,7 +8,6 @@ Do not log raw GitHub job output or credentials.
 from __future__ import annotations
 
 import argparse
-import base64
 import json
 import os
 import re
@@ -161,7 +160,8 @@ def plan(event: dict, project: str, runner_token: str, product_token: str,
     if not SHA.fullmatch(runner_sha):
         raise RecoveryPreparationError("invalid trusted Runner SHA")
     actual = github_api(f"repos/{RUNNER}/actions/runs/{run_id}", runner_token)
-    if candidate.get("id") != actual.get("id") or candidate.get("head_sha") != actual.get("head_sha"):
+    if (candidate.get("id") != actual.get("id")
+            or candidate.get("head_sha") != actual.get("head_sha"):
         raise RecoveryPreparationError("event and exact run disagree")
     checked_run(actual, project, runner_sha)
     failed_job = checked_failure_job(
@@ -187,7 +187,8 @@ def plan(event: dict, project: str, runner_token: str, product_token: str,
     branch = route["branch"]
     remote = github_api(f"repos/{repo}/branches/{branch}", product_token)
     source_date = remote["commit"]["commit"]["committer"]["date"]
-    if remote["commit"]["sha"] != original_sha or timestamp(actual["created_at"]) <= timestamp(source_date):
+    if (remote["commit"]["sha"] != original_sha
+            or timestamp(actual["created_at"]) <= timestamp(source_date):
         raise RecoveryPreparationError("current product generation is not failed source generation")
     open_prs = github_api(f"repos/{repo}/pulls?state=open&per_page=100", product_token)
     if not isinstance(open_prs, list) or len(open_prs) >= 100:
@@ -246,7 +247,8 @@ def plan(event: dict, project: str, runner_token: str, product_token: str,
     if set(tracked.splitlines()) != {"?? " + doc_path, " M " + allowed_state_path}:
         raise RecoveryPreparationError("recovery file mutations exceed exact two-file allowlist")
     # One last live active source check before publishing this unmerged docs PR.
-    if github_api(f"repos/{repo}/branches/{branch}", product_token)["commit"]["sha"] != original_sha:
+    latest_head = github_api(f"repos/{repo}/branches/{branch}", product_token)
+    if latest_head["commit"]["sha"] != original_sha:
         raise RecoveryPreparationError("active branch changed while preparing recovery docs")
     run_command(["git", "add", "--", doc_path, allowed_state_path],
                 cwd=product_checkout, token=product_token)
