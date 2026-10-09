@@ -1,0 +1,52 @@
+# PROPOSED trusted-main docs-only automation. Not active until PR is separately approved.
+name: Direct Worker Failed-Source Recovery Docs
+
+on:
+  workflow_run:
+    workflows: ["Direct Worker"]
+    types: [completed]
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: bounded-recovery-docs-${{ github.event.workflow_run.id }}
+  cancel-in-progress: false
+
+jobs:
+  wafl:
+    if: ${{ github.event.workflow_run.conclusion == 'failure' && github.event.workflow_run.event == 'workflow_dispatch' && github.event.workflow_run.display_title == 'Direct Worker WAFL next' && github.event.workflow_run.head_branch == 'main' }}
+    uses: ./.github/workflows/automatic-source-recovery-docs-core.yml
+    with:
+      project: WAFL
+    secrets:
+      product_write_token: ${{ secrets.WAFL_WRITE_TOKEN }}
+      control_read_token: ${{ secrets.CONTROL_READ_TOKEN }}
+
+  classmo:
+    if: ${{ github.event.workflow_run.conclusion == 'failure' && github.event.workflow_run.event == 'workflow_dispatch' && github.event.workflow_run.display_title == 'Direct Worker CLASSMO next' && github.event.workflow_run.head_branch == 'main' }}
+    uses: ./.github/workflows/automatic-source-recovery-docs-core.yml
+    with:
+      project: CLASSMO
+    secrets:
+      product_write_token: ${{ secrets.CLASSMO_WRITE_TOKEN }}
+      control_read_token: ${{ secrets.CONTROL_READ_TOKEN }}
+
+  esc:
+    if: ${{ github.event.workflow_run.conclusion == 'failure' && github.event.workflow_run.event == 'workflow_dispatch' && github.event.workflow_run.display_title == 'Direct Worker ESC next' && github.event.workflow_run.head_branch == 'main' }}
+    uses: ./.github/workflows/automatic-source-recovery-docs-core.yml
+    with:
+      project: ESC
+    secrets:
+      product_write_token: ${{ secrets.ESC_WRITE_TOKEN }}
+      control_read_token: ${{ secrets.CONTROL_READ_TOKEN }}
+
+  muvel:
+    if: ${{ github.event.workflow_run.conclusion == 'failure' && github.event.workflow_run.event == 'workflow_dispatch' && github.event.workflow_run.display_title == 'Direct Worker MUVEL next' && github.event.workflow_run.head_branch == 'main' }}
+    uses: ./.github/workflows/automatic-source-recovery-docs-core.yml
+    with:
+      project: MUVEL
+    secrets:
+      product_write_token: ${{ secrets.MUVEL_WRITE_TOKEN }}
+      control_read_token: ${{ secrets.CONTROL_READ_TOKEN }}

@@ -1,0 +1,83 @@
+# A narrow trusted-main docs-only publication path, never a product source writer.
+# Activation (merging this workflow) is a separate Owner-approved privilege boundary.
+name: Direct Worker Failed-Source Recovery Core
+
+on:
+  workflow_call:
+    inputs:
+      project:
+        required: true
+        type: string
+    secrets:
+      product_write_token:
+        required: true
+      control_read_token:
+        required: true
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  prepare:
+    runs-on: [self-hosted, Linux, X64, direct-worker]
+    timeout-minutes: 15
+    steps:
+      - name: Checkout trusted main recovery code
+        uses: actions/checkout@v6
+        with:
+          ref: main
+          clean: false
+          persist-credentials: false
+
+      - name: Checkout current control registry (read only)
+        uses: actions/checkout@v6
+        with:
+          repository: ChoiWonJae850610/DEV-CONTROL
+          ref: main
+          token: ${{ secrets.control_read_token }}
+          path: _control
+          clean: false
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Prepare isolated docs-only environment
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          root="$RUNNER_TEMP/wonjae-recovery-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          test ! -e "$root" && test ! -L "$root"
+          mkdir -m 700 "$root" "$root/home" "$root/gh"
+          echo "RECOVERY_ROOT=$root" >> "$GITHUB_ENV"
+          echo "HOME=$root/home" >> "$GITHUB_ENV"
+          echo "GH_CONFIG_DIR=$root/gh" >> "$GITHUB_ENV"
+          python3 -m venv "$root/venv"
+          "$root/venv/bin/python" -m pip install --no-cache-dir 'PyYAML==6.0.3'
+
+      - name: Prepare exact failed-source recovery docs PR
+        shell: bash
+        env:
+          RUNNER_READ_TOKEN: ${{ github.token }}
+          PRODUCT_WRITE_TOKEN: ${{ secrets.product_write_token }}
+          CONTROL_READ_TOKEN: ${{ secrets.control_read_token }}
+        run: |
+          set -euo pipefail
+          umask 077
+          PYTHONPATH="$GITHUB_WORKSPACE/src" "$RECOVERY_ROOT/venv/bin/python" \
+            scripts/prepare_failed_source_recovery.py \
+            --project "${{ inputs.project }}" \
+            --event "$GITHUB_EVENT_PATH" \
+            --registry "$GITHUB_WORKSPACE/_control/PROJECTS.yaml" \
+            --workdir "$RECOVERY_ROOT/work"
+
+      - name: Cleanup only this ephemeral recovery workspace
+        if: ${{ always() && env.RECOVERY_ROOT != '' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected="$RUNNER_TEMP/wonjae-recovery-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          test "$RECOVERY_ROOT" = "$expected"
+          test ! -L "$RECOVERY_ROOT"
+          test "$(realpath -m "$RECOVERY_ROOT")" = "$expected"
+          rm -rf --one-file-system -- "$RECOVERY_ROOT"
