@@ -266,7 +266,7 @@ def test_trusted_multiple_stage_plan_reaches_gate_without_new_doc_pr(tmp_path):
         ([queued_gate()], queued_gate(), "requires SOURCE_READY"),
         ([queued_gate()] * 9, queued_source("B", "WAFL-SOURCE-002"), "bounded"),
         ([queued_gate()], queued_source("B", "WAFL-SOURCE-001"), "distinct"),
-        ([queued_gate()], queued_source("B", ""), "distinct"),
+        ([queued_gate()], queued_source("B", ""), "source_task_id"),
     ],
 )
 def test_continuous_source_queue_fail_closed(tmp_path, queue, successor, problem):
