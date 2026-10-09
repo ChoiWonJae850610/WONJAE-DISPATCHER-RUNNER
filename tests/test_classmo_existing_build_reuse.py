@@ -1,4 +1,6 @@
 """Credential-free regression: reuse exactly one signed CLASSMO EAS Preview build."""
+import json
+
 from argparse import Namespace
 from pathlib import Path
 
@@ -31,8 +33,6 @@ def _payload(**changes):
 
 
 def _run(tmp_path: Path, builds, phase: str = "preflight", expected_id: str | None = None):
-    import json
-
     payload = tmp_path / "list.json"
     env_file = tmp_path / "env"
     payload.write_text(json.dumps(builds), encoding="utf-8")
@@ -70,7 +70,12 @@ def test_final_readback_requires_exact_id_and_metadata(tmp_path: Path):
     assert "EAS_BUILD_ARCHIVE_PRESENT=1" in env
     assert "EAS_EXISTING_BUILD" not in env
     with pytest.raises(SystemExit, match="original approved build"):
-        _run(tmp_path, [_payload()], phase="verify", expected_id="bbbbbbbb-2222-3333-4444-555555555555")
+        _run(
+            tmp_path,
+            [_payload()],
+            phase="verify",
+            expected_id="bbbbbbbb-2222-3333-4444-555555555555",
+        )
     with pytest.raises(SystemExit, match="exact existing EAS"):
         _run(tmp_path, [_payload()], phase="verify")
 
