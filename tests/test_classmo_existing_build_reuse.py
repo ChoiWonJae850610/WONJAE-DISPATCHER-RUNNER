@@ -5,7 +5,6 @@ from argparse import Namespace
 from pathlib import Path
 
 import pytest
-
 from scripts import provider_action
 
 
