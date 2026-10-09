@@ -161,7 +161,7 @@ def plan(event: dict, project: str, runner_token: str, product_token: str,
         raise RecoveryPreparationError("invalid trusted Runner SHA")
     actual = github_api(f"repos/{RUNNER}/actions/runs/{run_id}", runner_token)
     if (candidate.get("id") != actual.get("id")
-            or candidate.get("head_sha") != actual.get("head_sha"):
+            or candidate.get("head_sha") != actual.get("head_sha")):
         raise RecoveryPreparationError("event and exact run disagree")
     checked_run(actual, project, runner_sha)
     failed_job = checked_failure_job(
@@ -188,7 +188,7 @@ def plan(event: dict, project: str, runner_token: str, product_token: str,
     remote = github_api(f"repos/{repo}/branches/{branch}", product_token)
     source_date = remote["commit"]["commit"]["committer"]["date"]
     if (remote["commit"]["sha"] != original_sha
-            or timestamp(actual["created_at"]) <= timestamp(source_date):
+            or timestamp(actual["created_at"]) <= timestamp(source_date)):
         raise RecoveryPreparationError("current product generation is not failed source generation")
     open_prs = github_api(f"repos/{repo}/pulls?state=open&per_page=100", product_token)
     if not isinstance(open_prs, list) or len(open_prs) >= 100:
