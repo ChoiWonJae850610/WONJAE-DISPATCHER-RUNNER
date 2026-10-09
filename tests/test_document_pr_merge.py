@@ -54,7 +54,10 @@ def pr():
         "mergeable": True,
         "changed_files": 3,
         "user": {"login": "ChoiWonJae850610"},
-        "head": {"sha": HEAD, "ref": "docs/classmo-recovery", "repo": {"full_name": route()["repo"]}},
+        "head": {
+            "sha": HEAD, "ref": "docs/classmo-recovery",
+            "repo": {"full_name": route()["repo"]},
+        },
         "base": {"ref": "cloud-dev-v1", "sha": BASE,
                  "repo": {"full_name": route()["repo"]}},
     }
