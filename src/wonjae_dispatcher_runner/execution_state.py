@@ -187,7 +187,9 @@ def load_product_execution_state(
         raise ExecutionStateError("source_success_queue must be a bounded list")
     if queued and (next_action.type != "SOURCE_READY" or after is None
                    or after.type != "SOURCE_READY"):
-        raise ExecutionStateError("source_success_queue requires SOURCE_READY current and successor")
+        raise ExecutionStateError(
+            "source_success_queue requires SOURCE_READY current and successor"
+        )
     queue = tuple(
         _parse_action(value, "after_source_success") for value in queued
     )
