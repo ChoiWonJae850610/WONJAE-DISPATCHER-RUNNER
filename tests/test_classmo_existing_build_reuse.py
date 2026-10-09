@@ -1,13 +1,17 @@
 """Credential-free regression: reuse exactly one signed CLASSMO EAS Preview build."""
 
-import importlib
+import importlib.util
 import json
 from argparse import Namespace
 from pathlib import Path
 
 import pytest
 
-provider_action = importlib.import_module("scripts.provider_action")
+MODULE_PATH = Path(__file__).resolve().parents[1] / "scripts" / "provider_action.py"
+SPEC = importlib.util.spec_from_file_location("classmo_provider_action_readback", MODULE_PATH)
+assert SPEC is not None and SPEC.loader is not None
+provider_action = importlib.util.module_from_spec(SPEC)
+SPEC.loader.exec_module(provider_action)
 
 
 SOURCE_SHA = "a" * 40
