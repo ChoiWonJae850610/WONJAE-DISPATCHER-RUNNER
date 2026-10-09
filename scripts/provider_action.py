@@ -528,6 +528,87 @@ def parse_eas_build_launch(args: argparse.Namespace) -> None:
     fail("EAS build ID missing from launch result")
 
 
+def parse_classmo_build_list(args: argparse.Namespace) -> None:
+    """Fail-closed reuse/readback of an already-submitted exact EAS iOS build.
+
+    EAS CLI v24.8.0 'build:list --json' emits a filtered array of Build
+    fragments. Unlike build:view, this path does not depend on the failing
+    post-lookup JSON presentation step observed after a signed build.
+    No call from this function creates, restarts, or re-signs a build.
+    """
+    data = read_json(args.input)
+    if not isinstance(data, list):
+        fail("EAS build list must be a JSON array")
+    if not SHA_RE.fullmatch(args.source_sha):
+        fail("invalid exact source SHA")
+    if args.phase not in ("preflight", "verify"):
+        fail("invalid existing-build readback phase")
+    if args.phase == "verify" and not args.expected_id:
+        fail("exact existing EAS build ID is required for final verification")
+    if args.phase == "preflight" and args.expected_id:
+        fail("preflight must not adopt a caller-selected build ID")
+
+    if not data:
+        if args.phase == "verify":
+            fail("EAS build was not found in exact-version readback")
+        write_env(args.github_env, {"EAS_EXISTING_BUILD": "0"})
+        return
+    # Version/build are deliberately not silently filtered again: incorrect
+    # upstream filters must fail, never authorize another chargeable build.
+    if len(data) != 1 or not isinstance(data[0], dict):
+        fail("multiple or malformed EAS builds for the exact app/build version")
+    item = data[0]
+    expected = {
+        "appVersion": args.app_version,
+        "appBuildVersion": args.build_number,
+        "platform": "IOS",
+        "distribution": "INTERNAL",
+        "buildProfile": "preview",
+        "appIdentifier": "com.sanjinworks.classmo",
+        "gitCommitHash": args.source_sha,
+    }
+    for key, value in expected.items():
+        if str(item.get(key, "")).upper() != value.upper():
+            fail(f"EAS build identity mismatch: {key}")
+    if item.get("isForIosSimulator") is not False:
+        fail("EAS build is not a signed physical-device iOS artifact")
+    channel = item.get("updateChannel")
+    if not isinstance(channel, dict) or channel.get("name") != args.channel:
+        fail("EAS build channel mismatch")
+    runtime = item.get("runtime")
+    if not isinstance(runtime, dict) or runtime.get("version") != args.runtime_version:
+        fail("EAS build runtime version mismatch")
+    build_id = item.get("id")
+    if not isinstance(build_id, str) or not re.fullmatch(
+        r"[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}", build_id
+    ):
+        fail("exact EAS build ID missing or invalid")
+    if args.phase == "verify" and build_id != args.expected_id:
+        fail("EAS build ID does not match the original approved build")
+    if item.get("status") != "FINISHED":
+        fail("existing EAS build is not FINISHED; no new build is permitted")
+    artifacts = item.get("artifacts")
+    if not isinstance(artifacts, dict):
+        fail("finished EAS build has no installable archive evidence")
+    archive = artifacts.get("applicationArchiveUrl") or artifacts.get("buildUrl")
+    if not isinstance(archive, str) or not archive.startswith("https://"):
+        fail("finished EAS build has no HTTPS iOS archive reference")
+
+    values = {
+        "EAS_BUILD_ID": build_id,
+        "EAS_BUILD_APP_VERSION": args.app_version,
+        "EAS_BUILD_APP_BUILD_VERSION": args.build_number,
+        "EAS_BUILD_DISTRIBUTION": "internal",
+        "EAS_BUILD_ARCHIVE_PRESENT": "1",
+        "PROVIDER_STATUS": "SUCCESS",
+    }
+    if args.phase == "preflight":
+        values["EAS_EXISTING_BUILD"] = "1"
+    # Signed artifact URLs are checked in memory only, never logged, stored
+    # as workflow environment, or uploaded as an artifact.
+    write_env(args.github_env, values)
+
+
 def parse_eas_build_view(args: argparse.Namespace) -> None:
     data = read_json(args.input)
     chosen = None
@@ -707,6 +788,18 @@ def main() -> None:
     p.add_argument("--input", required=True)
     p.add_argument("--github-env", required=True)
     p.set_defaults(func=parse_eas_build_launch)
+
+    p = sub.add_parser("parse-classmo-build-list")
+    p.add_argument("--input", required=True)
+    p.add_argument("--phase", required=True, choices=["preflight", "verify"])
+    p.add_argument("--source-sha", required=True)
+    p.add_argument("--app-version", required=True)
+    p.add_argument("--build-number", required=True)
+    p.add_argument("--runtime-version", required=True)
+    p.add_argument("--channel", required=True)
+    p.add_argument("--expected-id")
+    p.add_argument("--github-env", required=True)
+    p.set_defaults(func=parse_classmo_build_list)
 
     p = sub.add_parser("parse-eas-build-view")
     p.add_argument("--input", required=True)
