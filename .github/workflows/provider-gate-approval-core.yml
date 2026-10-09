@@ -452,6 +452,34 @@ jobs:
           cd ".approval/product/$PROVIDER_WORKING_DIRECTORY"
           npm ci --ignore-scripts --no-audit --no-fund
 
+      - name: CLASSMO · read-only existing Preview build preflight
+        if: env.PROVIDER_EXECUTOR == 'classmo_eas_build'
+        env:
+          EXPO_TOKEN: ${{ secrets.expo_token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd ".approval/product/$PROVIDER_WORKING_DIRECTORY"
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          # A prior version/build must never trigger another paid signed build.
+          # Any failed or ambiguous EAS readback exits before 'eas build'.
+          eas build:list \
+            --platform "$PROVIDER_PLATFORM" \
+            --build-profile "$PROVIDER_BUILD_PROFILE" \
+            --app-version "$PROVIDER_APP_VERSION" \
+            --app-build-version "$PROVIDER_BUILD_NUMBER" \
+            --limit 50 --json --non-interactive > "$RUNNER_TEMP/classmo-build-preflight.json"
+          cd "$GITHUB_WORKSPACE"
+          python scripts/provider_action.py parse-classmo-build-list \
+            --phase preflight \
+            --input "$RUNNER_TEMP/classmo-build-preflight.json" \
+            --source-sha "$SOURCE_SHA" \
+            --app-version "$PROVIDER_APP_VERSION" \
+            --build-number "$PROVIDER_BUILD_NUMBER" \
+            --runtime-version "$PROVIDER_RUNTIME_VERSION" \
+            --channel "$PROVIDER_CHANNEL" \
+            --github-env "$GITHUB_ENV"
+
       - name: CLASSMO · build signed internal preview
         if: env.PROVIDER_EXECUTOR == 'classmo_eas_build'
         env:
@@ -459,6 +487,12 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          if [ "${EAS_EXISTING_BUILD:-0}" = "1" ]; then
+            test -n "${EAS_BUILD_ID:-}"
+            echo "Existing exact EAS build reused; no new build/resign."
+            exit 0
+          fi
+          test "${EAS_EXISTING_BUILD:-0}" = "0"
           cd ".approval/product/$PROVIDER_WORKING_DIRECTORY"
           test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
           eas build \
@@ -481,12 +515,24 @@ jobs:
           set -euo pipefail
           test -n "${EAS_BUILD_ID:-}"
           cd ".approval/product/$PROVIDER_WORKING_DIRECTORY"
-          eas build:view "$EAS_BUILD_ID" --json > "$RUNNER_TEMP/classmo-eas-build-view.json"
+          # Avoid the build:view --json command that failed post-lookup.
+          eas build:list \
+            --platform "$PROVIDER_PLATFORM" \
+            --build-profile "$PROVIDER_BUILD_PROFILE" \
+            --app-version "$PROVIDER_APP_VERSION" \
+            --app-build-version "$PROVIDER_BUILD_NUMBER" \
+            --limit 50 --json --non-interactive > "$RUNNER_TEMP/classmo-eas-build-list.json"
           cd "$GITHUB_WORKSPACE"
           build_env="$RUNNER_TEMP/classmo-eas-build.env"
           : > "$build_env"
-          python scripts/provider_action.py parse-eas-build-view \
-            --input "$RUNNER_TEMP/classmo-eas-build-view.json" \
+          python scripts/provider_action.py parse-classmo-build-list \
+            --phase verify \
+            --input "$RUNNER_TEMP/classmo-eas-build-list.json" \
+            --source-sha "$SOURCE_SHA" \
+            --app-version "$PROVIDER_APP_VERSION" \
+            --build-number "$PROVIDER_BUILD_NUMBER" \
+            --runtime-version "$PROVIDER_RUNTIME_VERSION" \
+            --channel "$PROVIDER_CHANNEL" \
             --expected-id "$EAS_BUILD_ID" \
             --github-env "$build_env"
           set -a
@@ -497,15 +543,17 @@ jobs:
           test "$EAS_BUILD_APP_VERSION" = "$PROVIDER_APP_VERSION"
           test "$EAS_BUILD_APP_BUILD_VERSION" = "$PROVIDER_BUILD_NUMBER"
           test "$EAS_BUILD_DISTRIBUTION" = "internal"
+          test "$EAS_BUILD_ARCHIVE_PRESENT" = "1"
           {
             echo "## CLASSMO preview iOS build"
             echo
-            printf -- '- source SHA: `%s`\n' "$SOURCE_SHA"
-            printf -- '- build ID: `%s`\n' "$EAS_BUILD_ID"
-            printf -- '- app/build: `%s (%s)`\n' "$EAS_BUILD_APP_VERSION" "$EAS_BUILD_APP_BUILD_VERSION"
-            printf -- '- distribution: `%s`\n' "$EAS_BUILD_DISTRIBUTION"
-            echo '- build result: `PASS`'
-            echo '- device install / physical QA: `NOT_RUN`'
+            printf -- '- source SHA: %s\n' "$SOURCE_SHA"
+            printf -- '- build ID: %s\n' "$EAS_BUILD_ID"
+            printf -- '- app/build: %s (%s)\n' "$EAS_BUILD_APP_VERSION" "$EAS_BUILD_APP_BUILD_VERSION"
+            printf -- '- distribution: %s\n' "$EAS_BUILD_DISTRIBUTION"
+            printf -- '- previous EAS build reused (no new build): %s\n' "${EAS_EXISTING_BUILD:-0}"
+            echo '- exact EAS build metadata and archive reference: PASS'
+            echo '- device install / physical QA: NOT_RUN'
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: WAFL · build signed internal Preview with fabric W
