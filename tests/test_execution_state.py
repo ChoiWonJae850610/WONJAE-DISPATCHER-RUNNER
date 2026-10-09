@@ -191,3 +191,120 @@ def test_manual_qa_transition_rejects_non_direct_mode(tmp_path: Path) -> None:
         load_product_execution_state(
             tmp_path, ".wonjae/execution-state.yaml", "WAFL"
         )
+
+
+def queued_source(title: str, task_id: str) -> dict[str, object]:
+    return {
+        "type": "SOURCE_READY", "title": title, "source_task_id": task_id,
+        "source_scope": [f"Implement bounded {title}."],
+        "gate": None, "owner_action": None,
+    }
+
+
+def queued_gate() -> dict[str, object]:
+    return {
+        "type": "PROVIDER_GATE", "title": "Owner-authorized preview validation",
+        "source_task_id": None, "source_scope": [],
+        "gate": "preview_ios_build", "owner_action": "Approve existing Preview executor.",
+    }
+
+
+def setup_continuous_plan(path: Path) -> None:
+    value = yaml.safe_load(path.read_text(encoding="utf-8"))
+    value["after_source_success"] = queued_source("Stage B", "WAFL-SOURCE-002")
+    value["source_success_queue"] = [
+        queued_source("Stage C", "WAFL-SOURCE-003"),
+        queued_gate(),
+    ]
+    path.write_text(yaml.safe_dump(value, sort_keys=False), encoding="utf-8")
+
+
+def test_trusted_multiple_stage_plan_reaches_gate_without_new_doc_pr(tmp_path):
+    path = write_state(tmp_path)
+    setup_continuous_plan(path)
+
+    first = load_product_execution_state(
+        tmp_path, ".wonjae/execution-state.yaml", "WAFL",
+    )
+    assert first.next_action.source_task_id == "WAFL-SOURCE-001"
+    assert first.after_source_success.source_task_id == "WAFL-SOURCE-002"
+    assert len(first.source_success_queue) == 2
+
+    second = advance_product_execution_state(
+        tmp_path, ".wonjae/execution-state.yaml", "WAFL",
+    )
+    assert second.next_action.source_task_id == "WAFL-SOURCE-002"
+    assert second.after_source_success.source_task_id == "WAFL-SOURCE-003"
+    assert len(second.source_success_queue) == 1
+
+    third = advance_product_execution_state(
+        tmp_path, ".wonjae/execution-state.yaml", "WAFL",
+    )
+    assert third.next_action.source_task_id == "WAFL-SOURCE-003"
+    assert third.after_source_success.type == "PROVIDER_GATE"
+    assert not third.source_success_queue
+
+    gated = advance_product_execution_state(
+        tmp_path, ".wonjae/execution-state.yaml", "WAFL",
+    )
+    assert gated.next_action.type == "PROVIDER_GATE"
+    assert gated.after_source_success is None
+    assert gated.source_success_queue == ()
+    with pytest.raises(ExecutionStateError, match="only SOURCE_READY"):
+        advance_product_execution_state(
+            tmp_path, ".wonjae/execution-state.yaml", "WAFL",
+        )
+
+
+@pytest.mark.parametrize(
+    "queue,successor,problem",
+    [
+        ([], queued_source("B", "WAFL-SOURCE-002"), "terminating"),
+        ([queued_source("C", "WAFL-SOURCE-003")],
+         queued_source("B", "WAFL-SOURCE-002"), "terminate"),
+        ([queued_gate(), queued_gate()], queued_source("B", "WAFL-SOURCE-002"), "chain"),
+        ([queued_gate()], queued_gate(), "requires SOURCE_READY"),
+        ([queued_gate()] * 9, queued_source("B", "WAFL-SOURCE-002"), "bounded"),
+        ([queued_gate()], queued_source("B", "WAFL-SOURCE-001"), "distinct"),
+        ([queued_gate()], queued_source("B", ""), "source_task_id"),
+    ],
+)
+def test_continuous_source_queue_fail_closed(tmp_path, queue, successor, problem):
+    path = write_state(tmp_path)
+    payload = yaml.safe_load(path.read_text(encoding="utf-8"))
+    payload["after_source_success"] = successor
+    payload["source_success_queue"] = queue
+    path.write_text(yaml.safe_dump(payload, sort_keys=False), encoding="utf-8")
+    with pytest.raises(ExecutionStateError, match=problem):
+        load_product_execution_state(tmp_path, ".wonjae/execution-state.yaml", "WAFL")
+
+
+def test_gate_must_not_enqueue_new_source_automatically(tmp_path):
+    path = write_state(tmp_path, "PROVIDER_GATE")
+    payload = yaml.safe_load(path.read_text(encoding="utf-8"))
+    payload["source_success_queue"] = [
+        queued_source("Another source", "WAFL-SOURCE-002"), queued_gate(),
+    ]
+    path.write_text(yaml.safe_dump(payload, sort_keys=False), encoding="utf-8")
+    with pytest.raises(ExecutionStateError, match="requires SOURCE_READY"):
+        load_product_execution_state(tmp_path, ".wonjae/execution-state.yaml", "WAFL")
+
+
+def test_invalid_manual_qa_final_stage_never_skips_actionability(tmp_path):
+    path = write_state(tmp_path)
+    payload = yaml.safe_load(path.read_text(encoding="utf-8"))
+    payload["after_source_success"] = queued_source("Stage B", "WAFL-SOURCE-002")
+    payload["source_success_queue"] = [
+        {"type": "MANUAL_QA", "title": "Review signed app", "source_scope": []},
+    ]
+    path.write_text(yaml.safe_dump(payload, sort_keys=False), encoding="utf-8")
+    with pytest.raises(ExecutionStateError, match="actionability contract"):
+        load_product_execution_state(tmp_path, ".wonjae/execution-state.yaml", "WAFL")
+
+
+def test_backward_compatible_single_source_gate_plan_does_not_add_queue(tmp_path):
+    path = write_state(tmp_path)
+    advance_product_execution_state(tmp_path, ".wonjae/execution-state.yaml", "WAFL")
+    payload = yaml.safe_load(path.read_text(encoding="utf-8"))
+    assert "source_success_queue" not in payload
+    assert payload["after_source_success"] is None
