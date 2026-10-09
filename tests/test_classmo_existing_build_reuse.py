@@ -1,11 +1,13 @@
 """Credential-free regression: reuse exactly one signed CLASSMO EAS Preview build."""
 
+import importlib
 import json
 from argparse import Namespace
 from pathlib import Path
 
 import pytest
-from scripts import provider_action
+
+provider_action = importlib.import_module("scripts.provider_action")
 
 
 SOURCE_SHA = "a" * 40
