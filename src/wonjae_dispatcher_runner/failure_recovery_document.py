@@ -7,11 +7,10 @@ trusted admission/publisher must verify the failed run and protected checkout.
 from __future__ import annotations
 
 import copy
-from dataclasses import dataclass
 import re
+from dataclasses import dataclass
 
 import yaml
-
 
 SHA = re.compile(r"^[0-9a-f]{40}$")
 TASK = re.compile(r"^[A-Z][A-Z0-9-]{2,100}$")
