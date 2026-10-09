@@ -1,0 +1,92 @@
+name: Document PR Merge Core
+
+on:
+  workflow_call:
+    inputs:
+      project:
+        required: true
+        type: string
+      pr_number:
+        required: true
+        type: string
+      head_sha:
+        required: true
+        type: string
+      base_sha:
+        required: true
+        type: string
+      control_sha:
+        required: true
+        type: string
+    secrets:
+      product_write_token:
+        required: true
+      control_read_token:
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: exact-document-merge-${{ inputs.project }}
+  cancel-in-progress: false
+
+jobs:
+  integrate:
+    if: ${{ github.event_name == 'workflow_dispatch' && github.actor == github.repository_owner }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout trusted Runner main
+        uses: actions/checkout@v6
+        with:
+          ref: main
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install only the registry YAML parser
+        run: python -m pip install "PyYAML>=6.0,<7"
+
+      - name: Checkout exact registered DEV-CONTROL
+        uses: actions/checkout@v6
+        with:
+          repository: ChoiWonJae850610/DEV-CONTROL
+          ref: ${{ inputs.control_sha }}
+          path: _control
+          token: ${{ secrets.control_read_token }}
+          persist-credentials: false
+
+      - name: Refuse stale shared control registration
+        env:
+          GH_TOKEN: ${{ secrets.control_read_token }}
+          EXPECTED_CONTROL_SHA: ${{ inputs.control_sha }}
+        run: |
+          set -euo pipefail
+          test "$(git -C _control rev-parse HEAD)" = "$EXPECTED_CONTROL_SHA"
+          current="$(gh api repos/ChoiWonJae850610/DEV-CONTROL/branches/main --jq '.commit.sha')"
+          test "$current" = "$EXPECTED_CONTROL_SHA" || {
+            echo "::error::Shared registry changed after Owner's button click."
+            exit 1
+          }
+
+      - name: Verify document-only exact PR, merge, and validate integrated SHA
+        env:
+          GH_TOKEN: ${{ secrets.product_write_token }}
+          PROJECT: ${{ inputs.project }}
+          PR_NUMBER: ${{ inputs.pr_number }}
+          PR_HEAD: ${{ inputs.head_sha }}
+          BASE_SHA: ${{ inputs.base_sha }}
+          CONTROL_SHA: ${{ inputs.control_sha }}
+        run: |
+          set -euo pipefail
+          python scripts/document_pr_merge.py \
+            --registry _control/PROJECTS.yaml \
+            --project "$PROJECT" \
+            --pr-number "$PR_NUMBER" \
+            --head "$PR_HEAD" \
+            --base "$BASE_SHA" \
+            --control-sha "$CONTROL_SHA"
