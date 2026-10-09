@@ -1,0 +1,72 @@
+# Dedicated non-secret, no-source Owner diagnostic. This is not Codex auth acceptance.
+name: Direct Worker Runner Readiness
+run-name: Runner Readiness ${{ inputs.project }} ${{ inputs.source_sha }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      project:
+        description: Registered project identity supplied by authenticated SANJINWORKS
+        required: true
+        type: string
+      source_sha:
+        description: Exact product branch HEAD at Owner request time
+        required: true
+        type: string
+      control_sha:
+        description: Current DEV-CONTROL main HEAD at Owner request time
+        required: true
+        type: string
+
+permissions: {}
+
+concurrency:
+  group: runner-readiness-${{ inputs.project }}-${{ inputs.source_sha }}
+  cancel-in-progress: false
+
+jobs:
+  readiness:
+    if: ${{ github.ref == 'refs/heads/main' }}
+    runs-on: [self-hosted, Linux, X64, direct-worker]
+    timeout-minutes: 5
+    steps:
+      - name: Verify bounded nonsecret host diagnostics
+        shell: bash
+        env:
+          PROJECT: ${{ inputs.project }}
+          PRODUCT_HEAD: ${{ inputs.source_sha }}
+          CONTROL_HEAD: ${{ inputs.control_sha }}
+        run: |
+          set -euo pipefail
+          [[ "$PROJECT" =~ ^[A-Z][A-Z0-9_-]{1,30}$ ]] || { echo "Invalid project identity"; exit 1; }
+          [[ "$PRODUCT_HEAD" =~ ^[0-9a-f]{40}$ ]] || { echo "Invalid source identity"; exit 1; }
+          [[ "$CONTROL_HEAD" =~ ^[0-9a-f]{40}$ ]] || { echo "Invalid control identity"; exit 1; }
+          test "$(uname -s)" = "Linux"
+          python3 --version >/dev/null
+          git --version >/dev/null
+          free_kb="$(df -Pk / | awk 'NR==2 {print $4}')"
+          [[ "$free_kb" =~ ^[0-9]+$ ]] || { echo "Disk capacity unreadable"; exit 1; }
+          mem_kb="$(awk '/^MemAvailable:/ {print $2}' /proc/meminfo)"
+          [[ "$mem_kb" =~ ^[0-9]+$ ]] || { echo "Memory capacity unreadable"; exit 1; }
+          dns="UNVERIFIED"
+          if command -v getent >/dev/null 2>&1 && getent hosts api.openai.com >/dev/null 2>&1; then
+            dns="REACHABLE_DNS"
+          fi
+          https="UNVERIFIED"
+          if command -v curl >/dev/null 2>&1; then
+            status="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' --connect-timeout 3 --max-time 8 https://api.openai.com 2>/dev/null || true)"
+            if [[ "$status" =~ ^[1-5][0-9]{2}$ ]]; then https="REACHABLE_HTTP"; fi
+          fi
+          {
+            echo "### Nonsecret Runner readiness"
+            echo "Project: \`$PROJECT\`"
+            echo "Product HEAD: \`$PRODUCT_HEAD\`"
+            echo "Control HEAD: \`$CONTROL_HEAD\`"
+            echo "Linux / Python / Git: AVAILABLE"
+            echo "Disk free (GiB rounded): $((free_kb / 1048576))"
+            echo "Available memory (GiB rounded): $((mem_kb / 1048576))"
+            echo "Public DNS: $dns"
+            echo "Unauthenticated public HTTPS: $https"
+            echo ""
+            echo "**Limits:** No product source, Codex auth or actual model turn, provider, EAS/OTA, credentials, token rotation, production or physical QA were accessed. A successful workflow proves only these host checks, not that the original Codex timeout is resolved. The product DECISION_REQUIRED gate remains unchanged."
+          } >> "$GITHUB_STEP_SUMMARY"
