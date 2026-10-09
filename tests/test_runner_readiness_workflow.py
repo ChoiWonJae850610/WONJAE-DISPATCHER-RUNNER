@@ -1,11 +1,13 @@
 """Synthetic guard: Owner readiness workflow must remain nonsecret and non-mutating."""
 from pathlib import Path
+
 import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 
 def test_nonsecret_readiness_workflow_does_not_start_product_source_or_rotate_secrets():
-    text = (ROOT / ".github/workflows/direct-worker-runner-readiness.yml").read_text(encoding="utf-8")
+    workflow = ROOT / ".github/workflows/direct-worker-runner-readiness.yml"
+    text = workflow.read_text(encoding="utf-8")
     value = yaml.safe_load(text)
     trigger = value.get("on", value.get(True))
     assert set(trigger) == {"workflow_dispatch"}
