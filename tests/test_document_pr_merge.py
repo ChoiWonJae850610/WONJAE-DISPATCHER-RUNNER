@@ -172,6 +172,7 @@ def test_trusted_owner_button_workflow_has_separate_tokens_and_no_provider_calls
     caller = (root / "document-pr-merge.yml").read_text(encoding="utf-8")
     core = (root / "document-pr-merge-core.yml").read_text(encoding="utf-8")
     assert "workflow_dispatch:" in caller
+    assert 'run-name: "Document PR Merge ${{ inputs.project }} #${{ inputs.pr_number }}' in caller
     assert "github.actor == github.repository_owner" in caller
     for token in ("WAFL_WRITE_TOKEN", "CLASSMO_WRITE_TOKEN", "ESC_WRITE_TOKEN",
                   "MUVEL_WRITE_TOKEN", "CONTROL_READ_TOKEN"):
