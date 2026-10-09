@@ -57,8 +57,10 @@ def check_evidence(evidence: TimeoutEvidence, state: dict) -> None:
         raise RecoveryPreparationError("untrusted project or task identity")
     if not SHA.fullmatch(evidence.source_sha) or not 0 < evidence.runner_run_id < 10**18:
         raise RecoveryPreparationError("untrusted source SHA or run identity")
-    if evidence.repository != f"ChoiWonJae850610/{evidence.project}":
-        raise RecoveryPreparationError("project repository does not match registration")
+    if not re.fullmatch(r"[A-Za-z0-9-]{2,39}/[A-Z][A-Z0-9-]{1,30}", evidence.repository):
+        raise RecoveryPreparationError("project repository is not a safe registered locator")
+    if evidence.repository.split("/", 1)[1] != evidence.project:
+        raise RecoveryPreparationError("product repository identity mismatch")
     if evidence.branch in ("main", "master") or not re.fullmatch(
         r"[a-z0-9][a-z0-9/_-]{1,90}", evidence.branch
     ):
