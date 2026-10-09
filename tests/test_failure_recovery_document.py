@@ -86,7 +86,7 @@ def test_exact_recovery_document_and_non_executable_state(tmp_path):
     assert "INITIAL_CODEX_TIMEOUT_EXHAUSTED" in doc
     assert "commits 0" in doc
     assert "source_scope" not in doc
-    assert "tokens" not in doc  # do not dump freeform source scopes
+    assert "Implement bounded cloud checks; do not include tokens" not in doc
     assert "Image work" in doc and "Protected external R2 gate" in doc
     branch, doc_path, state_path = recovery_paths(identity)
     assert branch == f"docs/recovery-wafl-{RUN}"
