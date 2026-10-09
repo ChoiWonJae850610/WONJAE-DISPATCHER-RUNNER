@@ -1,6 +1,6 @@
 name: Document PR Merge
 
-run-name: Document PR Merge ${{ inputs.project }} #${{ inputs.pr_number }} ${{ inputs.head_sha }} ${{ inputs.base_sha }} ${{ inputs.control_sha }}
+run-name: "Document PR Merge ${{ inputs.project }} #${{ inputs.pr_number }} ${{ inputs.head_sha }} ${{ inputs.base_sha }} ${{ inputs.control_sha }}"
 
 on:
   workflow_dispatch:
