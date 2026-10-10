@@ -53,7 +53,7 @@ def checked_run(run: object, expected_project: str, runner_sha: str) -> None:
     if not isinstance(run, dict) or not PROJECT.fullmatch(expected_project):
         raise RecoveryPreparationError("invalid failed run identity")
     if (run.get("repository", {}).get("full_name") != RUNNER
-            or run.get("name") != "Direct Worker"
+            or run.get("name") != f"Direct Worker {expected_project} next"
             or run.get("display_title") != f"Direct Worker {expected_project} next"
             or run.get("event") != "workflow_dispatch"
             or run.get("head_branch") != "main"
