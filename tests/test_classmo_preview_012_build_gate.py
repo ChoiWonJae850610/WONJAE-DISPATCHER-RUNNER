@@ -87,8 +87,8 @@ def test_classmo_022_ota_gate_restricts_new_runtime_to_existing_signed_build_sha
     assert "contract.all? { |key, value| config[key] == value }" in ota
     assert "abort(\"CLASSMO EAS update runtime/baseline contract mismatch\") unless matched_runtime_contract" in ota
     contracts = re.findall(
-        r'"runtime_version"\\s*=>\\s*"(0\\.0\\.\\d+)"\\s*,\\s*'
-        r'"compatibility_base_sha"\\s*=>\\s*"([a-f0-9]{40})"',
+        r'"runtime_version"\s*=>\s*"(0\.0\.\d+)"\s*,\s*'
+        r'"compatibility_base_sha"\s*=>\s*"([a-f0-9]{40})"',
         ota,
     )
     assert len(contracts) == 2
