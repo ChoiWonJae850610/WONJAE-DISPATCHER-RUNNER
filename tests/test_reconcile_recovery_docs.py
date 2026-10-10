@@ -312,7 +312,6 @@ def test_scope_modification_does_not_advance_006_or_provider_gate():
 
 
 def test_published_pr_readback_waits_for_expected_sha(monkeypatch):
-    from attach_recovery_docs import request_json as _original  # noqa: F401
     import attach_recovery_docs as script
 
     seen = []
