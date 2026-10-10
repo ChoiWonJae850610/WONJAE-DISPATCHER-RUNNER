@@ -67,6 +67,35 @@ def checked_run(run: object, expected_project: str, runner_sha: str) -> None:
         raise RecoveryPreparationError("failed run is not an exact eligible source next")
 
 
+
+def checked_trusted_runner_history(
+    failed_head_sha: str, current_main_sha: str, read_token: str
+) -> None:
+    """Admit a historical exact Owner run only on trusted main ancestry.
+
+    A recovery job retried after its initial run can check out newer trusted
+    main code. Requiring the failed run SHA to equal current main would wrongly
+    reject every historical recovery after a common Runner fix. This does not
+    grant permission to rerun source; it only verifies old main ancestry.
+    """
+    if not SHA.fullmatch(failed_head_sha) or not SHA.fullmatch(current_main_sha):
+        raise RecoveryPreparationError("invalid runner history identity")
+    comparison = github_api(
+        f"repos/{RUNNER}/compare/{failed_head_sha}...{current_main_sha}",
+        read_token,
+    )
+    if (not isinstance(comparison, dict)
+            or comparison.get("status") not in {"ahead", "identical"}
+            or comparison.get("base_commit", {}).get("sha") != failed_head_sha
+            or comparison.get("merge_base_commit", {}).get("sha") != failed_head_sha
+            or type(comparison.get("ahead_by")) is not int
+            or not 0 <= comparison["ahead_by"] <= 40
+            or comparison.get("behind_by") != 0
+            or (comparison["ahead_by"] == 0) != (failed_head_sha == current_main_sha)):
+        raise RecoveryPreparationError("failed runner is not bounded trusted main ancestry")
+
+
+
 def checked_failure_job(value: object, project: str) -> int:
     if not isinstance(value, dict):
         raise RecoveryPreparationError("missing exact failed job inventory")
@@ -129,6 +158,8 @@ RECENT_SOURCE_RUN_PAGE_SIZE = 15  # Each full GitHub run is ~15 KB; stay under 5
 RECENT_SOURCE_RUN_MAX_PAGES = 7  # Fail closed after at most 105 newer/exact runs.
 SAFE_RECOVERY_CODES = {
     "unbounded GitHub metadata": "GITHUB_METADATA_BOUND",
+    "invalid runner history identity": "RUNNER_HISTORY_IDENTITY",
+    "failed runner is not bounded trusted main ancestry": "RUNNER_MAIN_ANCESTRY",
     "untrusted bounded source run inventory": "SOURCE_RUN_INVENTORY",
     "out-of-order source run inventory": "SOURCE_RUN_ORDER",
     "failed source run absent from bounded history": "FAILED_RUN_NOT_FOUND",
@@ -247,7 +278,11 @@ def plan(event: dict, project: str, runner_token: str, product_token: str,
     if (candidate.get("id") != actual.get("id")
             or candidate.get("head_sha") != actual.get("head_sha")):
         raise RecoveryPreparationError("event and exact run disagree")
-    checked_run(actual, project, runner_sha)
+    recorded_sha = actual.get("head_sha")
+    if not isinstance(recorded_sha, str) or not SHA.fullmatch(recorded_sha):
+        raise RecoveryPreparationError("invalid runner history identity")
+    checked_run(actual, project, recorded_sha)
+    checked_trusted_runner_history(recorded_sha, runner_sha, runner_token)
     failed_job = checked_failure_job(
         github_api(f"repos/{RUNNER}/actions/runs/{run_id}/jobs?per_page=100",
                    runner_token), project)
