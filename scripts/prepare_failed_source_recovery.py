@@ -84,12 +84,16 @@ def checked_trusted_runner_history(
         f"repos/{RUNNER}/compare/{failed_head_sha}...{current_main_sha}",
         read_token,
     )
+    base_commit = comparison.get("base_commit") if isinstance(comparison, dict) else None
+    merge_base = comparison.get("merge_base_commit") if isinstance(comparison, dict) else None
     if (not isinstance(comparison, dict)
+            or not isinstance(base_commit, dict)
+            or not isinstance(merge_base, dict)
             or comparison.get("status") != (
                 "identical" if failed_head_sha == current_main_sha else "ahead"
             )
-            or comparison.get("base_commit", {}).get("sha") != failed_head_sha
-            or comparison.get("merge_base_commit", {}).get("sha") != failed_head_sha
+            or base_commit.get("sha") != failed_head_sha
+            or merge_base.get("sha") != failed_head_sha
             or type(comparison.get("ahead_by")) is not int
             or not 0 <= comparison["ahead_by"] <= 40
             or comparison.get("behind_by") != 0
