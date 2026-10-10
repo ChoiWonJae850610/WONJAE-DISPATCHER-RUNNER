@@ -1,5 +1,5 @@
 name: Existing Source PR Recovery Docs
-run-name: "Recovery Docs ${{ inputs.project }} source #${{ inputs.source_pr }} ${{ inputs.source_head }} docs #${{ inputs.docs_pr }} ${{ inputs.docs_head }} run ${{ inputs.failed_run_id }} base ${{ inputs.base_sha }} control ${{ inputs.control_sha }}"
+run-name: "Recovery Docs ${{ inputs.project }} source #${{ inputs.source_pr }} ${{ inputs.source_head }} docs #${{ inputs.docs_pr }} ${{ inputs.docs_head }} run ${{ inputs.failed_run_id }} base ${{ inputs.base_sha }} control ${{ inputs.control_sha }}${{ inputs.mode == 'reconcile' && ' [read-only reconcile]' || '' }}"
 
 on:
   workflow_dispatch:
@@ -13,6 +13,18 @@ on:
         type: string
       source_head:
         required: true
+        type: string
+      mode:
+        description: Existing docs attachment or read-only reconciliation
+        required: true
+        type: choice
+        default: attach
+        options: [attach, reconcile]
+      attached_head:
+        required: false
+        type: string
+      failed_attach_run_id:
+        required: false
         type: string
       docs_pr:
         required: true
@@ -42,6 +54,9 @@ jobs:
       project: ${{ inputs.project }}
       source_pr: ${{ inputs.source_pr }}
       source_head: ${{ inputs.source_head }}
+      mode: ${{ inputs.mode }}
+      attached_head: ${{ inputs.attached_head }}
+      failed_attach_run_id: ${{ inputs.failed_attach_run_id }}
       docs_pr: ${{ inputs.docs_pr }}
       docs_head: ${{ inputs.docs_head }}
       failed_run_id: ${{ inputs.failed_run_id }}
