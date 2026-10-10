@@ -138,6 +138,32 @@ def regular_tree_file(root: Path, sha: str, path: str) -> None:
         raise DocumentMergeError("recovery path is not an exact regular Git file")
 
 
+def wait_attached_pr_head(
+    repo: str, route: dict, args: argparse.Namespace, attached: str,
+    source_branch: str, attempts: int = 18, interval: int = 3,
+) -> None:
+    """Wait through GitHub PR-ref propagation; never accept a different writer."""
+    for attempt in range(attempts):
+        pr = request_json([f"repos/{repo}/pulls/{args.source_pr}"])
+        if (
+            not isinstance(pr, dict)
+            or pr.get("state") != "open"
+            or pr.get("merged_at") is not None
+            or pr.get("base", {}).get("sha") != args.base
+            or pr.get("base", {}).get("ref") != route["branch"]
+            or pr.get("head", {}).get("ref") != source_branch
+        ):
+            raise DocumentMergeError("post-push PR identity changed")
+        observed = pr.get("head", {}).get("sha")
+        if observed == attached:
+            return
+        if observed != args.source_head:
+            raise DocumentMergeError("post-push PR head moved to an unapproved SHA")
+        if attempt + 1 < attempts:
+            time.sleep(interval)
+    raise DocumentMergeError("POST_PUSH_READBACK_DELAY")
+
+
 def attach(args: argparse.Namespace) -> None:
     for name in ("source_head", "docs_head", "base", "control_sha"):
         check_sha(getattr(args, name), name)
@@ -246,10 +272,7 @@ def attach(args: argparse.Namespace) -> None:
         route, args.docs_pr, args.docs_head, args.base,
     )
     git(workspace, "push", "origin", f"HEAD:refs/heads/{source_branch}")
-    updated = request_json([f"repos/{repo}/pulls/{args.source_pr}"])
-    if (updated.get("head", {}).get("sha") != attached
-        or updated.get("base", {}).get("sha") != args.base):
-        raise DocumentMergeError("attached source PR head readback not established")
+    wait_attached_pr_head(repo, route, args, attached, source_branch)
     # This is validation of a documentation-only PR-head amendment, not a new
     # Direct Worker source test, product integration, or backend deployment.
     for _ in range(72):
@@ -291,7 +314,8 @@ def main() -> int:
     try:
         attach(args)
     except (DocumentMergeError, yaml.YAMLError) as exc:
-        print(f"RECOVERY_DOCS_ATTACH_HALTED reason={type(exc).__name__}")
+        phase = "POST_PUSH_READBACK_DELAY" if str(exc) == "POST_PUSH_READBACK_DELAY" else "GUARD_FAILED"
+        print(f"RECOVERY_DOCS_ATTACH_HALTED reason={type(exc).__name__} phase={phase}")
         return 1
     return 0
 
