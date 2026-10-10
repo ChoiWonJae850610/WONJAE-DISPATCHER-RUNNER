@@ -124,6 +124,65 @@ def checked_registry(value: object, project: str) -> dict:
     return route
 
 
+
+RECENT_SOURCE_RUN_PAGE_SIZE = 15  # Each full GitHub run is ~15 KB; stay under 500 KB GET bound.
+RECENT_SOURCE_RUN_MAX_PAGES = 7  # Fail closed after at most 105 newer/exact runs.
+SAFE_RECOVERY_CODES = {
+    "unbounded GitHub metadata": "GITHUB_METADATA_BOUND",
+    "untrusted bounded source run inventory": "SOURCE_RUN_INVENTORY",
+    "out-of-order source run inventory": "SOURCE_RUN_ORDER",
+    "failed source run absent from bounded history": "FAILED_RUN_NOT_FOUND",
+    "later product source run supersedes this failure": "LATER_SOURCE_RUN",
+    "failed run is not an exact eligible source next": "FAILED_RUN_IDENTITY",
+    "failed source job ambiguous": "FAILED_JOB_IDENTITY",
+    "not an exact isolated source turn failure": "FAILED_STEP_IDENTITY",
+    "initial timeout evidence is not exactly proven": "TIMEOUT_MARKERS",
+    "control registry changed since checkout": "CONTROL_SHA_CHANGED",
+    "current product generation is not failed source generation": "PRODUCT_SHA_CHANGED",
+    "active source writer conflicts with docs recovery": "SOURCE_WRITER_ACTIVE",
+    "recovery documents exceed strict limits": "RECOVERY_DOC_BOUND",
+}
+
+
+def checked_latest_owner_source_run(project: str, run_id: int, runner_token: str) -> None:
+    """Require the exact failed run in newest-first bounded history, without bulk GETs.
+
+    GitHub workflow-run records include large embedded metadata. A per_page=100
+    request can exceed github_api's 500 KB safety limit before this freshness
+    check even runs. Inspect 15 records/page (7 pages max) and fail closed if
+    the original run is unavailable, ordering is ambiguous, or a later source
+    run for the same product exists. This is read-only and never dispatches.
+    """
+    previous_id = None
+    for page in range(1, RECENT_SOURCE_RUN_MAX_PAGES + 1):
+        payload = github_api(
+            f"repos/{RUNNER}/actions/workflows/direct-worker.yml/runs"
+            f"?event=workflow_dispatch&per_page={RECENT_SOURCE_RUN_PAGE_SIZE}&page={page}",
+            runner_token,
+        )
+        rows = payload.get("workflow_runs") if isinstance(payload, dict) else None
+        if (not isinstance(rows, list) or not rows
+                or len(rows) > RECENT_SOURCE_RUN_PAGE_SIZE):
+            raise RecoveryPreparationError("untrusted bounded source run inventory")
+        for row in rows:
+            item_id = row.get("id") if isinstance(row, dict) else None
+            if (type(item_id) is not int or item_id < 1
+                    or (previous_id is not None and item_id >= previous_id)):
+                raise RecoveryPreparationError("out-of-order source run inventory")
+            previous_id = item_id
+            if item_id > run_id and str(row.get("display_title", "")).startswith(
+                    f"Direct Worker {project} "):
+                raise RecoveryPreparationError("later product source run supersedes this failure")
+            if item_id == run_id:
+                return
+            if item_id < run_id:
+                raise RecoveryPreparationError("failed source run absent from bounded history")
+        if len(rows) < RECENT_SOURCE_RUN_PAGE_SIZE:
+            raise RecoveryPreparationError("failed source run absent from bounded history")
+    raise RecoveryPreparationError("failed source run absent from bounded history")
+
+
+
 def clean_checkout(path: Path, sha: str) -> None:
     got = subprocess.run(["git", "-C", str(path), "rev-parse", "HEAD"],
                          capture_output=True, text=True, check=True, timeout=15).stdout.strip()
@@ -221,16 +280,8 @@ def plan(event: dict, project: str, runner_token: str, product_token: str,
     if any(p["base"]["ref"] == branch and p["head"]["ref"].startswith(("job/", "direct/"))
            for p in open_prs):
         raise RecoveryPreparationError("active source writer conflicts with docs recovery")
-    latest = github_api(
-        f"repos/{RUNNER}/actions/workflows/direct-worker.yml/runs"
-        "?event=workflow_dispatch&per_page=100", runner_token,
-    )
-    rows = latest.get("workflow_runs", [])
-    if not isinstance(rows, list) or len(rows) >= 100:
-        raise RecoveryPreparationError("cannot prove latest Owner run")
-    if any(x.get("id", 0) > run_id and x.get("display_title", "").startswith(
-            f"Direct Worker {project} ") for x in rows):
-        raise RecoveryPreparationError("later product source run supersedes this failure")
+    # Verify exact original Owner run without requesting an oversized 100-run payload.
+    checked_latest_owner_source_run(project, run_id, runner_token)
     product_checkout = workdir / "product"
     if workdir.is_symlink() or workdir.exists():
         raise RecoveryPreparationError("recovery workspace must be new and isolated")
@@ -328,7 +379,12 @@ def main() -> int:
             subprocess.SubprocessError, OSError, yaml.YAMLError) as exc:
         # Do not stringify arbitrary subprocess/JSON exception bodies into
         # a public GitHub log. Diagnosis remains the separate FAILED state.
-        print(f"RECOVERY_PREP_HALTED reason={type(exc).__name__}", file=sys.stderr)
+        code = SAFE_RECOVERY_CODES.get(
+            str(exc) if isinstance(exc, RecoveryPreparationError) else "",
+            "UNCLASSIFIED",
+        )
+        print(f"RECOVERY_PREP_HALTED reason={type(exc).__name__} code={code}",
+              file=sys.stderr)
         return 1
     return 0
 
