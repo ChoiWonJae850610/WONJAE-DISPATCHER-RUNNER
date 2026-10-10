@@ -86,6 +86,10 @@ def check_attached_commit(
         raise DocumentMergeError("missing PR/attached commit evidence")
     if source.get("head", {}).get("sha") != args.attached_head:
         raise DocumentMergeError("source PR head differs from exact attached commit")
+    if source.get("head", {}).get("ref") != (
+        f"direct/{args.project}-{args.failed_run_id}"
+    ):
+        raise DocumentMergeError("source PR branch differs from originating Runner")
     # Re-apply the original one-writer/run/branch binding to the original parent,
     # after proving the current head is exactly the one requested by Owner.
     original = {
