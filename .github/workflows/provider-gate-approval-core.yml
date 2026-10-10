@@ -248,12 +248,26 @@ jobs:
               "platform" => "ios",
               "environment" => "preview",
               "channel" => "preview",
-              "runtime_version" => "0.0.11",
-              "compatibility_base_sha" => "bc18af6cab37408643f3825e1137a75dd4b899f3",
             }
             expected.each do |key, value|
               abort("CLASSMO EAS update executor #{key} mismatch") unless config[key] == value
             end
+            # Each runtime is bound to its own audited installed-Preview source.
+            # Retain the 0.0.11 historical contract without allowing mixed pairs.
+            allowed_runtime_contracts = [
+              {
+                "runtime_version" => "0.0.11",
+                "compatibility_base_sha" => "bc18af6cab37408643f3825e1137a75dd4b899f3",
+              },
+              {
+                "runtime_version" => "0.0.12",
+                "compatibility_base_sha" => "875bebf9582ef464edb4cf644bed3cb335ece9b7",
+              },
+            ]
+            matched_runtime_contract = allowed_runtime_contracts.any? { |contract|
+              contract.all? { |key, value| config[key] == value }
+            }
+            abort("CLASSMO EAS update runtime/baseline contract mismatch") unless matched_runtime_contract
             values.merge!(
               "PROVIDER_WORKING_DIRECTORY" => config["working_directory"],
               "PROVIDER_PLATFORM" => config["platform"],

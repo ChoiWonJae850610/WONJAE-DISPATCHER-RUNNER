@@ -70,3 +70,37 @@ def test_owner_only_caller_preserves_classmo_scope_and_existing_legacy_ota():
     )[0]
     assert '"runtime_version" => "0.0.11"' in ota
     assert '"compatibility_base_sha" => "bc18af6cab37408643f3825e1137a75dd4b899f3"' in ota
+
+def test_classmo_022_ota_gate_restricts_new_runtime_to_existing_signed_build_sha():
+    import re
+
+    workflow = CORE.read_text(encoding="utf-8")
+    ota = workflow.split('elsif executor == "classmo_eas_update"', 1)[1].split(
+        'elsif executor == "wafl_eas_update"', 1
+    )[0]
+    assert '"provider" => "eas_update"' in ota
+    assert '"working_directory" => "apps/mobile"' in ota
+    assert '"platform" => "ios"' in ota
+    assert '"environment" => "preview"' in ota
+    assert '"channel" => "preview"' in ota
+    assert "allowed_runtime_contracts.any?" in ota
+    assert "contract.all? { |key, value| config[key] == value }" in ota
+    assert (
+        'abort("CLASSMO EAS update runtime/baseline contract mismatch") '
+        'unless matched_runtime_contract'
+    ) in ota
+    contracts = re.findall(
+        r'"runtime_version"\s*=>\s*"(0\.0\.\d+)"\s*,\s*'
+        r'"compatibility_base_sha"\s*=>\s*"([a-f0-9]{40})"',
+        ota,
+    )
+    assert len(contracts) == 2
+    assert set(contracts) == {
+        ("0.0.11", "bc18af6cab37408643f3825e1137a75dd4b899f3"),
+        ("0.0.12", "875bebf9582ef464edb4cf644bed3cb335ece9b7"),
+    }
+    assert ("0.0.12", "bc18af6cab37408643f3825e1137a75dd4b899f3") not in contracts
+    assert ("0.0.11", "875bebf9582ef464edb4cf644bed3cb335ece9b7") not in contracts
+    assert '"PROVIDER_RUNTIME_VERSION" => config["runtime_version"]' in ota
+    assert '"PROVIDER_COMPATIBILITY_BASE_SHA" => config["compatibility_base_sha"]' in ota
+
