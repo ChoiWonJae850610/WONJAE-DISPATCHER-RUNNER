@@ -17,7 +17,6 @@ from pathlib import Path
 from urllib.parse import quote
 
 import yaml
-
 from attach_recovery_docs import check_scope, checked_source_pr, verify_manual_gate
 from document_pr_merge import (
     DocumentMergeError,
