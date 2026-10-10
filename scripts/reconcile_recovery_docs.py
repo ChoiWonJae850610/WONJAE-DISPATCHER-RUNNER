@@ -113,7 +113,8 @@ def check_attached_commit(
     author = metadata.get("author") if isinstance(metadata, dict) else None
     committer = metadata.get("committer") if isinstance(metadata, dict) else None
     if (
-        metadata.get("message")
+        not isinstance(metadata, dict)
+        or metadata.get("message")
         != f"docs: attach recovery PR #{args.docs_pr} to source PR #{args.source_pr}"
         or not isinstance(author, dict)
         or author.get("name") != TRUSTED_ATTACH_AUTHOR
@@ -266,6 +267,22 @@ def reconcile(args: argparse.Namespace) -> int:
         request_json([f"repos/{repo}/pulls/{args.docs_pr}"]),
         route, args.docs_pr, args.docs_head, args.base,
     )
+    live_prs = request_json([
+        f"repos/{repo}/pulls?state=open&base={route['branch']}&per_page=100"
+    ])
+    if (
+        not isinstance(live_prs, list) or len(live_prs) >= 100
+        or sorted(
+            pr["number"] for pr in live_prs
+            if str(pr.get("head", {}).get("ref", "")).startswith(("direct/", "job/"))
+        ) != [args.source_pr]
+    ):
+        raise DocumentMergeError("source writer inventory changed during reconciliation")
+    if check_pr_head_validation(
+        canonical_runs(repo, route["workflow"], args.attached_head, "pull_request"),
+        route, args.attached_head,
+    ) != attached_run_id:
+        raise DocumentMergeError("latest exact attached-SHA canonical CI changed")
     print(
         f"RECOVERY_DOCS_RECONCILED project={args.project} "
         f"source_pr={args.source_pr} source_parent={args.source_head} "
