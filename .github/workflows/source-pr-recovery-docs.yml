@@ -1,5 +1,5 @@
 name: Existing Source PR Recovery Docs
-run-name: "Recovery Docs ${{ inputs.project }} source #${{ inputs.source_pr }} ${{ inputs.source_head }} docs #${{ inputs.docs_pr }} ${{ inputs.docs_head }} run ${{ inputs.failed_run_id }} base ${{ inputs.base_sha }} control ${{ inputs.control_sha }} ${{ inputs.mode == 'reconcile' && '[read-only reconcile]' || '' }}"
+run-name: "Recovery Docs ${{ inputs.project }} source #${{ inputs.source_pr }} ${{ inputs.source_head }} docs #${{ inputs.docs_pr }} ${{ inputs.docs_head }} run ${{ inputs.failed_run_id }} base ${{ inputs.base_sha }} control ${{ inputs.control_sha }}${{ inputs.mode == 'reconcile' && ' [read-only reconcile]' || '' }}"
 
 on:
   workflow_dispatch:
