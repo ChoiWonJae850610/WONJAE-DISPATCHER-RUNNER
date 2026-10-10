@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+import sys
 from pathlib import Path
 
 import pytest
@@ -167,6 +168,114 @@ def test_product_recovery_paths_reject_symlink_aliases(tmp_path, alias):
         with pytest.raises(RecoveryPreparationError):
             prep.checked_recovery_write_paths(root, state_file, doc)
     assert (outside / "target.yaml").read_text(encoding="utf-8") == "no mutation"
+
+
+
+def history_run(number: int, project: str = "CLASSMO"):
+    return {"id": number, "display_title": f"Direct Worker {project} next"}
+
+
+def mock_history_pages(monkeypatch, pages):
+    calls = []
+
+    def fake_github_api(endpoint, token, *, method="GET", fields=None):
+        assert method == "GET" and fields is None and token == "read-only-token"
+        assert "actions/workflows/direct-worker.yml/runs?event=workflow_dispatch" in endpoint
+        assert "per_page=15" in endpoint and "per_page=100" not in endpoint
+        page = int(endpoint.rsplit("&page=", 1)[1])
+        calls.append(page)
+        return {"workflow_runs": pages[page - 1]}
+
+    monkeypatch.setattr(prep, "github_api", fake_github_api)
+    return calls
+
+
+def test_recent_source_fence_paginates_small_reads_and_finds_exact_original(monkeypatch):
+    # Real GitHub metadata is roughly 15 KB per run: previous 100-run GET
+    # exceeded the 500 KB fetch guard even with under 100 total run records.
+    pages = [
+        [history_run(number) for number in range(226, 211, -1)],
+        [history_run(211, "WAFL")],
+    ]
+    calls = mock_history_pages(monkeypatch, pages)
+    prep.checked_latest_owner_source_run("WAFL", 211, "read-only-token")
+    assert calls == [1, 2]
+
+
+def test_recent_source_fence_rejects_later_same_product_run(monkeypatch):
+    calls = mock_history_pages(
+        monkeypatch,
+        [[history_run(222, "CLASSMO"), history_run(221, "WAFL"),
+          history_run(220, "CLASSMO")]],
+    )
+    with pytest.raises(RecoveryPreparationError, match="supersedes"):
+        prep.checked_latest_owner_source_run("WAFL", 220, "read-only-token")
+    assert calls == [1]
+
+
+@pytest.mark.parametrize("rows", [
+    [history_run(212), history_run(214)],  # out of order
+    [history_run(212), history_run(212)],  # duplicated ID
+    [{"id": "212", "display_title": "Direct Worker CLASSMO next"}],
+    [history_run(n) for n in range(220, 204, -1)],  # >15 records in one page
+])
+def test_recent_source_fence_fails_closed_on_malformed_or_oversized_page(
+    monkeypatch, rows,
+):
+    mock_history_pages(monkeypatch, [rows])
+    with pytest.raises(RecoveryPreparationError):
+        prep.checked_latest_owner_source_run("WAFL", 205, "read-only-token")
+
+
+def test_recent_source_fence_rejects_missing_original_even_with_no_later_wafl(
+    monkeypatch,
+):
+    mock_history_pages(monkeypatch, [
+        [history_run(215), history_run(214), history_run(211)],
+    ])
+    with pytest.raises(RecoveryPreparationError, match="absent"):
+        prep.checked_latest_owner_source_run("WAFL", 212, "read-only-token")
+
+
+def test_recent_source_fence_has_a_strict_total_history_bound(monkeypatch):
+    pages = [
+        [history_run(number) for number in range(300 - p * 15, 285 - p * 15, -1)]
+        for p in range(7)
+    ]
+    calls = mock_history_pages(monkeypatch, pages)
+    with pytest.raises(RecoveryPreparationError, match="absent"):
+        prep.checked_latest_owner_source_run("WAFL", 150, "read-only-token")
+    assert calls == list(range(1, 8))
+
+
+@pytest.mark.parametrize("reason,expected", [
+    ("unbounded GitHub metadata", "GITHUB_METADATA_BOUND"),
+    ("later product source run supersedes this failure", "LATER_SOURCE_RUN"),
+    ("private token=abc123", "UNCLASSIFIED"),
+])
+def test_recovery_rejection_codes_are_allowlisted_and_non_secret(
+    monkeypatch, tmp_path, capsys, reason, expected,
+):
+    event = tmp_path / "event.json"
+    registry = tmp_path / "registry.yaml"
+    event.write_text("{}", encoding="utf-8")
+    registry.write_text("{}", encoding="utf-8")
+
+    def fake_plan(*_args):
+        raise RecoveryPreparationError(reason)
+
+    monkeypatch.setattr(prep, "plan", fake_plan)
+    for name in ("RUNNER_READ_TOKEN", "PRODUCT_WRITE_TOKEN", "CONTROL_READ_TOKEN"):
+        monkeypatch.setenv(name, "fixture-secret")
+    monkeypatch.setattr(sys, "argv", [
+        "recovery", "--project", "WAFL", "--event", str(event),
+        "--registry", str(registry), "--workdir", str(tmp_path / "work"),
+    ])
+    assert prep.main() == 1
+    output = capsys.readouterr().err
+    assert "code=" + expected in output
+    assert "fixture-secret" not in output
+    assert "abc123" not in output
 
 
 def test_recovery_workflow_is_not_a_new_source_or_merge_executor():
