@@ -210,6 +210,8 @@ def test_historical_recovery_admits_exact_main_ancestor(monkeypatch, old, curren
     lambda value: value.update(behind_by=1),
     lambda value: value["merge_base_commit"].update(sha="c" * 40),
     lambda value: value["base_commit"].update(sha="c" * 40),
+    lambda value: value.update(merge_base_commit=None),
+    lambda value: value.update(base_commit="invalid"),
     lambda value: value.update(status="identical"),
     lambda value: value.update(ahead_by=0),
 ])
