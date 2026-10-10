@@ -21,7 +21,8 @@ spec.loader.exec_module(prep)
 def failed_run():
     return {
         "id": 37938489783,
-        "name": "Direct Worker",
+        # GitHub REST actions/runs reflects run-name, not the workflow display label.
+        "name": "Direct Worker WAFL next",
         "display_title": "Direct Worker WAFL next",
         "event": "workflow_dispatch",
         "head_branch": "main",
@@ -66,8 +67,22 @@ def test_owner_triggered_failed_run_and_exact_job_are_sufficient_to_inspect():
     assert prep.checked_registry(registry(), "WAFL")["branch"] == "cloud-dev-v1"
 
 
+@pytest.mark.parametrize("product", ["WAFL", "CLASSMO", "ESC", "MUVEL"])
+def test_actual_github_run_name_stays_bound_to_exact_product_next(product):
+    run = failed_run()
+    run["name"] = f"Direct Worker {product} next"
+    run["display_title"] = f"Direct Worker {product} next"
+    prep.checked_run(run, product, "a" * 40)
+    run["name"] = f"Direct Worker {product} resume"
+    with pytest.raises(RecoveryPreparationError):
+        prep.checked_run(run, product, "a" * 40)
+
+
 @pytest.mark.parametrize("field,value", [
     ("name", "Provider Gate Approval"),
+    ("name", "Direct Worker"),
+    ("name", "Direct Worker CLASSMO next"),
+    ("name", "Direct Worker WAFL retry"),
     ("display_title", "Direct Worker CLASSMO next"),
     ("event", "pull_request"), ("head_branch", "cloud-dev-v1"),
     ("head_sha", "b" * 40), ("conclusion", "success"),
