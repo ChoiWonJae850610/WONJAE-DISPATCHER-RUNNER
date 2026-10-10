@@ -8,16 +8,22 @@ from __future__ import annotations
 
 import argparse
 import os
-from pathlib import Path
 import re
 import subprocess
 import time
+from pathlib import Path
 
 import yaml
 
 from document_pr_merge import (
-    DocumentMergeError, branch_sha, canonical_runs, check_files,
-    check_pr, check_pr_head_validation, check_sha, request_json,
+    DocumentMergeError,
+    branch_sha,
+    canonical_runs,
+    check_files,
+    check_pr,
+    check_pr_head_validation,
+    check_sha,
+    request_json,
     route_from_registry,
 )
 
@@ -55,7 +61,8 @@ def verify_manual_gate(repo: str, source_pr: int, source_sha: str,
     if not token:
         raise DocumentMergeError("trusted runner read authority unavailable")
     result = subprocess.run(
-        ["gh", "api", f"repos/ChoiWonJae850610/WONJAE-DISPATCHER-RUNNER/actions/runs/{failed_run_id}"],
+        ["gh", "api", "repos/ChoiWonJae850610/WONJAE-DISPATCHER-RUNNER/actions/runs/"
+         + str(failed_run_id)],
         env={**os.environ, "GH_TOKEN": token}, capture_output=True,
         text=True, timeout=25, check=False,
     )
@@ -185,7 +192,8 @@ def attach(args: argparse.Namespace) -> None:
         raise DocumentMergeError("recovery workspace must be fresh")
     workspace.parent.mkdir(parents=True, exist_ok=True)
     # Git never executes product code here; use only trusted main code and approved doc bytes.
-    git(workspace.parent, "clone", "--no-checkout", f"https://github.com/{repo}.git", str(workspace))
+    git(workspace.parent, "clone", "--no-checkout",
+        f"https://github.com/{repo}.git", str(workspace))
     git(workspace, "fetch", "--no-tags", "origin", args.source_head, args.docs_head, args.base)
     git(workspace, "checkout", "--detach", args.source_head)
     if git(workspace, "status", "--porcelain=v1", "--untracked-files=all"):
@@ -221,9 +229,10 @@ def attach(args: argparse.Namespace) -> None:
     git(workspace, "-c", "user.name=WONJAE trusted recovery docs",
         "-c", "user.email=trusted-recovery@users.noreply.github.com",
         "-c", "core.hooksPath=/dev/null", "commit", "-m",
-        f"docs: attach verified recovery PR #{args.docs_pr} to existing source PR #{args.source_pr}")
+        f"docs: attach recovery PR #{args.docs_pr} to source PR #{args.source_pr}")
     attached = check_sha(git(workspace, "rev-parse", "HEAD"), "attached PR head")
-    if git(workspace, "diff", "--name-only", args.source_head, attached).splitlines() != sorted(paths):
+    delta = git(workspace, "diff", "--name-only", args.source_head, attached).splitlines()
+    if delta != sorted(paths):
         raise DocumentMergeError("trusted attached commit differs from exact document scope")
 
     # Last-authority check before the *non-force* fast-forward to the same source PR.
@@ -262,7 +271,7 @@ def attach(args: argparse.Namespace) -> None:
                         and str(run.get("path", "")).split("@", 1)[0] == route["workflow"]
                         and run.get("name") == route["workflow_name"]]
             if matching and max(matching, key=lambda item: item["id"]).get("status") == "completed":
-                raise DocumentMergeError("attached PR-head canonical CI failed")
+                raise DocumentMergeError("attached PR-head canonical CI failed") from None
         time.sleep(10)
     raise DocumentMergeError("document attachment published; exact PR-head CI not terminal")
 
