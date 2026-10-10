@@ -264,9 +264,10 @@ jobs:
                 "compatibility_base_sha" => "875bebf9582ef464edb4cf644bed3cb335ece9b7",
               },
             ]
-            abort("CLASSMO EAS update runtime/baseline contract mismatch") unless allowed_runtime_contracts.any? do |contract|
+            matched_runtime_contract = allowed_runtime_contracts.any? { |contract|
               contract.all? { |key, value| config[key] == value }
-            end
+            }
+            abort("CLASSMO EAS update runtime/baseline contract mismatch") unless matched_runtime_contract
             values.merge!(
               "PROVIDER_WORKING_DIRECTORY" => config["working_directory"],
               "PROVIDER_PLATFORM" => config["platform"],
