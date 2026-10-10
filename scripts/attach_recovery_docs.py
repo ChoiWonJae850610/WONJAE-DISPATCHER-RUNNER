@@ -14,7 +14,6 @@ import time
 from pathlib import Path
 
 import yaml
-
 from document_pr_merge import (
     DocumentMergeError,
     branch_sha,
