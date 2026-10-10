@@ -85,7 +85,9 @@ def checked_trusted_runner_history(
         read_token,
     )
     if (not isinstance(comparison, dict)
-            or comparison.get("status") not in {"ahead", "identical"}
+            or comparison.get("status") != (
+                "identical" if failed_head_sha == current_main_sha else "ahead"
+            )
             or comparison.get("base_commit", {}).get("sha") != failed_head_sha
             or comparison.get("merge_base_commit", {}).get("sha") != failed_head_sha
             or type(comparison.get("ahead_by")) is not int
