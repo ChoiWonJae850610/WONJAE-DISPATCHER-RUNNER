@@ -3,13 +3,17 @@
 from __future__ import annotations
 
 import importlib.util
+import subprocess
 import sys
 from pathlib import Path
 
 import pytest
 import yaml
 
-from wonjae_dispatcher_runner.failure_recovery_document import RecoveryPreparationError
+from wonjae_dispatcher_runner.failure_recovery_document import (
+    RecoveryPreparationError,
+    parse_initial_turn_timeout,
+)
 
 ROOT = Path(__file__).resolve().parent.parent
 SCRIPT = ROOT / "scripts/prepare_failed_source_recovery.py"
@@ -60,6 +64,110 @@ def registry():
             },
         },
     }
+
+
+
+def raw_job_log(source_sha: str = "a" * 40) -> str:
+    """Synthetic raw REST lines matching the three confirmed 2026-10-10 log shapes."""
+    timestamps = (
+        "2026-10-10T14:20:24.3049582Z",
+        "2026-10-10T14:29:19.3494581Z",
+        "2026-10-10T14:38:14.3175853Z",
+    )
+    lines = [
+        f"{timestamp} INITIAL_TURN attempt={attempt} "
+        "outcome=INITIAL_CODEX_TIMEOUT_480_SECONDS "
+        f"source={source_sha}"
+        for attempt, timestamp in enumerate(timestamps, start=1)
+    ]
+    lines.append(
+        "2026-10-10T14:38:14.3187992Z "
+        "InitialTurnTimeout: INITIAL_CODEX_TIMEOUT_EXHAUSTED attempts=3 commits=0"
+    )
+    return "\n".join(lines) + "\n"
+
+
+def test_original_rest_job_log_matches_three_exact_source_timeout_markers():
+    raw = raw_job_log()
+    assert parse_initial_turn_timeout(raw, "a" * 40)
+    assert not parse_initial_turn_timeout(raw, "b" * 40)
+    assert not parse_initial_turn_timeout(
+        raw.replace("attempt=2", "attempt=1"), "a" * 40,
+    )
+    assert not parse_initial_turn_timeout(
+        raw + raw.splitlines()[0] + "\n", "a" * 40,
+    )
+    assert not parse_initial_turn_timeout(
+        raw.replace("commits=0", "commits=1"), "a" * 40,
+    )
+
+
+def test_recovery_reads_unformatted_logs_from_exact_github_job_api(monkeypatch):
+    log = raw_job_log()
+    received = []
+
+    def fake_run(args, **kwargs):
+        received.append((args, kwargs))
+        return subprocess.CompletedProcess(args, 0, stdout=log, stderr="")
+
+    monkeypatch.setattr(prep.subprocess, "run", fake_run)
+    monkeypatch.setenv("GH_TOKEN", "unrelated-host-token")
+    result = prep.read_job_log(123, 456, "scoped-actions-read-token")
+    assert result == log
+    assert parse_initial_turn_timeout(result, "a" * 40)
+    assert len(received) == 1
+    args, kwargs = received[0]
+    assert args == [
+        "gh", "api", "--method", "GET",
+        f"repos/{prep.RUNNER}/actions/jobs/456/logs",
+    ]
+    assert kwargs["env"]["GH_TOKEN"] == "scoped-actions-read-token"
+    assert kwargs["check"] is True
+    assert kwargs["capture_output"] is True
+    assert kwargs["text"] is True
+    assert kwargs["timeout"] == 40
+    assert all("scoped-actions-read-token" not in arg for arg in args)
+    assert "run" not in args and "view" not in args
+
+
+@pytest.mark.parametrize("raw", ["", "x" * 2_000_001])
+def test_original_job_log_rejects_empty_or_unbounded_transport(
+    monkeypatch, raw,
+):
+    monkeypatch.setattr(
+        prep.subprocess, "run",
+        lambda args, **kwargs: subprocess.CompletedProcess(
+            args, 0, stdout=raw, stderr="",
+        ),
+    )
+    with pytest.raises(RecoveryPreparationError, match="original job log"):
+        prep.read_job_log(123, 456, "scoped-actions-read-token")
+
+
+@pytest.mark.parametrize("run_id,job_id,token", [
+    (0, 456, "token"), (123, 0, "token"),
+    (-1, 456, "token"), (123, -1, "token"),
+    (True, 456, "token"), (123, False, "token"), (123, 456, ""),
+])
+def test_invalid_exact_log_identity_never_starts_transport(
+    monkeypatch, run_id, job_id, token,
+):
+    def forbidden_transport(*args, **kwargs):
+        raise AssertionError("No original job-log API call permitted")
+
+    monkeypatch.setattr(prep.subprocess, "run", forbidden_transport)
+    with pytest.raises(RecoveryPreparationError, match="job log identity"):
+        prep.read_job_log(run_id, job_id, token)
+
+
+def test_failed_original_job_log_download_fails_closed(monkeypatch):
+    def failed_download(args, **kwargs):
+        raise subprocess.CalledProcessError(1, args)
+
+    monkeypatch.setattr(prep.subprocess, "run", failed_download)
+    with pytest.raises(subprocess.CalledProcessError):
+        prep.read_job_log(123, 456, "token")
+
 
 
 def test_owner_triggered_failed_run_and_exact_job_are_sufficient_to_inspect():
