@@ -314,7 +314,11 @@ def main() -> int:
     try:
         attach(args)
     except (DocumentMergeError, yaml.YAMLError) as exc:
-        phase = "POST_PUSH_READBACK_DELAY" if str(exc) == "POST_PUSH_READBACK_DELAY" else "GUARD_FAILED"
+        phase = (
+            "POST_PUSH_READBACK_DELAY"
+            if str(exc) == "POST_PUSH_READBACK_DELAY"
+            else "GUARD_FAILED"
+        )
         print(f"RECOVERY_DOCS_ATTACH_HALTED reason={type(exc).__name__} phase={phase}")
         return 1
     return 0
