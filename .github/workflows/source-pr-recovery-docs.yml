@@ -1,0 +1,76 @@
+name: Existing Source PR Recovery Docs
+run-name: "Recovery Docs ${{ inputs.project }} source #${{ inputs.source_pr }} ${{ inputs.source_head }} docs #${{ inputs.docs_pr }} ${{ inputs.docs_head }} run ${{ inputs.failed_run_id }} base ${{ inputs.base_sha }} control ${{ inputs.control_sha }}"
+
+on:
+  workflow_dispatch:
+    inputs:
+      project:
+        required: true
+        type: choice
+        options: [WAFL, CLASSMO, ESC, MUVEL]
+      source_pr:
+        required: true
+        type: string
+      source_head:
+        required: true
+        type: string
+      docs_pr:
+        required: true
+        type: string
+      docs_head:
+        required: true
+        type: string
+      failed_run_id:
+        required: true
+        type: string
+      base_sha:
+        required: true
+        type: string
+      control_sha:
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  wafl:
+    if: ${{ inputs.project == 'WAFL' && github.actor == github.repository_owner }}
+    uses: ./.github/workflows/source-pr-recovery-docs-core.yml
+    with: &inputs
+      project: ${{ inputs.project }}
+      source_pr: ${{ inputs.source_pr }}
+      source_head: ${{ inputs.source_head }}
+      docs_pr: ${{ inputs.docs_pr }}
+      docs_head: ${{ inputs.docs_head }}
+      failed_run_id: ${{ inputs.failed_run_id }}
+      base_sha: ${{ inputs.base_sha }}
+      control_sha: ${{ inputs.control_sha }}
+    secrets:
+      control_read_token: ${{ secrets.CONTROL_READ_TOKEN }}
+      product_write_token: ${{ secrets.WAFL_WRITE_TOKEN }}
+
+  classmo:
+    if: ${{ inputs.project == 'CLASSMO' && github.actor == github.repository_owner }}
+    uses: ./.github/workflows/source-pr-recovery-docs-core.yml
+    with: *inputs
+    secrets:
+      control_read_token: ${{ secrets.CONTROL_READ_TOKEN }}
+      product_write_token: ${{ secrets.CLASSMO_WRITE_TOKEN }}
+
+  esc:
+    if: ${{ inputs.project == 'ESC' && github.actor == github.repository_owner }}
+    uses: ./.github/workflows/source-pr-recovery-docs-core.yml
+    with: *inputs
+    secrets:
+      control_read_token: ${{ secrets.CONTROL_READ_TOKEN }}
+      product_write_token: ${{ secrets.ESC_WRITE_TOKEN }}
+
+  muvel:
+    if: ${{ inputs.project == 'MUVEL' && github.actor == github.repository_owner }}
+    uses: ./.github/workflows/source-pr-recovery-docs-core.yml
+    with: *inputs
+    secrets:
+      control_read_token: ${{ secrets.CONTROL_READ_TOKEN }}
+      product_write_token: ${{ secrets.MUVEL_WRITE_TOKEN }}
