@@ -1,0 +1,110 @@
+name: Existing Source PR Recovery Docs Core
+
+on:
+  workflow_call:
+    inputs:
+      project:
+        required: true
+        type: string
+      source_pr:
+        required: true
+        type: string
+      source_head:
+        required: true
+        type: string
+      docs_pr:
+        required: true
+        type: string
+      docs_head:
+        required: true
+        type: string
+      failed_run_id:
+        required: true
+        type: string
+      base_sha:
+        required: true
+        type: string
+      control_sha:
+        required: true
+        type: string
+    secrets:
+      product_write_token:
+        required: true
+      control_read_token:
+        required: true
+
+permissions:
+  actions: read
+  contents: read
+
+# Same exact project writer lock as Direct Worker Core, not an independent writer.
+concurrency:
+  group: direct-worker-${{ inputs.project }}
+  cancel-in-progress: false
+
+jobs:
+  attach:
+    if: ${{ github.ref == 'refs/heads/main' && github.actor == github.repository_owner }}
+    runs-on: [self-hosted, Linux, X64, direct-worker]
+    timeout-minutes: 35
+    steps:
+      - name: Checkout trusted exact Runner main
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Install trusted Python tools
+        run: |
+          python3 -m venv "$RUNNER_TEMP/attach-venv-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          "$RUNNER_TEMP/attach-venv-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT/bin/python" -m pip install --no-cache-dir -e .
+          echo "$RUNNER_TEMP/attach-venv-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT/bin" >> "$GITHUB_PATH"
+
+      - name: Checkout exact registered DEV-CONTROL
+        uses: actions/checkout@v6
+        with:
+          repository: ChoiWonJae850610/DEV-CONTROL
+          ref: ${{ inputs.control_sha }}
+          token: ${{ secrets.control_read_token }}
+          path: _control
+          persist-credentials: false
+
+      - name: Refuse stale main or registration
+        env:
+          GH_TOKEN: ${{ secrets.control_read_token }}
+          CONTROL_SHA: ${{ inputs.control_sha }}
+        run: |
+          set -euo pipefail
+          test "$(gh api repos/ChoiWonJae850610/DEV-CONTROL/branches/main --jq '.commit.sha')" = "$CONTROL_SHA"
+          test "$(git -C _control rev-parse HEAD)" = "$CONTROL_SHA"
+          test "$(gh api repos/$GITHUB_REPOSITORY/branches/main --jq '.commit.sha')" = "$GITHUB_SHA"
+
+      - name: Attach exact validated docs to the still-open source PR only
+        env:
+          GH_TOKEN: ${{ secrets.product_write_token }}
+          RUNNER_READ_TOKEN: ${{ github.token }}
+          PROJECT: ${{ inputs.project }}
+          SOURCE_PR: ${{ inputs.source_pr }}
+          SOURCE_HEAD: ${{ inputs.source_head }}
+          DOCS_PR: ${{ inputs.docs_pr }}
+          DOCS_HEAD: ${{ inputs.docs_head }}
+          FAILED_RUN_ID: ${{ inputs.failed_run_id }}
+          BASE_SHA: ${{ inputs.base_sha }}
+          CONTROL_SHA: ${{ inputs.control_sha }}
+        run: |
+          set -euo pipefail
+          umask 077
+          job_root="$RUNNER_TEMP/attach-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          test ! -e "$job_root" && test ! -L "$job_root"
+          mkdir -p "$job_root/home" "$job_root/gh"
+          export HOME="$job_root/home" GH_CONFIG_DIR="$job_root/gh"
+          trap 'test "$job_root" = "$RUNNER_TEMP/attach-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" && rm -rf --one-file-system -- "$job_root"' EXIT
+          gh auth setup-git
+          python scripts/attach_recovery_docs.py \
+            --registry _control/PROJECTS.yaml \
+            --project "$PROJECT" \
+            --source-pr "$SOURCE_PR" --source-head "$SOURCE_HEAD" \
+            --docs-pr "$DOCS_PR" --docs-head "$DOCS_HEAD" \
+            --failed-run-id "$FAILED_RUN_ID" \
+            --base "$BASE_SHA" --control-sha "$CONTROL_SHA" \
+            --workspace "$job_root/product"
