@@ -171,6 +171,85 @@ def test_product_recovery_paths_reject_symlink_aliases(tmp_path, alias):
 
 
 
+
+def ancestry_result(old_sha: str, current_sha: str):
+    return {
+        "status": "identical" if old_sha == current_sha else "ahead",
+        "base_commit": {"sha": old_sha},
+        "merge_base_commit": {"sha": old_sha},
+        "ahead_by": 0 if old_sha == current_sha else 8,
+        "behind_by": 0,
+    }
+
+
+@pytest.mark.parametrize("old,current", [
+    ("a" * 40, "a" * 40),  # same main as originally executed
+    ("a" * 40, "b" * 40),  # trusted ancestor after tested Runner fixes
+])
+def test_historical_recovery_admits_exact_main_ancestor(monkeypatch, old, current):
+    requests = []
+
+    def fake_github_api(endpoint, token, *, method="GET", fields=None):
+        requests.append((endpoint, token, method, fields))
+        return ancestry_result(old, current)
+
+    monkeypatch.setattr(prep, "github_api", fake_github_api)
+    prep.checked_trusted_runner_history(old, current, "read-only-token")
+    assert requests == [(
+        f"repos/{prep.RUNNER}/compare/{old}...{current}",
+        "read-only-token", "GET", None,
+    )]
+
+
+@pytest.mark.parametrize("mutation", [
+    lambda value: value.update(status="behind"),
+    lambda value: value.update(status="diverged"),
+    lambda value: value.update(ahead_by=41),
+    lambda value: value.update(ahead_by=-1),
+    lambda value: value.update(ahead_by="8"),
+    lambda value: value.update(behind_by=1),
+    lambda value: value["merge_base_commit"].update(sha="c" * 40),
+    lambda value: value["base_commit"].update(sha="c" * 40),
+    lambda value: value.update(merge_base_commit=None),
+    lambda value: value.update(base_commit="invalid"),
+    lambda value: value.update(status="identical"),
+    lambda value: value.update(ahead_by=0),
+])
+def test_historical_recovery_rejects_non_ancestral_unbounded_or_ambiguous_history(
+    monkeypatch, mutation,
+):
+    history = ancestry_result("a" * 40, "b" * 40)
+    mutation(history)
+    monkeypatch.setattr(prep, "github_api", lambda *_args, **_kwargs: history)
+    with pytest.raises(RecoveryPreparationError, match="ancestry"):
+        prep.checked_trusted_runner_history("a" * 40, "b" * 40, "token")
+
+
+@pytest.mark.parametrize("old,current", [
+    ("z" * 40, "a" * 40),
+    ("a" * 40, "no-such-branch"),
+])
+def test_historical_recovery_rejects_invalid_history_sha_before_lookup(
+    monkeypatch, old, current,
+):
+    def reject_called(*_args, **_kwargs):
+        raise AssertionError("Invalid SHA must never reach GitHub")
+
+    monkeypatch.setattr(prep, "github_api", reject_called)
+    with pytest.raises(RecoveryPreparationError, match="identity"):
+        prep.checked_trusted_runner_history(old, current, "token")
+
+
+def test_historical_gate_still_requires_exact_failed_run_and_ancestry():
+    # No fallback to accepting an arbitrary old workflow run by title alone.
+    source = (ROOT / "scripts/prepare_failed_source_recovery.py").read_text(
+        encoding="utf-8"
+    )
+    assert "checked_run(actual, project, recorded_sha)" in source
+    assert "checked_trusted_runner_history(recorded_sha, runner_sha, runner_token)" in source
+    assert "RECENT_SOURCE_RUN_PAGE_SIZE = 15" in source
+
+
 def history_run(number: int, project: str = "CLASSMO"):
     return {"id": number, "display_title": f"Direct Worker {project} next"}
 
@@ -250,6 +329,7 @@ def test_recent_source_fence_has_a_strict_total_history_bound(monkeypatch):
 
 @pytest.mark.parametrize("reason,expected", [
     ("unbounded GitHub metadata", "GITHUB_METADATA_BOUND"),
+    ("failed runner is not bounded trusted main ancestry", "RUNNER_MAIN_ANCESTRY"),
     ("later product source run supersedes this failure", "LATER_SOURCE_RUN"),
     ("private token=abc123", "UNCLASSIFIED"),
 ])
