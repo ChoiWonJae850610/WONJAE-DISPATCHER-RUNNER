@@ -127,13 +127,25 @@ def checked_failure_job(value: object, project: str) -> int:
 
 
 def read_job_log(run_id: int, job_id: int, token: str) -> str:
+    """Read the exact failed job's original log without CLI presentation prefixes.
+
+    The gh run view --log command reformats job lines for humans; the tightly
+    anchored INITIAL_TURN parser checks the raw GitHub job-log transport instead.
+    The job ID is admitted only via the exact run's verified jobs inventory.
+    Do not print or persist the returned original log.
+    """
+    if (type(run_id) is not int or run_id < 1
+            or type(job_id) is not int or job_id < 1 or not token):
+        raise RecoveryPreparationError("invalid exact job log identity")
     env = dict(os.environ, GH_TOKEN=token)
     response = subprocess.run(
-        ["gh", "run", "view", str(run_id), "--repo", RUNNER, "--job", str(job_id), "--log"],
+        ["gh", "api", "--method", "GET",
+         f"repos/{RUNNER}/actions/jobs/{job_id}/logs"],
         env=env, check=True, capture_output=True, text=True, timeout=40,
     )
-    if len(response.stdout) > 2_000_000:
-        raise RecoveryPreparationError("unbounded original job log")
+    if not 0 < len(response.stdout) <= 2_000_000:
+        raise RecoveryPreparationError("empty or unbounded original job log")
+    # Raw job log contains timestamps plus exact application markers.
     # Keep untrusted logs in memory only; never print or upload them.
     return response.stdout
 
