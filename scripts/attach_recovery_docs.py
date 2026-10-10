@@ -42,9 +42,9 @@ def checked_source_pr(pr: object, route: dict, number: int, sha: str,
         raise DocumentMergeError("source PR/base/head identity changed")
     body = pr.get("body")
     if (not isinstance(body, str) or
-        f"- source_base_sha: \`{base}\`" not in body or
-        f"- runner_run_id: \`{failed_run_id}\`" not in body or
-        f"- project: \`{route['repo'].split('/')[-1]}\`" not in body):
+        f"- source_base_sha: `{base}`" not in body or
+        f"- runner_run_id: `{failed_run_id}`" not in body or
+        f"- project: `{route['repo'].split('/')[-1]}`" not in body):
         raise DocumentMergeError("original Direct Worker run binding missing")
     return branch
 
@@ -77,9 +77,9 @@ def verify_manual_gate(repo: str, source_pr: int, source_sha: str,
         isinstance(comment, dict)
         and comment.get("user", {}).get("login") in
             ("ChoiWonJae850610", "github-actions[bot]")
-        and "- result: \`MANUAL_REQUIRED\`" in str(comment.get("body", ""))
-        and f"- runner_run_id: \`{failed_run_id}\`" in str(comment.get("body", ""))
-        and f"- head_sha: \`{source_sha}\`" in str(comment.get("body", ""))
+        and "- result: `MANUAL_REQUIRED`" in str(comment.get("body", ""))
+        and f"- runner_run_id: `{failed_run_id}`" in str(comment.get("body", ""))
+        and f"- head_sha: `{source_sha}`" in str(comment.get("body", ""))
         for comment in comments
     ):
         raise DocumentMergeError("exact Owner/manual gate comment not present")
