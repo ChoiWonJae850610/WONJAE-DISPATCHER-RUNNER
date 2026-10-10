@@ -12,6 +12,19 @@ on:
       source_head:
         required: true
         type: string
+      mode:
+        description: attach or read-only reconcile of a previous failed attachment
+        required: false
+        default: attach
+        type: string
+      attached_head:
+        required: false
+        default: ""
+        type: string
+      failed_attach_run_id:
+        required: false
+        default: ""
+        type: string
       docs_pr:
         required: true
         type: string
@@ -73,13 +86,25 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.control_read_token }}
           CONTROL_SHA: ${{ inputs.control_sha }}
+          MODE: ${{ inputs.mode }}
+          ATTACHED_HEAD: ${{ inputs.attached_head }}
+          FAILED_ATTACH_RUN_ID: ${{ inputs.failed_attach_run_id }}
         run: |
           set -euo pipefail
+          case "$MODE" in
+            attach) test -z "$ATTACHED_HEAD" && test -z "$FAILED_ATTACH_RUN_ID" ;;
+            reconcile)
+              [[ "$ATTACHED_HEAD" =~ ^[a-f0-9]{40}$ ]]
+              [[ "$FAILED_ATTACH_RUN_ID" =~ ^[1-9][0-9]*$ ]]
+              ;;
+            *) echo '::error::Unknown recovery mode'; exit 1 ;;
+          esac
           test "$(gh api repos/ChoiWonJae850610/DEV-CONTROL/branches/main --jq '.commit.sha')" = "$CONTROL_SHA"
           test "$(git -C _control rev-parse HEAD)" = "$CONTROL_SHA"
           test "$(gh api repos/$GITHUB_REPOSITORY/branches/main --jq '.commit.sha')" = "$GITHUB_SHA"
 
       - name: Attach exact validated docs to the still-open source PR only
+        if: ${{ inputs.mode == 'attach' }}
         env:
           GH_TOKEN: ${{ secrets.product_write_token }}
           RUNNER_READ_TOKEN: ${{ github.token }}
@@ -108,3 +133,31 @@ jobs:
             --failed-run-id "$FAILED_RUN_ID" \
             --base "$BASE_SHA" --control-sha "$CONTROL_SHA" \
             --workspace "$job_root/product"
+
+      - name: Reconcile previously attached exact PR-head without any product write
+        if: ${{ inputs.mode == 'reconcile' }}
+        env:
+          GH_TOKEN: ${{ secrets.product_write_token }}
+          RUNNER_READ_TOKEN: ${{ github.token }}
+          PROJECT: ${{ inputs.project }}
+          SOURCE_PR: ${{ inputs.source_pr }}
+          SOURCE_HEAD: ${{ inputs.source_head }}
+          ATTACHED_HEAD: ${{ inputs.attached_head }}
+          DOCS_PR: ${{ inputs.docs_pr }}
+          DOCS_HEAD: ${{ inputs.docs_head }}
+          FAILED_RUN_ID: ${{ inputs.failed_run_id }}
+          FAILED_ATTACH_RUN_ID: ${{ inputs.failed_attach_run_id }}
+          BASE_SHA: ${{ inputs.base_sha }}
+          CONTROL_SHA: ${{ inputs.control_sha }}
+        run: |
+          set -euo pipefail
+          umask 077
+          python scripts/reconcile_recovery_docs.py \
+            --registry _control/PROJECTS.yaml \
+            --project "$PROJECT" \
+            --source-pr "$SOURCE_PR" --source-head "$SOURCE_HEAD" \
+            --attached-head "$ATTACHED_HEAD" \
+            --docs-pr "$DOCS_PR" --docs-head "$DOCS_HEAD" \
+            --failed-run-id "$FAILED_RUN_ID" \
+            --failed-attach-run-id "$FAILED_ATTACH_RUN_ID" \
+            --base "$BASE_SHA" --control-sha "$CONTROL_SHA"
