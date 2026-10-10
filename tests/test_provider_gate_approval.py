@@ -25,7 +25,8 @@ def test_provider_gate_core_rechecks_identity_validation_and_registered_executor
     assert (
         '["approval_only", "classmo_supabase_migration", '
         '"classmo_eas_build", "classmo_eas_update", '
-        '"wafl_supabase_hardening", "wafl_eas_update", "wafl_eas_build", '\n        '"wafl_r2_preview_deploy"].include?(executor)' in raw
+        '"wafl_supabase_hardening", "wafl_eas_update", '
+        '"wafl_eas_build", "wafl_r2_preview_deploy"].include?(executor)' in raw
     )
     assert 'action["type"] == "PROVIDER_GATE"' in raw
     assert 'action["gate"] == gate' in raw
