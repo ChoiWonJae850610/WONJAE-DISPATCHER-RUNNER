@@ -25,7 +25,8 @@ def test_provider_gate_core_rechecks_identity_validation_and_registered_executor
     assert (
         '["approval_only", "classmo_supabase_migration", '
         '"classmo_eas_build", "classmo_eas_update", '
-        '"wafl_supabase_hardening", "wafl_eas_update", "wafl_eas_build"].include?(executor)' in raw
+        '"wafl_supabase_hardening", "wafl_eas_update", '
+        '"wafl_eas_build", "wafl_r2_preview_deploy"].include?(executor)' in raw
     )
     assert 'action["type"] == "PROVIDER_GATE"' in raw
     assert 'action["gate"] == gate' in raw
@@ -149,3 +150,27 @@ def test_wafl_signed_preview_icon_build_is_credential_frozen_exact_gate_only():
     assert 'test "$EAS_BUILD_DISTRIBUTION" = "internal"' in workflow
     assert "Owner iPhone/iPad install & physical acceptance: `NOT_RUN`" in workflow
     assert "APP_STORE_CONNECT_API_KEY" not in workflow
+
+def test_wafl_r2_existing_worker_gate_is_disabled_without_separate_owner_activation():
+    with open(".github/workflows/provider-gate-approval.yml", encoding="utf-8") as handle:
+        caller = handle.read()
+    with open(".github/workflows/provider-gate-approval-core.yml", encoding="utf-8") as handle:
+        core = handle.read()
+    for key in (
+        "WAFL_CLOUDFLARE_API_TOKEN", "WAFL_CLOUDFLARE_ACCOUNT_ID",
+        "WAFL_R2_PREVIEW_WORKER_NAME", "WAFL_R2_PREVIEW_BUCKET_NAME",
+        "WAFL_R2_PREVIEW_WORKER_URL", "WAFL_R2_IMAGES_ENTITLEMENT_APPROVED",
+        "WAFL_R2_SIGNING_PARITY_APPROVED",
+    ):
+        assert key in caller
+    assert 'gate == "r2_preview_worker_delivery"' in core
+    assert 'config["ready_for_owner"] == true' in core
+    assert '"deployment_policy" => "existing_nonproduction_worker_only"' in core
+    assert 'scripts/wafl_r2_preview_gate.py' in core
+    assert 'wrangler@4.86.0' in core
+    assert '--repo "$GITHUB_WORKSPACE/.approval/product"' in core
+    assert 'CLOUDFLARE_API_TOKEN: ${{ secrets.cloudflare_token }}' in core
+    assert "wrangler secret put" not in core
+    assert "wrangler r2 bucket create" not in core
+    assert "wrangler deploy --prod" not in core
+

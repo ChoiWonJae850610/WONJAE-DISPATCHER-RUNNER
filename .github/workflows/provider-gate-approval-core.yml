@@ -33,6 +33,20 @@ on:
         required: false
       expo_token:
         required: false
+      cloudflare_token:
+        required: false
+      cloudflare_account_id:
+        required: false
+      wafl_r2_worker_name:
+        required: false
+      wafl_r2_bucket_name:
+        required: false
+      wafl_r2_worker_url:
+        required: false
+      wafl_images_entitlement_approved:
+        required: false
+      wafl_signing_parity_approved:
+        required: false
 
 permissions:
   contents: read
@@ -107,7 +121,7 @@ jobs:
           abort("provider gate is not registered") unless config.is_a?(Hash)
           abort("provider gate approval mode mismatch") unless config["approval_mode"] == "sanjinworks_owner_button"
           executor = config["executor"]
-          abort("provider gate executor is unsupported") unless ["approval_only", "classmo_supabase_migration", "classmo_eas_build", "classmo_eas_update", "wafl_supabase_hardening", "wafl_eas_update", "wafl_eas_build"].include?(executor)
+          abort("provider gate executor is unsupported") unless ["approval_only", "classmo_supabase_migration", "classmo_eas_build", "classmo_eas_update", "wafl_supabase_hardening", "wafl_eas_update", "wafl_eas_build", "wafl_r2_preview_deploy"].include?(executor)
           label = config["label"]
           abort("provider gate label missing") unless label.is_a?(String) && !label.strip.empty?
 
@@ -130,6 +144,23 @@ jobs:
           if executor == "wafl_supabase_hardening"
             abort("WAFL executor routed to another project") unless project == "WAFL"
             abort("WAFL provider gate mismatch") unless gate == "separate_explicit_provider_authority"
+          elsif executor == "wafl_r2_preview_deploy"
+            abort("WAFL R2 executor routed to another project") unless project == "WAFL"
+            abort("WAFL R2 gate mismatch") unless gate == "r2_preview_worker_delivery"
+            expected = {
+              "provider" => "cloudflare_workers_r2",
+              "environment" => "development",
+              "source_entry" => "cloudflare/r2-upload-worker.js",
+              "deployment_policy" => "existing_nonproduction_worker_only",
+            }
+            expected.each do |key, value|
+              abort("WAFL R2 gate contract #{key} mismatch") unless config[key] == value
+            end
+            abort("WAFL R2 gate is not activated by Owner") unless config["ready_for_owner"] == true
+            values.merge!(
+              "PROVIDER_R2_SOURCE_ENTRY" => config["source_entry"],
+              "PROVIDER_R2_DEPLOY_POLICY" => config["deployment_policy"],
+            )
           elsif executor == "classmo_supabase_migration"
             abort("CLASSMO executor routed to another project") unless project == "CLASSMO"
             expected = {
@@ -344,6 +375,37 @@ jobs:
           path: ${{ runner.temp }}/wafl-provider-evidence.json
           if-no-files-found: error
           retention-days: 30
+
+      - name: WAFL R2 · set up reviewed Wrangler CLI
+        if: env.PROVIDER_EXECUTOR == 'wafl_r2_preview_deploy'
+        uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+
+      - name: WAFL R2 · install pinned Wrangler without product scripts
+        if: env.PROVIDER_EXECUTOR == 'wafl_r2_preview_deploy'
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm install --global "wrangler@4.86.0" --ignore-scripts --no-audit --no-fund
+
+      - name: WAFL R2 · existing Development Worker guarded deploy and readback
+        if: env.PROVIDER_EXECUTOR == 'wafl_r2_preview_deploy'
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.cloudflare_token }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.cloudflare_account_id }}
+          WAFL_R2_PREVIEW_WORKER_NAME: ${{ secrets.wafl_r2_worker_name }}
+          WAFL_R2_PREVIEW_BUCKET_NAME: ${{ secrets.wafl_r2_bucket_name }}
+          WAFL_R2_PREVIEW_WORKER_URL: ${{ secrets.wafl_r2_worker_url }}
+          WAFL_R2_IMAGES_ENTITLEMENT_APPROVED: ${{ secrets.wafl_images_entitlement_approved }}
+          WAFL_R2_SIGNING_PARITY_APPROVED: ${{ secrets.wafl_signing_parity_approved }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python scripts/wafl_r2_preview_gate.py \
+            --repo "$GITHUB_WORKSPACE/.approval/product" \
+            --source-sha "$SOURCE_SHA" \
+            --summary "$GITHUB_STEP_SUMMARY"
 
       - name: EAS · require scoped Expo credential
         if: env.PROVIDER_EXECUTOR == 'classmo_eas_build' || env.PROVIDER_EXECUTOR == 'classmo_eas_update' || env.PROVIDER_EXECUTOR == 'wafl_eas_update' || env.PROVIDER_EXECUTOR == 'wafl_eas_build'

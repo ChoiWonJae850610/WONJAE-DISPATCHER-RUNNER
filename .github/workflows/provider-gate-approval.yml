@@ -47,6 +47,13 @@ jobs:
       product_read_token: ${{ secrets.WAFL_WRITE_TOKEN }}
       supabase_access_token: ${{ secrets.WAFL_SUPABASE_ACCESS_TOKEN }}
       expo_token: ${{ secrets.WAFL_EXPO_TOKEN }}
+      cloudflare_token: ${{ secrets.WAFL_CLOUDFLARE_API_TOKEN }}
+      cloudflare_account_id: ${{ secrets.WAFL_CLOUDFLARE_ACCOUNT_ID }}
+      wafl_r2_worker_name: ${{ secrets.WAFL_R2_PREVIEW_WORKER_NAME }}
+      wafl_r2_bucket_name: ${{ secrets.WAFL_R2_PREVIEW_BUCKET_NAME }}
+      wafl_r2_worker_url: ${{ secrets.WAFL_R2_PREVIEW_WORKER_URL }}
+      wafl_images_entitlement_approved: ${{ secrets.WAFL_R2_IMAGES_ENTITLEMENT_APPROVED }}
+      wafl_signing_parity_approved: ${{ secrets.WAFL_R2_SIGNING_PARITY_APPROVED }}
 
   classmo:
     if: ${{ inputs.project == 'CLASSMO' }}
