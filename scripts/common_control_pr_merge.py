@@ -22,10 +22,15 @@ SHA = re.compile(r"^[0-9a-f]{40}$")
 DIGEST = re.compile(r"^[0-9a-f]{64}$")
 NONCE = re.compile(r"^[0-9a-f]{32}$")
 REPO = re.compile(r"^[A-Za-z0-9-]+/[A-Za-z0-9_.-]+$")
-PATH = re.compile(r"^docs/(?:[A-Za-z0-9._-]+/)*[A-Za-z0-9._-]+\.md$")
+SAFE_PATH = re.compile(
+    r"^(?:docs/(?:[A-Za-z0-9._-]+/)*[A-Za-z0-9._-]+\.md"
+    r"|(?:src|tests)/(?:[A-Za-z0-9._-]+/)*[A-Za-z0-9._-]+\.(?:py|js|mjs|ts|tsx))$"
+)
 SENSITIVE = re.compile(
     r"(?:^|[/._-])(?:auth|security|credential|secret|token|permission|policy|policies|"
-    r"production|deployment|release|owner-action|common-system-owner)(?:[/._-]|$)",
+    r"production|deploy|deployment|release|owner-action|common-system-owner|"
+    r"session|workflow|runner|direct-worker|provider|dispatcher|operating|"
+    r"execution|bootstrap|registry|control|merge|write)(?:[/._-]|$)",
     re.IGNORECASE,
 )
 WORKFLOWS = {
@@ -33,9 +38,11 @@ WORKFLOWS = {
     "WONJAE-DISPATCHER-RUNNER": ("validate.yml", "Runner Validation"),
 }
 VERSION = "common-pr-merge-v1"
-# First Owner rehearsal is limited to one inert document; expansion needs a new PR.
-PILOT_REPOSITORY = "ChoiWonJae850610/DEV-CONTROL"
-PILOT_PATH = "docs/COMMON_PR_PILOT_NOTE.md"
+# One repository-scoped merge token at a time. SANJINWORKS/Production and
+# security/credential/workflow-policy changes retain independent approval.
+MAX_REVIEWED_FILES = 30
+MAX_PATCH_CHARS = 24000
+MAX_TOTAL_PATCH_CHARS = 120000
 
 
 class AdmissionError(RuntimeError):
@@ -82,8 +89,6 @@ def guard_scope(args: argparse.Namespace, env: dict[str, str]) -> tuple[str, str
     target = env.get("COMMON_PR_MERGE_TARGET_REPOSITORY", "")
     if not target or target != args.repository:
         raise AdmissionError("target repository is not separately activated")
-    if args.repository != PILOT_REPOSITORY:
-        raise AdmissionError("only the approved DEV-CONTROL pilot is supported")
     if args.repository.split("/")[0] != env.get("GITHUB_REPOSITORY_OWNER", ""):
         raise AdmissionError("Owner repository identity mismatch")
     name = args.repository.split("/")[1]
@@ -125,26 +130,50 @@ def checked_pr(pr: Any, args: argparse.Namespace) -> str:
     return head["ref"]
 
 
-def check_file_inventory(files: Any, count: int, digest: str, diff_digest: str) -> None:
-    """Match the complete reviewed one-file change AND exact GitHub patch contents."""
-    if not isinstance(files, list) or len(files) != 1 or count != 1:
-        raise AdmissionError("first pilot requires exactly one reviewed file")
-    file = files[0]
-    if not isinstance(file, dict) or file.get("status") not in {"added", "modified"}:
-        raise AdmissionError("PR has destructive or unknown file mutation")
-    path, patch = file.get("filename"), file.get("patch")
-    if (path != PILOT_PATH or not PATH.fullmatch(path)
-        or SENSITIVE.search(path) or file.get("previous_filename")
-        or not isinstance(patch, str) or not patch or len(patch) > 12000
-        or file.get("changes", 0) > 400):
-        raise AdmissionError("first pilot path or complete diff is unreviewed")
-    observed_paths = hashlib.sha256(path.encode("utf-8")).hexdigest()
+def safe_common_path(repo: str, path: Any) -> bool:
+    """Small routine-code/docs allowlist, not security or Production approval."""
+    if repo not in {
+        "ChoiWonJae850610/DEV-CONTROL",
+        "ChoiWonJae850610/WONJAE-DISPATCHER-RUNNER",
+    }:
+        return False
+    return (
+        isinstance(path, str) and bool(SAFE_PATH.fullmatch(path))
+        and all(part not in {".", ".."} for part in path.split("/"))
+        and not bool(SENSITIVE.search(path))
+    )
+
+
+def check_file_inventory(files: Any, count: int, digest: str,
+                         diff_digest: str, repo: str) -> None:
+    """Match every Owner-reviewed changed path AND GitHub patch, not just filenames."""
+    if (not isinstance(files, list) or not isinstance(count, int)
+        or not 1 <= count <= MAX_REVIEWED_FILES or len(files) != count):
+        raise AdmissionError("reviewed common PR file inventory is incomplete")
+    paths: list[str] = []
+    records: list[tuple[str, str]] = []
+    total_chars = 0
+    for file in files:
+        if not isinstance(file, dict) or file.get("status") not in {"added", "modified"}:
+            raise AdmissionError("deletion, rename or unknown file mutation requires another gate")
+        path, patch = file.get("filename"), file.get("patch")
+        changes = file.get("changes")
+        if (not safe_common_path(repo, path) or file.get("previous_filename")
+            or not isinstance(patch, str) or not patch or len(patch) > MAX_PATCH_CHARS
+            or type(changes) is not int or not 1 <= changes <= 2000):
+            raise AdmissionError("sensitive/unreviewed path or incomplete diff is blocked")
+        total_chars += len(patch)
+        paths.append(path)
+        records.append((path, f"{path}\n{file['status']}\n{patch}"))
+    if len(set(paths)) != count or total_chars > MAX_TOTAL_PATCH_CHARS:
+        raise AdmissionError("duplicate or oversized common PR diff")
+    observed_paths = hashlib.sha256("\n".join(sorted(paths)).encode("utf-8")).hexdigest()
     observed_diff = hashlib.sha256(
-        f"{path}\n{file['status']}\n{patch}".encode("utf-8")
+        "\n---\n".join(value for _, value in sorted(records)).encode("utf-8")
     ).hexdigest()
     if (not hmac.compare_digest(observed_paths, digest)
         or not hmac.compare_digest(observed_diff, diff_digest)):
-        raise AdmissionError("reviewed path or diff contents changed")
+        raise AdmissionError("current GitHub diff differs from exact Owner-reviewed contents")
 
 
 def exact_ci(payload: Any, args: argparse.Namespace, workflow: str, name: str,
@@ -209,7 +238,9 @@ def integrate(args: argparse.Namespace, env: dict[str, str] | None = None) -> in
     pr = gh_api([f"repos/{args.repository}/pulls/{args.pr_number}"])
     ref = checked_pr(pr, args)
     files = gh_api([f"repos/{args.repository}/pulls/{args.pr_number}/files?per_page=100"])
-    check_file_inventory(files, pr["changed_files"], args.paths_digest, args.diff_digest)
+    check_file_inventory(
+        files, pr["changed_files"], args.paths_digest, args.diff_digest, args.repository
+    )
     exact_ci(ci_runs(args.repository, workflow, args.head, "pull_request"),
              args, workflow, name, "pull_request", args.head, ref)
     if main_sha(args.repository) != args.base:
@@ -219,7 +250,8 @@ def integrate(args: argparse.Namespace, env: dict[str, str] | None = None) -> in
     checked_pr(latest_pr, args)
     latest_files = gh_api([f"repos/{args.repository}/pulls/{args.pr_number}/files?per_page=100"])
     check_file_inventory(
-        latest_files, latest_pr["changed_files"], args.paths_digest, args.diff_digest
+        latest_files, latest_pr["changed_files"], args.paths_digest, args.diff_digest,
+        args.repository
     )
     exact_ci(ci_runs(args.repository, workflow, args.head, "pull_request"),
              args, workflow, name, "pull_request", args.head, ref)
@@ -248,7 +280,7 @@ def integrate(args: argparse.Namespace, env: dict[str, str] | None = None) -> in
     summary = os.getenv("GITHUB_STEP_SUMMARY")
     if summary:
         with open(summary, "a", encoding="utf-8") as out:
-            out.write(f"## Common-system docs-only PR integration\n\n"
+            out.write(f"## Common-system routine PR integration\n\n"
                       f"- PR: #{args.pr_number}\n- Exact PR head: {args.head}\n"
                       f"- Reviewed base: {args.base}\n- PR-head validation: {args.ci_run_id} PASS\n"
                       f"- Integrated SHA: {integrated}\n"
