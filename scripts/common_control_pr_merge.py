@@ -218,7 +218,9 @@ def integrate(args: argparse.Namespace, env: dict[str, str] | None = None) -> in
     latest_pr = gh_api([f"repos/{args.repository}/pulls/{args.pr_number}"])
     checked_pr(latest_pr, args)
     latest_files = gh_api([f"repos/{args.repository}/pulls/{args.pr_number}/files?per_page=100"])
-    check_file_inventory(latest_files, latest_pr["changed_files"], args.paths_digest, args.diff_digest)
+    check_file_inventory(
+        latest_files, latest_pr["changed_files"], args.paths_digest, args.diff_digest
+    )
     exact_ci(ci_runs(args.repository, workflow, args.head, "pull_request"),
              args, workflow, name, "pull_request", args.head, ref)
 
