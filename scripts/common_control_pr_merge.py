@@ -29,7 +29,7 @@ SAFE_PATH = re.compile(
 SENSITIVE = re.compile(
     r"(?:^|[/._-])(?:auth|security|credential|secret|token|permission|policy|policies|"
     r"production|deploy|deployment|release|owner-action|common-system-owner|"
-    r"session|workflow|runner|direct-worker|provider|dispatcher|operating|"
+    r"session|workflow|runner|worker|direct-worker|provider|dispatcher|operating|"
     r"execution|bootstrap|registry|control|merge|write)(?:[/._-]|$)",
     re.IGNORECASE,
 )
