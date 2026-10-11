@@ -109,7 +109,8 @@ def checked_pr(pr: Any, args: argparse.Namespace) -> str:
         raise AdmissionError("PR target is not the exact common main")
     if head.get("repo", {}).get("full_name") != args.repository or head.get("sha") != args.head:
         raise AdmissionError("PR head changed or belongs to a fork")
-    if not isinstance(head.get("ref"), str) or not re.fullmatch(r"[A-Za-z0-9._/-]{1,160}", head["ref"]):
+    if (not isinstance(head.get("ref"), str)
+        or not re.fullmatch(r"[A-Za-z0-9._/-]{1,160}", head["ref"])):
         raise AdmissionError("invalid trusted PR branch")
     count = pr.get("changed_files")
     if type(count) is not int or not 1 <= count <= 100:
