@@ -60,7 +60,7 @@ def validation(**changes):
     }]}
 
 
-def test_dormant_credentials_and_single_pilot_guard():
+def test_dormant_credentials_and_one_target_common_repo_guard():
     for runtime in [{}, {"COMMON_PR_MERGE_ACTIVATED": "true"}, {
         "COMMON_PR_MERGE_TARGET_REPOSITORY": REPO,
         "GITHUB_REPOSITORY_OWNER": "ChoiWonJae850610",
@@ -77,11 +77,15 @@ def test_dormant_credentials_and_single_pilot_guard():
         "control-validation.yml", "DEV-CONTROL Validation"
     )
     for other in ["ChoiWonJae850610/SANJINWORKS", "ChoiWonJae850610/KDN",
-                  "ChoiWonJae850610/WONJAE-DISPATCHER-RUNNER"]:
+                  "ChoiWonJae850610/WAFL"]:
         with pytest.raises(guard.AdmissionError):
             guard.guard_scope(selected(repository=other), {
                 **config, "COMMON_PR_MERGE_TARGET_REPOSITORY": other,
             })
+    runner = "ChoiWonJae850610/WONJAE-DISPATCHER-RUNNER"
+    assert guard.guard_scope(selected(repository=runner), {
+        **config, "COMMON_PR_MERGE_TARGET_REPOSITORY": runner,
+    }) == ("validate.yml", "Runner Validation")
 
 
 def test_hmac_interoperability_vector_identical_to_typescript():
@@ -116,20 +120,48 @@ def test_stale_fork_draft_unmergeable_rejected():
 
 
 def test_signed_patch_contents_cannot_change_even_when_path_stays_identical():
-    guard.check_file_inventory([file_change()], 1, PATH_DIGEST, DIFF_DIGEST)
+    guard.check_file_inventory([file_change()], 1, PATH_DIGEST, DIFF_DIGEST, REPO)
     for changed in [
         {"filename": "docs/CHATGPT_OPERATING_RULES.md"},
         {"filename": "docs/SELF_HOSTED_EXECUTION.md"},
-        {"filename": "src/worker.ts"},
+        {"filename": "src/worker.ts"}, {"filename": ".github/workflows/validate.yml"},
+        {"filename": "src/common_control_pr_merge.py"},
         {"filename": "docs/../COMMON_PR_PILOT_NOTE.md"},
         {"status": "removed"}, {"status": "renamed"},
         {"patch": PATCH + "\n+unreviewed"}, {"patch": None},
         {"previous_filename": "docs/old.md"},
     ]:
         with pytest.raises(guard.AdmissionError):
-            guard.check_file_inventory([file_change(**changed)], 1, PATH_DIGEST, DIFF_DIGEST)
+            guard.check_file_inventory([file_change(**changed)], 1, PATH_DIGEST, DIFF_DIGEST, REPO)
     with pytest.raises(guard.AdmissionError):
-        guard.check_file_inventory([file_change()], 2, PATH_DIGEST, DIFF_DIGEST)
+        guard.check_file_inventory([file_change()], 2, PATH_DIGEST, DIFF_DIGEST, REPO)
+
+
+def test_routine_multi_file_diff_signed_in_canonical_path_order():
+    files = [
+        {"filename": "src/display_format.py", "status": "modified",
+         "patch": "@@ -1 +1 @@\n-print('old')\n+print('new')", "changes": 2},
+        {"filename": "docs/README.md", "status": "added",
+         "patch": "@@ -0,0 +1 @@\n+Notes", "changes": 1},
+        {"filename": "tests/test_display.py", "status": "added",
+         "patch": "@@ -0,0 +1 @@\n+assert True", "changes": 1},
+    ]
+    paths = sorted(f["filename"] for f in files)
+    path_digest = hashlib.sha256("\n".join(paths).encode()).hexdigest()
+    ordered = sorted(files, key=lambda f: f["filename"])
+    records = [f"{f['filename']}\n{f['status']}\n{f['patch']}" for f in ordered]
+    diff_digest = hashlib.sha256("\n---\n".join(records).encode()).hexdigest()
+    guard.check_file_inventory(files, 3, path_digest, diff_digest, REPO)
+    guard.check_file_inventory(list(reversed(files)), 3, path_digest, diff_digest, REPO)
+    with pytest.raises(guard.AdmissionError):
+        guard.check_file_inventory(
+            [{**files[0], "patch": files[0]["patch"] + "\n+extra"}, *files[1:]],
+            3, path_digest, diff_digest, REPO
+        )
+    with pytest.raises(guard.AdmissionError):
+        guard.check_file_inventory(files, 3, path_digest, diff_digest, "other/repo")
+    with pytest.raises(guard.AdmissionError):
+        guard.check_file_inventory(files + [files[0]], 4, path_digest, diff_digest, REPO)
 
 
 def test_latest_exact_pr_head_ci_only():
