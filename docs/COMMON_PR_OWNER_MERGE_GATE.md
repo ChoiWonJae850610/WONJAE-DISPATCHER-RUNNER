@@ -13,4 +13,12 @@ Status: **SOURCE CANDIDATE ONLY / NOT ACTIVATED**. This document and the accompa
 7. **Workflow execution provenance** is bounded by GitHub owner identity plus the SANJINWORKS short-lived HMAC signature. Direct manual dispatch without a signed Owner request cannot pass the trusted guard. Never log the secret, credential, raw GitHub response bodies, signed request, or private source.
 8. **Validation and handoff:** this PR requires exact Runner PR-head CI, the paired SANJINWORKS source PR separately requires its own exact PR-head CI, and both remain unmerged until separately authorized. Future activation must verify source integration, GitHub workflow identity, actual credential repository scope, endpoint/same-origin protection, Owner QA, duplicate rejection, and a harmless approved docs-only rehearsal before any routine use. PR-head static CI does not establish Production or active permission.
 
+## First DEV-CONTROL pilot safety tightening (NOT ACTIVE)
+
+The only admitted rehearsal PR changes the exact `docs/COMMON_PR_PILOT_NOTE.md` file. The proposed PR is not created here. A modified diff or an additional changed path is blocked even if the SHA/CI remains unchanged. The trusted script independently computes SHA256 of `path + LF + file status + LF + GitHub patch`, verifies the Owner-signed `diff_digest`, re-reads PR changed files, exact main SHA and latest canonical PR-head CI just before the guarded merge, and independently verifies integrated SHA/CI afterward. No other docs source, policy or trusted workflow path is admitted.
+
+The paired SANJINWORKS Owner endpoint will use the **existing** RealtimeHub admission lock to prevent concurrent dispatch requests, and GitHub remains the only durable PR/run result authority. The signed tuple now includes the SHA-bound diff digest, and the GitHub Workflow Dispatch result must contain a valid exact Run ID. A static test or an unactivated workflow cannot prove live credentials or runtime behavior.
+
+Dedicated write/dispatch tokens, HMAC secrets, Runner activation variables, target configuration, first rehearsal PR, main integration and Production deployment remain separately Owner-authorized.
+
 No central queue, Dispatcher replacement, new database, Production deployment, or product development Runner is created. Existing product document merge workflows remain unchanged.
