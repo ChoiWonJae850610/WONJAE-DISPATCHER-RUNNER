@@ -23,7 +23,7 @@ permissions:
   actions: read
 
 concurrency:
-  group: bounded-recovery-docs-${{ github.event.workflow_run.id }}
+  group: bounded-recovery-docs-${{ github.event_name == 'workflow_dispatch' && inputs.failed_run_id || github.event.workflow_run.id }}
   cancel-in-progress: false
 
 jobs:
