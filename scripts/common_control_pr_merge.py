@@ -126,7 +126,9 @@ def check_file_inventory(files: Any, count: int, digest: str) -> None:
         if not isinstance(file, dict) or file.get("status") not in {"added", "modified"}:
             raise AdmissionError("PR has destructive or unknown file mutation")
         path = file.get("filename")
-        if not isinstance(path, str) or not PATH.fullmatch(path) or SENSITIVE.search(path):
+        if (not isinstance(path, str) or not PATH.fullmatch(path)
+            or any(segment in {".", ".."} for segment in path.split("/"))
+            or SENSITIVE.search(path)):
             raise AdmissionError("PR contains source, security or authority-changing files")
         if file.get("previous_filename") or file.get("changes", 0) > 40000:
             raise AdmissionError("unreviewed path rename or excessive diff")
