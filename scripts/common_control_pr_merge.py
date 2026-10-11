@@ -140,7 +140,7 @@ def check_file_inventory(files: Any, count: int, digest: str, diff_digest: str) 
         raise AdmissionError("first pilot path or complete diff is unreviewed")
     observed_paths = hashlib.sha256(path.encode("utf-8")).hexdigest()
     observed_diff = hashlib.sha256(
-        f"{path}\\n{file['status']}\\n{patch}".encode("utf-8")
+        f"{path}\n{file['status']}\n{patch}".encode("utf-8")
     ).hexdigest()
     if (not hmac.compare_digest(observed_paths, digest)
         or not hmac.compare_digest(observed_diff, diff_digest)):
