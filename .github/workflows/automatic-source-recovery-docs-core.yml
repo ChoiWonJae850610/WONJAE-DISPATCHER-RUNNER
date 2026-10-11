@@ -8,6 +8,10 @@ on:
       project:
         required: true
         type: string
+      failed_run_id:
+        required: false
+        type: string
+        default: ""
     secrets:
       product_write_token:
         required: true
@@ -67,6 +71,7 @@ jobs:
           PYTHONPATH="$GITHUB_WORKSPACE/src" "$RECOVERY_ROOT/venv/bin/python" \
             scripts/prepare_failed_source_recovery.py \
             --project "${{ inputs.project }}" \
+            --failed-run-id "${{ inputs.failed_run_id }}" \
             --event "$GITHUB_EVENT_PATH" \
             --registry "$GITHUB_WORKSPACE/_control/PROJECTS.yaml" \
             --workdir "$RECOVERY_ROOT/work"
