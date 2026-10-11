@@ -417,11 +417,12 @@ def plan(event: dict, project: str, runner_token: str, product_token: str,
         "body": (
             f"Automated docs-only preparation bound to original Owner Direct Worker #{run_id}, "
             f"source {original_sha} and task {identity.task_id}. The exact trusted "
-            "initial-turn timeout signature was verified. Current state becomes "
-            "DECISION_REQUIRED pending Codex/Runner readiness check, not SOURCE_READY. "
+            "initial-turn timeout signature was verified. The already-approved "
+            "SOURCE_READY scope stays unchanged after Owner document integration "
+            "and exact integrated CI; Codex transport is NOT proven repaired. "
             "No source, provider, EAS, credential, Production or QA action executed. "
-            "Only the SANJINWORKS authenticated document-merge Owner button may "
-            "integrate this PR after exact PR-head validation."
+            "Only SANJINWORKS Owner document-merge can integrate these two files. "
+            "A later separate Owner next click is required to start source."
         ),
     })
     if not isinstance(pr, dict) or pr.get("state") != "open" or pr.get("base", {}).get(
