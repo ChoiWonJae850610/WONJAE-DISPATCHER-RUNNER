@@ -75,6 +75,12 @@ def test_docs_only_inventory_and_exact_paths_checksum():
         guard.check_file_inventory(
             [{"filename": "docs/example.md", "status": "removed"}], 1, DIGEST
         )
+    traversal = "docs/../x.md"
+    traversal_digest = hashlib.sha256(traversal.encode()).hexdigest()
+    with pytest.raises(guard.AdmissionError):
+        guard.check_file_inventory(
+            [{"filename": traversal, "status": "modified"}], 1, traversal_digest
+        )
 
 
 def test_canonical_pr_head_run_must_be_latest_and_exact():
