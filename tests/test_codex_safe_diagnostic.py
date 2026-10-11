@@ -6,6 +6,7 @@ from contextlib import nullcontext
 from types import SimpleNamespace
 
 import pytest
+from openai_codex import ApprovalMode, Sandbox
 
 from wonjae_dispatcher_runner.codex_safe_diagnostic import (
     PROBE_PROMPT,
@@ -62,8 +63,8 @@ def fake_probe(tmp_path, kind):
         def turn(self, prompt, **kwargs):
             calls.append("turn")
             assert prompt == PROBE_PROMPT
-            assert kwargs["approval_mode"].value == "never" or kwargs["approval_mode"] is not None
-            assert kwargs["sandbox"] is not None
+            assert kwargs["approval_mode"] == ApprovalMode.deny_all
+            assert kwargs["sandbox"] == Sandbox.read_only
             if kind == "turn_timeout":
                 raise RuntimeError("secret-like-data")
             return FakeTurn()
@@ -91,8 +92,8 @@ def fake_probe(tmp_path, kind):
             calls.append("thread")
             assert kwargs["cwd"] == str(workspace)
             assert kwargs["ephemeral"] is True
-            assert kwargs["approval_mode"] is not None
-            assert kwargs["sandbox"] is not None
+            assert kwargs["approval_mode"] == ApprovalMode.deny_all
+            assert kwargs["sandbox"] == Sandbox.read_only
             assert kwargs["config"]["history"] == {"persistence": "none"}
             if kind == "thread_timeout":
                 raise RuntimeError("secret-like-data")
@@ -237,3 +238,53 @@ def test_existing_credential_rotating_smoke_is_not_used_by_diagnostic():
     assert "gh secret set" not in core
     assert "CODEX_AUTH_JSON" not in core
     assert "workflow_dispatch" not in core
+
+
+def test_cli_reads_only_bounded_evidence_and_never_echoes_private_marker(tmp_path):
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1]
+    log = tmp_path / "synthetic.log"
+    sha = "f" * 40
+    log.write_text(
+        "\\n".join(
+            f"INITIAL_TURN attempt={i} outcome=INITIAL_CODEX_TIMEOUT_480_SECONDS source={sha}"
+            for i in (1, 2, 3)
+        ) + "\\nINITIAL_CODEX_TIMEOUT_EXHAUSTED attempts=3 commits=0",
+        encoding="utf-8",
+    )
+    result = subprocess.run(
+        [sys.executable, str(root / "scripts/inspect_codex_timeout_evidence.py"),
+         "--log", str(log)],
+        capture_output=True, text=True, check=True,
+    )
+    assert "status=LEGACY_TIMEOUT_PHASE_UNKNOWN" in result.stdout
+    assert "timeout_attempts=3" in result.stdout
+    assert sha not in result.stdout
+    assert str(log) not in result.stdout
+    assert not result.stderr
+
+
+def test_real_deadline_exception_is_bounded_and_never_prints_exception(tmp_path):
+    from wonjae_dispatcher_runner.repair_timeout import RepairPlanTimeout
+
+    workspace = tmp_path / "empty"
+    workspace.mkdir()
+
+    class TimedOutSdk:
+        def __enter__(self):
+            raise RepairPlanTimeout("secret-model-prompt-do-not-leak")
+
+        def __exit__(self, *_args):
+            pass
+
+    report = probe_injected_sdk(
+        sdk_factory=TimedOutSdk,
+        empty_workspace=workspace,
+        deadline=lambda seconds: nullcontext(),
+    )
+    assert report.status == "TIMEOUT"
+    assert report.last_phase == "sdk_start"
+    assert "secret-model-prompt-do-not-leak" not in format_probe_result(report)
