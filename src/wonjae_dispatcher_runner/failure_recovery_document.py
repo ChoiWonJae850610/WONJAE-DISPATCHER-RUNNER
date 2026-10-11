@@ -16,7 +16,7 @@ SHA = re.compile(r"^[0-9a-f]{40}$")
 TASK = re.compile(r"^[A-Z][A-Z0-9-]{2,100}$")
 PROJECT = re.compile(r"^[A-Z][A-Z0-9-]{1,30}$")
 INITIAL = re.compile(
-    r"(?m)^.{0,160}\bINITIAL_TURN attempt=([1-3]) "
+    r"(?m)^.{0,512}\bINITIAL_TURN attempt=([1-3]) "
     r"outcome=INITIAL_CODEX_TIMEOUT_480_SECONDS source=([0-9a-f]{40})\r?$"
 )
 TERMINAL = "INITIAL_CODEX_TIMEOUT_EXHAUSTED attempts=3 commits=0"
@@ -45,7 +45,11 @@ def parse_initial_turn_timeout(log: str, exact_source_sha: str) -> bool:
         return False
     if not 0 < len(log) <= MAX_LOG_CHARS or TERMINAL not in log:
         return False
-    observations = INITIAL.findall(log)
+    # GitHub log endpoints and CLI may prepend long job labels or ANSI styles.
+    # Normalize presentation only; keep strict SHA, three ordered attempts and
+    # the original zero-commit timeout terminal. Reject missing/extra markers.
+    cleaned = re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", log)
+    observations = INITIAL.findall(cleaned)
     return observations == [("1", exact_source_sha), ("2", exact_source_sha),
                             ("3", exact_source_sha)]
 
@@ -108,7 +112,7 @@ def render_recovery(
     # intentionally NOT included, so credentials embedded in prose never escape.
     doc = (
         f"# Failed source execution recovery — {evidence.task_id}\n\n"
-        f"Status: **PREPARED / NOT SOURCE_READY / NOT RETRIED**.\n\n"
+        f"Status: **DOCS PR PREPARED / SOURCE NOT RETRIED**.\n\n"
         f"- Project: `{evidence.project}`\n"
         f"- Registered active branch: `{evidence.branch}`\n"
         f"- Original exact source SHA: `{evidence.source_sha}`\n"
@@ -122,21 +126,17 @@ def render_recovery(
         "deadline, **not** whether prompt size, service transport, authentication, "
         "resource limits or a code defect caused it. No previous committed source "
         "changes are accepted. Avoid blind reruns or increasing the timeout.\n\n"
-        "## Bounded repair phases\n\n"
-        "1. **Common Runner readiness:** perform a non-secret read-only check for "
-        "Codex session availability, first-turn transport and Linux resource "
-        "conditions. The preflight must not dispatch product source work or "
-        "expose tokens. If unavailable, classify as Runner recovery instead "
-        "of continuing product development.\n"
-        "2. **Product replan:** after readiness is proven, prepare a separate "
-        "docs-only PR splitting the previously approved source stage into "
-        "the smallest independently testable substeps. Preserve its original "
-        "functional scope, allowed paths, validation contract and subsequent "
-        "approval/QA stop gates. No new feature is authorized here.\n"
-        "3. **Owner integration:** exact PR-head validation, authenticated "
-        "SANJINWORKS document-PR merge, and integrated SHA validation are "
-        "needed before the corrected SOURCE_READY stage can be shown. A separate "
-        "Owner click still initiates any source work.\n\n"
+        "## Owner recovery and registered next source stage\n\n"
+        "1. **Review recovery:** the failed run produced no Product PR or committed "
+        "source. Approved next source scope and stop gates remain unchanged. The "
+        "initial Codex transport timeout has **not been proven fixed**.\n"
+        "2. **Owner document integration:** after exact PR-head CI, use the "
+        "authenticated SANJINWORKS recovery document-merge button; this only "
+        "integrates two docs/state files and verifies integrated SHA CI.\n"
+        "3. **Optional Owner source click:** after successful document integration "
+        "SANJINWORKS may show the original registered next task again. Only a "
+        "fresh authenticated Owner click can run that source task. Repeated "
+        "timeouts remain FAILED and require fresh review, not blind retries.\n\n"
         "## Preserved follow-on intent (not automatic permissions)\n\n"
         + "\n".join(f"- {title}" for title in next_titles)
         + "\n\n"
@@ -144,21 +144,19 @@ def render_recovery(
         "permissions, production, or unfinished physical QA.\n"
     )
     current = copy.deepcopy(original_state)
-    current["next_action"] = {
-        "type": "DECISION_REQUIRED",
-        "title": f"실패 복구 진단: {evidence.task_id}",
-        "source_task_id": None,
-        "owner_action": (
-            "기존 Direct Worker의 초기 Codex 480초 시간초과가 3회 발생했습니다. "
-            "개발 재시작 전 공통 Runner/Codex 연결·인증·자원 점검이 필요합니다. "
-            f"정확한 실행 #{evidence.runner_run_id}과 해당 복구 문서를 확인하세요. "
-            "점검 PASS 및 기존 범위의 작은 개발 단계가 문서 PR로 등록되기 전에는 "
-            "다음 작업을 시작하지 않습니다."
-        ),
-        "source_scope": [],
-    }
-    current["after_source_success"] = None
-    current["source_success_queue"] = []
+    # Keep exact already-approved source scope and every successor stop gate.
+    # A docs-only Owner merge creates a new Git HEAD; it does not claim Codex
+    # readiness and does not dispatch development. Source remains Owner-started.
+    prior_instruction = current["next_action"].get("owner_action", "")
+    if not isinstance(prior_instruction, str):
+        raise RecoveryPreparationError("unexpected approved Owner instruction")
+    current["next_action"]["owner_action"] = (
+        prior_instruction.rstrip()
+        + f"\n복구 근거: Runner #{evidence.runner_run_id} 초기 Codex 시간초과 "
+        "3회, 소스 커밋·PR 0개. 복구 문서 병합과 CI 확인 후에도 실제 원인은 "
+        "미해결일 수 있습니다. 동일 단계의 다음 작업은 SANJINWORKS Owner가 "
+        "별도 클릭할 때만 실행하며 실패 시 무조건 자동 재실행하지 않습니다."
+    )
     try:
         text = yaml.safe_dump(current, allow_unicode=True, sort_keys=False)
     except yaml.YAMLError as exc:
