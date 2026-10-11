@@ -1,0 +1,85 @@
+name: Common Control PR Merge
+run-name: "Common PR Merge ${{ inputs.repository }} #${{ inputs.pr_number }} ${{ inputs.head_sha }} ${{ inputs.base_sha }} ${{ inputs.ci_run_id }} ${{ inputs.paths_digest }}"
+
+on:
+  workflow_dispatch:
+    inputs:
+      repository:
+        description: Owner-approved one-repository target, must match protected activation
+        required: true
+        type: string
+      pr_number:
+        required: true
+        type: string
+      head_sha:
+        required: true
+        type: string
+      base_sha:
+        required: true
+        type: string
+      ci_run_id:
+        required: true
+        type: string
+      paths_digest:
+        required: true
+        type: string
+      expires_ms:
+        required: true
+        type: string
+      nonce:
+        required: true
+        type: string
+      approval_mac:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: common-control-pr-merge-${{ inputs.repository }}
+  cancel-in-progress: false
+
+jobs:
+  integrate:
+    # Not activated by this source PR. Missing Owner-approved activation
+    # variable, target and independently scoped credential fail closed.
+    if: ${{ github.event_name == 'workflow_dispatch' && github.actor == github.repository_owner && vars.COMMON_PR_MERGE_ACTIVATED == 'true' }}
+    runs-on: [self-hosted, Linux, X64, direct-worker]
+    timeout-minutes: 25
+    steps:
+      - name: Checkout trusted Runner default branch only
+        uses: actions/checkout@v6
+        with:
+          ref: main
+          persist-credentials: false
+
+      - name: Verify exact signed Owner approval and guarded common documentation PR
+        env:
+          GITHUB_REPOSITORY_OWNER: ${{ github.repository_owner }}
+          COMMON_PR_MERGE_ACTIVATED: ${{ vars.COMMON_PR_MERGE_ACTIVATED }}
+          COMMON_PR_MERGE_TARGET_REPOSITORY: ${{ vars.COMMON_PR_MERGE_TARGET_REPOSITORY }}
+          COMMON_PR_MERGE_APPROVAL_SECRET: ${{ secrets.COMMON_PR_MERGE_APPROVAL_SECRET }}
+          GH_TOKEN: ${{ secrets.COMMON_PR_MERGE_TOKEN }}
+          REVIEW_REPOSITORY: ${{ inputs.repository }}
+          REVIEW_PR: ${{ inputs.pr_number }}
+          REVIEW_HEAD: ${{ inputs.head_sha }}
+          REVIEW_BASE: ${{ inputs.base_sha }}
+          REVIEW_CI: ${{ inputs.ci_run_id }}
+          REVIEW_PATHS: ${{ inputs.paths_digest }}
+          REVIEW_EXPIRES: ${{ inputs.expires_ms }}
+          REVIEW_NONCE: ${{ inputs.nonce }}
+          REVIEW_SIGNATURE: ${{ inputs.approval_mac }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/common_control_pr_merge.py \
+            --repository "$REVIEW_REPOSITORY" \
+            --pr-number "$REVIEW_PR" \
+            --head "$REVIEW_HEAD" \
+            --base "$REVIEW_BASE" \
+            --ci-run-id "$REVIEW_CI" \
+            --paths-digest "$REVIEW_PATHS" \
+            --expires-ms "$REVIEW_EXPIRES" \
+            --nonce "$REVIEW_NONCE" \
+            --approval-mac "$REVIEW_SIGNATURE"
