@@ -175,7 +175,9 @@ def test_probe_rejects_nonempty_or_symlink_workspaces_without_sdk(tmp_path):
     workspace_link = tmp_path / "workspace-link"
     workspace_link.symlink_to(workspace, target_is_directory=True)
     with pytest.raises(ValueError, match="independent"):
-        probe_injected_sdk(sdk_factory=lambda: pytest.fail("no SDK"), empty_workspace=workspace_link)
+        probe_injected_sdk(
+            sdk_factory=lambda: pytest.fail("no SDK"), empty_workspace=workspace_link,
+        )
 
 
 def test_historic_3x480_seconds_does_not_infer_missing_model_first_response():
