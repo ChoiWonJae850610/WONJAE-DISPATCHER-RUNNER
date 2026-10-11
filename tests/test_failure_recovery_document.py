@@ -93,16 +93,19 @@ def test_exact_recovery_document_and_non_executable_state(tmp_path):
     assert doc_path == f"docs/operations/RECOVERY-WAFL-CLOUD-RUNTIME-001-{RUN}.md"
     assert state_path == ".wonjae/execution-state.yaml"
     new = yaml.safe_load(new_yaml)
-    assert new["next_action"]["type"] == "DECISION_REQUIRED"
-    assert new["next_action"]["source_task_id"] is None
-    assert new["after_source_success"] is None
-    assert new["source_success_queue"] == []
-    assert "개발" in new["next_action"]["owner_action"]
+    assert new["next_action"]["type"] == "SOURCE_READY"
+    assert new["next_action"]["source_task_id"] == "WAFL-CLOUD-RUNTIME-001"
+    assert new["next_action"]["source_scope"] == state["next_action"]["source_scope"]
+    assert new["after_source_success"] == state["after_source_success"]
+    assert new["source_success_queue"] == state["source_success_queue"]
+    assert f"Runner #{RUN}" in new["next_action"]["owner_action"]
+    assert "Codex" in new["next_action"]["owner_action"]
+    assert "Codex transport" in doc
     (tmp_path / ".wonjae").mkdir()
     (tmp_path / state_path).write_text(new_yaml, encoding="utf-8")
     restored = load_product_execution_state(tmp_path, state_path, identity.project)
-    assert restored.next_action.type == "DECISION_REQUIRED"
-    assert restored.after_source_success is None
+    assert restored.next_action.type == "SOURCE_READY"
+    assert restored.after_source_success is not None
 
 
 @pytest.mark.parametrize("change", [
@@ -132,3 +135,19 @@ def test_unapproved_or_unbounded_state_fails_closed(mutation):
     mutation(value)
     with pytest.raises(RecoveryPreparationError):
         render_recovery(evidence(), value)
+
+
+def test_long_github_job_prefix_and_ansi_accept_only_three_exact_timeout_markers():
+    long_prefix = "wafl / direct-worker\tRun isolated Codex Direct Worker\t" + (
+        "2026-10-10T14:11:14.1718709Z " + "step-label-" * 17
+    )
+    text = timeout_log().replace(
+        "2026-10-09T13:49:33Z ", long_prefix + "\x1b[32m"
+    ).replace(
+        "2026-10-09T13:58:33Z ", long_prefix + "\x1b[32m"
+    ).replace(
+        "2026-10-09T14:07:28Z ", long_prefix + "\x1b[32m"
+    )
+    assert parse_initial_turn_timeout(text, SHA)
+    assert not parse_initial_turn_timeout(text.replace("attempt=2", "attempt=1"), SHA)
+    assert not parse_initial_turn_timeout(text + "\n" + text, SHA)
