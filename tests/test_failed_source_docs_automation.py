@@ -470,7 +470,8 @@ def test_recovery_workflow_is_not_a_new_source_or_merge_executor():
     top = yaml.safe_load((ROOT / ".github/workflows/automatic-source-recovery-docs.yml")
                          .read_text(encoding="utf-8"))
     trigger = top.get("on", top.get(True))
-    assert set(trigger) == {"workflow_run"}
+    assert set(trigger) == {"workflow_run", "workflow_dispatch"}
+    assert trigger["workflow_dispatch"]["inputs"]["failed_run_id"]["required"]
     assert trigger["workflow_run"]["workflows"] == ["Direct Worker"]
     assert trigger["workflow_run"]["types"] == ["completed"]
     assert top["permissions"] == {"contents": "read", "actions": "read"}
@@ -478,6 +479,9 @@ def test_recovery_workflow_is_not_a_new_source_or_merge_executor():
     for project in ("WAFL", "CLASSMO", "ESC", "MUVEL"):
         job = top["jobs"][project.lower()]
         assert job["with"]["project"] == project
+        assert job["with"]["failed_run_id"] == "${{ inputs.failed_run_id || '' }}"
+        assert "github.actor == github.repository_owner" in job["if"]
+        assert "inputs.project == '" + project + "'" in job["if"]
         assert "workflow_run.conclusion == 'failure'" in job["if"]
         assert "workflow_run.event == 'workflow_dispatch'" in job["if"]
         assert job["secrets"]["product_write_token"] == (
@@ -494,7 +498,69 @@ def test_recovery_workflow_is_not_a_new_source_or_merge_executor():
     ]
     scripts = str(core)
     assert "prepare_failed_source_recovery.py" in scripts
+    assert "--failed-run-id" in scripts
     assert "dispatches" not in scripts and "eas build" not in scripts
     assert "pull_request_target" not in scripts
     assert "on:" in (ROOT / ".github/workflows/automatic-source-recovery-docs.yml"
                      ).read_text(encoding="utf-8")
+
+
+def test_exact_owner_selected_failed_run_can_reuse_docs_only_publisher(monkeypatch, tmp_path):
+    run_id = failed_run()["id"]
+    event = {
+        "inputs": {"project": "WAFL", "failed_run_id": str(run_id)},
+        "repository": {"full_name": prep.RUNNER},
+        "sender": {"login": "ChoiWonJae850610"},
+    }
+    observed = []
+
+    def fake_get(endpoint, token, **kwargs):
+        observed.append(endpoint)
+        if endpoint == f"repos/{prep.RUNNER}/branches/main":
+            return {"commit": {"sha": "b" * 40}}
+        if endpoint == f"repos/{prep.RUNNER}/actions/runs/{run_id}":
+            return failed_run()
+        raise AssertionError("No unreviewed GitHub read permitted")
+
+    def end_after_original_run_identity(actual, project, recorded_sha):
+        assert project == "WAFL"
+        assert actual["id"] == run_id
+        assert recorded_sha == actual["head_sha"]
+        raise RecoveryPreparationError("verified selected failed run")
+
+    monkeypatch.setattr(prep, "github_api", fake_get)
+    monkeypatch.setattr(prep, "checked_run", end_after_original_run_identity)
+    with pytest.raises(RecoveryPreparationError, match="verified selected failed run"):
+        prep.plan(event, "WAFL", "read", "product", "control", tmp_path / "work",
+                  tmp_path / "registry.yaml", run_id)
+    assert observed == [
+        f"repos/{prep.RUNNER}/branches/main",
+        f"repos/{prep.RUNNER}/actions/runs/{run_id}",
+    ]
+
+
+@pytest.mark.parametrize("tamper", [
+    lambda v: v["inputs"].update({"project": "CLASSMO"}),
+    lambda v: v["inputs"].update({"failed_run_id": "1"}),
+    lambda v: v["repository"].update({"full_name": "attacker/repo"}),
+    lambda v: v["sender"].update({"login": "not-owner"}),
+    lambda v: v.pop("inputs"),
+])
+def test_owner_recovery_dispatch_identity_fails_before_github_read(
+    monkeypatch, tmp_path, tamper,
+):
+    run_id = failed_run()["id"]
+    event = {
+        "inputs": {"project": "WAFL", "failed_run_id": str(run_id)},
+        "repository": {"full_name": prep.RUNNER},
+        "sender": {"login": "ChoiWonJae850610"},
+    }
+    tamper(event)
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("Should fail before GitHub reads")
+
+    monkeypatch.setattr(prep, "github_api", forbidden)
+    with pytest.raises(RecoveryPreparationError, match="Owner recovery dispatch identity"):
+        prep.plan(event, "WAFL", "read", "product", "control", tmp_path / "work",
+                  tmp_path / "registry.yaml", run_id)
