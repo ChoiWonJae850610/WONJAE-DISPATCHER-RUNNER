@@ -9,10 +9,10 @@ from __future__ import annotations
 
 import re
 import time
-from collections.abc import Callable, ContextManager
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, ContextManager
 
 from openai_codex import ApprovalMode, Sandbox
 
