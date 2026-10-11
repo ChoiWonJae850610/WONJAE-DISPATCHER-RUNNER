@@ -72,7 +72,9 @@ def test_docs_only_inventory_and_exact_paths_checksum():
         with pytest.raises(guard.AdmissionError):
             guard.check_file_inventory([{"filename": path, "status": "modified"}], 1, DIGEST)
     with pytest.raises(guard.AdmissionError):
-        guard.check_file_inventory([{"filename": "docs/example.md", "status": "removed"}], 1, DIGEST)
+        guard.check_file_inventory(
+            [{"filename": "docs/example.md", "status": "removed"}], 1, DIGEST
+        )
 
 
 def test_canonical_pr_head_run_must_be_latest_and_exact():
