@@ -249,10 +249,10 @@ def test_cli_reads_only_bounded_evidence_and_never_echoes_private_marker(tmp_pat
     log = tmp_path / "synthetic.log"
     sha = "f" * 40
     log.write_text(
-        "\\n".join(
+        "\n".join(
             f"INITIAL_TURN attempt={i} outcome=INITIAL_CODEX_TIMEOUT_480_SECONDS source={sha}"
             for i in (1, 2, 3)
-        ) + "\\nINITIAL_CODEX_TIMEOUT_EXHAUSTED attempts=3 commits=0",
+        ) + "\nINITIAL_CODEX_TIMEOUT_EXHAUSTED attempts=3 commits=0",
         encoding="utf-8",
     )
     result = subprocess.run(
