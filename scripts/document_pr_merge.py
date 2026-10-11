@@ -23,6 +23,10 @@ PROJECT = re.compile(r"^[A-Z][A-Z0-9_-]*$")
 REPO = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 BRANCH = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_./-]*$")
 ALLOWED_STATUSES = frozenset(("added", "modified"))
+ROOT_POLICY_PATHS = frozenset(("AGENTS.md", "PROJECT_RULES.md"))
+EXCEPTION_KEYS = frozenset((
+    "kind", "pr_number", "head_ref", "head_sha", "base_sha", "changed_files",
+))
 
 
 class DocumentMergeError(RuntimeError):
@@ -44,7 +48,65 @@ def allowed_document_path(path: object, state_path: str) -> bool:
     return path == state_path or (path.startswith("docs/") and len(parts) >= 2)
 
 
-def route_from_registry(registry: object, project: str) -> dict[str, str]:
+def private_document_exception(raw: object) -> dict[str, object] | None:
+    """Validate only the generic schema; private PR identity stays in DEV-CONTROL."""
+    if raw is None:
+        return None
+    if not isinstance(raw, dict) or set(raw) != EXCEPTION_KEYS:
+        raise DocumentMergeError("invalid exact document-policy exception keys")
+    paths = raw.get("changed_files")
+    if not isinstance(paths, list) or len(paths) != 3 or any(
+        not isinstance(path, str)
+        or len(path) > 512
+        or any(part in ("", ".", "..") for part in path.split("/"))
+        for path in paths
+    ):
+        raise DocumentMergeError("invalid exception file inventory")
+    docs = [path for path in paths if path.startswith("docs/")]
+    if len(set(paths)) != 3 or len(docs) != 1 or set(paths) != ROOT_POLICY_PATHS | set(docs):
+        raise DocumentMergeError("exception must contain two exact root policies and one doc")
+    ref = raw.get("head_ref")
+    if (
+        raw.get("kind") != "exact_root_policy_docs_v1"
+        or type(raw.get("pr_number")) is not int
+        or not 1 <= raw["pr_number"] <= 100000
+        or not isinstance(ref, str)
+        or not re.fullmatch(r"docs/[A-Za-z0-9._/-]+", ref)
+        or any(part in ("", ".", "..") for part in ref.split("/"))
+        or not isinstance(raw.get("head_sha"), str)
+        or not SHA.fullmatch(raw["head_sha"])
+        or not isinstance(raw.get("base_sha"), str)
+        or not SHA.fullmatch(raw["base_sha"])
+    ):
+        raise DocumentMergeError("invalid exact document-policy PR identity")
+    return dict(raw)
+
+
+def exact_private_policy_exception(
+    pr: dict, route: dict, pr_number: int, head: str, base: str, files: object,
+) -> dict[str, object] | None:
+    """Admission still requires separate PR, files, CI and merge checks."""
+    config = route.get("document_merge_exception")
+    if not isinstance(config, dict) or not isinstance(files, list):
+        return None
+    if (
+        config["pr_number"] != pr_number
+        or pr.get("number") != pr_number
+        or config["head_sha"] != head
+        or pr.get("head", {}).get("sha") != head
+        or config["base_sha"] != base
+        or pr.get("base", {}).get("sha") != base
+        or config["head_ref"] != pr.get("head", {}).get("ref")
+        or pr.get("changed_files") != 3
+        or len(files) != 3
+        or {file.get("filename") for file in files if isinstance(file, dict)}
+        != set(config["changed_files"])
+    ):
+        return None
+    return config
+
+
+def route_from_registry(registry: object, project: str) -> dict[str, object]:
     if not PROJECT.fullmatch(project) or project == "KDN":
         raise DocumentMergeError("project is outside the registered product scope")
     if not isinstance(registry, dict):
@@ -79,6 +141,9 @@ def route_from_registry(registry: object, project: str) -> dict[str, str]:
         raise DocumentMergeError("canonical workflow name is missing")
     if values["state_path"] != ".wonjae/execution-state.yaml":
         raise DocumentMergeError("unrecognized product-owned execution state path")
+    exception = private_document_exception(execution.get("document_merge_exception"))
+    if exception is not None:
+        values["document_merge_exception"] = exception
     return values
 
 
@@ -110,18 +175,30 @@ def check_pr(pr: object, route: dict[str, str], pr_number: int,
         raise DocumentMergeError("document PR file inventory exceeds trusted bounds")
 
 
-def check_files(files: object, count: int, state_path: str) -> None:
+def check_files(
+    files: object, count: int, state_path: str, exception: dict | None = None,
+) -> None:
     if not isinstance(files, list) or len(files) != count:
         raise DocumentMergeError("incomplete PR changed-file inventory")
+    if exception is not None:
+        expected = exception["changed_files"]
+        names = [file.get("filename") for file in files if isinstance(file, dict)]
+        if count != 3 or len(set(names)) != 3 or set(names) != set(expected):
+            raise DocumentMergeError("protected policy exception file inventory mismatch")
     for file in files:
         if not isinstance(file, dict):
             raise DocumentMergeError("malformed PR file")
         path = file.get("filename")
-        if file.get("status") not in ALLOWED_STATUSES or file.get("previous_filename"):
+        status = file.get("status")
+        if status not in ALLOWED_STATUSES or file.get("previous_filename"):
             raise DocumentMergeError("deleted, renamed or unknown PR file mutation")
-        if not allowed_document_path(path, state_path):
+        if exception is not None and status != "modified":
+            raise DocumentMergeError("protected policy exception requires modified-only files")
+        if not allowed_document_path(path, state_path) and not (
+            exception is not None and path in ROOT_POLICY_PATHS
+        ):
             raise DocumentMergeError("non-document source or protected path in PR")
-        if file.get("changes", 0) > 40000:
+        if not isinstance(file.get("changes", 0), int) or not 0 <= file.get("changes", 0) <= 40000:
             raise DocumentMergeError("document file change exceeds bounded review scope")
 
 
@@ -197,7 +274,10 @@ def integrate(args: argparse.Namespace) -> int:
     pr = request_json([f"repos/{repo}/pulls/{args.pr_number}"])
     check_pr(pr, route, args.pr_number, args.head, args.base)
     files = request_json([f"repos/{repo}/pulls/{args.pr_number}/files?per_page=100"])
-    check_files(files, pr["changed_files"], route["state_path"])
+    exception = exact_private_policy_exception(
+        pr, route, args.pr_number, args.head, args.base, files,
+    )
+    check_files(files, pr["changed_files"], route["state_path"], exception)
     open_prs = request_json([
         f"repos/{repo}/pulls?state=open&base={route['branch']}&per_page=100"
     ])
