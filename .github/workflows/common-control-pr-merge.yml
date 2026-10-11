@@ -1,5 +1,5 @@
 name: Common Control PR Merge
-run-name: "Common PR Merge ${{ inputs.repository }} #${{ inputs.pr_number }} ${{ inputs.head_sha }} ${{ inputs.base_sha }} ${{ inputs.ci_run_id }} ${{ inputs.paths_digest }}"
+run-name: "Common PR Merge ${{ inputs.repository }} #${{ inputs.pr_number }} ${{ inputs.head_sha }} ${{ inputs.base_sha }} ${{ inputs.ci_run_id }} ${{ inputs.paths_digest }} ${{ inputs.diff_digest }}"
 
 on:
   workflow_dispatch:
@@ -21,6 +21,9 @@ on:
         required: true
         type: string
       paths_digest:
+        required: true
+        type: string
+      diff_digest:
         required: true
         type: string
       expires_ms:
@@ -67,6 +70,7 @@ jobs:
           REVIEW_BASE: ${{ inputs.base_sha }}
           REVIEW_CI: ${{ inputs.ci_run_id }}
           REVIEW_PATHS: ${{ inputs.paths_digest }}
+          REVIEW_DIFF: ${{ inputs.diff_digest }}
           REVIEW_EXPIRES: ${{ inputs.expires_ms }}
           REVIEW_NONCE: ${{ inputs.nonce }}
           REVIEW_SIGNATURE: ${{ inputs.approval_mac }}
@@ -80,6 +84,7 @@ jobs:
             --base "$REVIEW_BASE" \
             --ci-run-id "$REVIEW_CI" \
             --paths-digest "$REVIEW_PATHS" \
+            --diff-digest "$REVIEW_DIFF" \
             --expires-ms "$REVIEW_EXPIRES" \
             --nonce "$REVIEW_NONCE" \
             --approval-mac "$REVIEW_SIGNATURE"
