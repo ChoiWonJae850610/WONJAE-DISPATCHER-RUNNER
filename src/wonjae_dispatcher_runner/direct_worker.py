@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 import subprocess
+import time
 from contextlib import nullcontext
 from dataclasses import dataclass
 from pathlib import Path
@@ -701,33 +702,56 @@ def run_direct_worker(
         thread_config["shell_environment_policy"]["set"].update(npm_environment)
         sandbox = None
 
+    # A 480-second deadline bounds the WHOLE SDK interaction, not just the first
+    # model response. Only coarse, static phase labels and elapsed seconds are logged:
+    # never prompts, model text, account objects, auth, paths or environment values.
+    codex_started = time.monotonic()
+    codex_phase = "sandbox_setup"
+
+    def report_codex_phase(phase: str) -> None:
+        nonlocal codex_phase
+        codex_phase = phase
+        elapsed_s = int(time.monotonic() - codex_started)
+        print(f"DIRECT_CODEX_PHASE phase={phase} elapsed_s={elapsed_s}", flush=True)
+
     try:
+        report_codex_phase("sandbox_setup")
         mounts = protected_mount_placeholders(repo_path) if home_isolation else nullcontext()
-        with mounts, repair_plan_deadline(), Codex(config=config) as codex:
-            account = codex.account(refresh_token=False)
-            if account.account is None:
-                raise DirectWorkerError("Codex account session is missing")
-            thread = codex.thread_start(
-                approval_mode=ApprovalMode.deny_all,
-                cwd=str(repo_path),
-                ephemeral=True,
-                sandbox=sandbox,
-                config=thread_config,
-            )
-            result = thread.run(
-                _prompt(
-                    route,
-                    command,
-                    starting_sha,
-                    checkout_branch,
-                    validation_failure,
-                    execution_state,
-                ),
-                approval_mode=ApprovalMode.deny_all,
-                output_schema=output_schema,
-                sandbox=sandbox,
-            )
+        with mounts, repair_plan_deadline():
+            report_codex_phase("sdk_start")
+            with Codex(config=config) as codex:
+                report_codex_phase("account_lookup")
+                account = codex.account(refresh_token=False)
+                if account.account is None:
+                    raise DirectWorkerError("Codex account session is missing")
+                report_codex_phase("thread_start")
+                thread = codex.thread_start(
+                    approval_mode=ApprovalMode.deny_all,
+                    cwd=str(repo_path),
+                    ephemeral=True,
+                    sandbox=sandbox,
+                    config=thread_config,
+                )
+                report_codex_phase("turn_run")
+                result = thread.run(
+                    _prompt(
+                        route,
+                        command,
+                        starting_sha,
+                        checkout_branch,
+                        validation_failure,
+                        execution_state,
+                    ),
+                    approval_mode=ApprovalMode.deny_all,
+                    output_schema=output_schema,
+                    sandbox=sandbox,
+                )
+                report_codex_phase("turn_result")
+            report_codex_phase("sdk_closed")
     except RepairPlanTimeout as exc:
+        elapsed_s = int(time.monotonic() - codex_started)
+        print(f"DIRECT_CODEX_TIMEOUT_PHASE phase={codex_phase} elapsed_s={elapsed_s}",
+              flush=True)
         raise DirectWorkerTurnTimeout("Direct Worker Codex turn timed out") from exc
 
     status_value = str(getattr(result.status, "value", result.status)).lower()
