@@ -91,8 +91,11 @@ def exact_private_policy_exception(
         return None
     if (
         config["pr_number"] != pr_number
+        or pr.get("number") != pr_number
         or config["head_sha"] != head
+        or pr.get("head", {}).get("sha") != head
         or config["base_sha"] != base
+        or pr.get("base", {}).get("sha") != base
         or config["head_ref"] != pr.get("head", {}).get("ref")
         or pr.get("changed_files") != 3
         or len(files) != 3
