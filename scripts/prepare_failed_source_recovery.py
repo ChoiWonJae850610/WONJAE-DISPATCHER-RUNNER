@@ -280,21 +280,38 @@ def timestamp(value: str) -> float:
 
 
 def plan(event: dict, project: str, runner_token: str, product_token: str,
-         control_token: str, workdir: Path, registry_path: Path) -> None:
-    if event.get("action") != "completed":
-        raise RecoveryPreparationError("not a terminal workflow_run event")
-    candidate = event.get("workflow_run")
-    if not isinstance(candidate, dict):
-        raise RecoveryPreparationError("missing failed run")
-    run_id = candidate.get("id")
-    if not isinstance(run_id, int) or run_id < 1:
-        raise RecoveryPreparationError("invalid original run ID")
+         control_token: str, workdir: Path, registry_path: Path,
+         selected_failed_run_id: int | None = None) -> None:
+    if selected_failed_run_id is None:
+        if event.get("action") != "completed":
+            raise RecoveryPreparationError("not a terminal workflow_run event")
+        candidate = event.get("workflow_run")
+        if not isinstance(candidate, dict):
+            raise RecoveryPreparationError("missing failed run")
+        run_id = candidate.get("id")
+        if type(run_id) is not int or run_id < 1:
+            raise RecoveryPreparationError("invalid original run ID")
+    else:
+        # Owner-initiated recovery is the SAME docs-only path, not source retry.
+        # Verify the event's exact typed inputs; the workflow separately verifies
+        # github.actor == repository_owner before exposing a write credential.
+        event_inputs = event.get("inputs")
+        if (type(selected_failed_run_id) is not int or selected_failed_run_id < 1
+                or not isinstance(event_inputs, dict)
+                or event_inputs.get("project") != project
+                or event_inputs.get("failed_run_id") != str(selected_failed_run_id)
+                or event.get("repository", {}).get("full_name") != RUNNER
+                or event.get("sender", {}).get("login") != RUNNER.split("/", 1)[0]):
+            raise RecoveryPreparationError("invalid Owner recovery dispatch identity")
+        run_id = selected_failed_run_id
+        candidate = None
     runner_sha = github_api(f"repos/{RUNNER}/branches/main", runner_token)["commit"]["sha"]
     if not SHA.fullmatch(runner_sha):
         raise RecoveryPreparationError("invalid trusted Runner SHA")
     actual = github_api(f"repos/{RUNNER}/actions/runs/{run_id}", runner_token)
-    if (candidate.get("id") != actual.get("id")
-            or candidate.get("head_sha") != actual.get("head_sha")):
+    if actual.get("id") != run_id or (candidate is not None
+            and (candidate.get("id") != actual.get("id")
+                 or candidate.get("head_sha") != actual.get("head_sha"))):
         raise RecoveryPreparationError("event and exact run disagree")
     recorded_sha = actual.get("head_sha")
     if not isinstance(recorded_sha, str) or not SHA.fullmatch(recorded_sha):
@@ -419,15 +436,19 @@ def plan(event: dict, project: str, runner_token: str, product_token: str,
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--project", required=True)
+    parser.add_argument("--failed-run-id", default="")
     parser.add_argument("--event", type=Path, required=True)
     parser.add_argument("--registry", type=Path, required=True)
     parser.add_argument("--workdir", type=Path, required=True)
     a = parser.parse_args()
     try:
         event = json.loads(a.event.read_text(encoding="utf-8"))
+        if a.failed_run_id and not re.fullmatch(r"[1-9][0-9]{0,17}", a.failed_run_id):
+            raise RecoveryPreparationError("invalid Owner recovery dispatch identity")
+        selected_id = int(a.failed_run_id) if a.failed_run_id else None
         plan(event, a.project, os.environ["RUNNER_READ_TOKEN"],
              os.environ["PRODUCT_WRITE_TOKEN"], os.environ["CONTROL_READ_TOKEN"],
-             a.workdir, a.registry)
+             a.workdir, a.registry, selected_id)
     except (RecoveryPreparationError, ValueError, KeyError, TypeError,
             subprocess.SubprocessError, OSError, yaml.YAMLError) as exc:
         # Do not stringify arbitrary subprocess/JSON exception bodies into
