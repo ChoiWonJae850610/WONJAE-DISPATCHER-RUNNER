@@ -90,6 +90,126 @@ def test_exact_prepared_document_pr_passes_guards():
     )
 
 
+def private_policy():
+    return {
+        "kind": "exact_root_policy_docs_v1",
+        "pr_number": 110,
+        "head_ref": "docs/classmo-recovery",
+        "head_sha": HEAD,
+        "base_sha": BASE,
+        "changed_files": [
+            "AGENTS.md", "PROJECT_RULES.md", "docs/NEXT_WORK.md",
+        ],
+    }
+
+
+def private_policy_files():
+    return [
+        {"filename": name, "status": "modified", "changes": 12}
+        for name in private_policy()["changed_files"]
+    ]
+
+
+def test_private_exact_policy_exception_does_not_grant_general_root_access():
+    policy = private_policy()
+    fake = registry()
+    fake["projects"]["CLASSMO"]["execution"]["document_merge_exception"] = policy
+    protected_route = guard.route_from_registry(fake, "CLASSMO")
+    assert protected_route["document_merge_exception"] == policy
+    guard.check_pr(pr(), protected_route, 110, HEAD, BASE)
+    actual = private_policy_files()
+    with pytest.raises(guard.DocumentMergeError):
+        guard.check_files(actual, 3, protected_route["state_path"])
+    exception = guard.exact_private_policy_exception(
+        pr(), protected_route, 110, HEAD, BASE, actual,
+    )
+    assert exception == policy
+    guard.check_files(actual, 3, protected_route["state_path"], exception)
+    assert guard.check_pr_head_validation(runs(), protected_route, HEAD) == 123
+    assert guard.exact_private_policy_exception(
+        pr(), route(), 110, HEAD, BASE, actual,
+    ) is None
+
+
+@pytest.mark.parametrize("change", [
+    {"number": 111},
+    {"head": {"ref": "docs/different", "sha": HEAD}},
+])
+def test_private_exception_identity_changes_do_not_admit_root_files(change):
+    fake = registry()
+    fake["projects"]["CLASSMO"]["execution"]["document_merge_exception"] = private_policy()
+    protected_route = guard.route_from_registry(fake, "CLASSMO")
+    altered = pr()
+    altered.update(change)
+    assert guard.exact_private_policy_exception(
+        altered, protected_route, 110, HEAD, BASE, private_policy_files(),
+    ) is None
+
+
+@pytest.mark.parametrize("key,new", [
+    ("pr_number", 111),
+    ("head_ref", "docs/different"),
+    ("head_sha", "c" * 40),
+    ("base_sha", "d" * 40),
+])
+def test_private_exception_wrong_registration_fails_to_admit(key, new):
+    fake = registry()
+    policy = private_policy()
+    policy[key] = new
+    fake["projects"]["CLASSMO"]["execution"]["document_merge_exception"] = policy
+    protected_route = guard.route_from_registry(fake, "CLASSMO")
+    assert guard.exact_private_policy_exception(
+        pr(), protected_route, 110, HEAD, BASE, private_policy_files(),
+    ) is None
+
+
+@pytest.mark.parametrize("fileset", [
+    ["AGENTS.md", "AGENTS.md", "docs/NEXT_WORK.md"],
+    ["AGENTS.md", "PROJECT_RULES.md", "src/unsafe.py"],
+    ["AGENTS.md", "PROJECT_RULES.md", "docs/../other.md"],
+])
+def test_private_exception_does_not_admit_duplicate_or_source_files(fileset):
+    fake = registry()
+    fake["projects"]["CLASSMO"]["execution"]["document_merge_exception"] = private_policy()
+    protected_route = guard.route_from_registry(fake, "CLASSMO")
+    altered = [
+        {"filename": name, "status": "modified", "changes": 1}
+        for name in fileset
+    ]
+    exception = guard.exact_private_policy_exception(
+        pr(), protected_route, 110, HEAD, BASE, altered,
+    )
+    assert exception is None
+
+
+@pytest.mark.parametrize("mutation", [
+    {"status": "added"}, {"status": "removed"}, {"status": "renamed"},
+    {"changes": 40001}, {"previous_filename": "docs/old.md"},
+])
+def test_private_exception_rejects_non_modified_or_broad_mutation(mutation):
+    altered = private_policy_files()
+    altered[0] = {**altered[0], **mutation}
+    with pytest.raises(guard.DocumentMergeError):
+        guard.check_files(
+            altered, 3, route()["state_path"], private_policy(),
+        )
+
+
+@pytest.mark.parametrize("mutation", [
+    {"kind": "arbitrary_paths"},
+    {"changed_files": ["AGENTS.md", "PROJECT_RULES.md", "src/foo.py"]},
+    {"changed_files": ["AGENTS.md", "PROJECT_RULES.md", "docs/../x.md"]},
+    {"head_sha": "invalid"},
+    {"extra_scope": True},
+])
+def test_invalid_private_document_exception_registration_fails_closed(mutation):
+    fake = registry()
+    policy = {**private_policy(), **mutation}
+    fake["projects"]["CLASSMO"]["execution"]["document_merge_exception"] = policy
+    with pytest.raises(guard.DocumentMergeError):
+        guard.route_from_registry(fake, "CLASSMO")
+
+
 @pytest.mark.parametrize("path", [
     "src/App.tsx", "apps/mobile/app.json", ".github/workflows/validate.yml",
     ".wonja/execution-state.yaml", ".wonjae/other.yaml", "../docs/pwn.md",
