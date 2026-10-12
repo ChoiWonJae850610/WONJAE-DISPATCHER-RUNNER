@@ -434,6 +434,22 @@ def plan(event: dict, project: str, runner_token: str, product_token: str,
     print(f"RECOVERY_DOCS_PR_PREPARED project={project} run_id={run_id} pr={number}")
 
 
+def safe_skip_noninitial_source_failure(
+    event: object, selected_id: int | None, error: BaseException,
+) -> bool:
+    """Skip only unrequested auto-recovery for a non-initial failed source step.
+
+    An explicit Owner recovery dispatch never inherits a success/skip result.
+    """
+    return (
+        selected_id is None
+        and isinstance(event, dict)
+        and event.get("action") == "completed"
+        and isinstance(error, RecoveryPreparationError)
+        and str(error) == "not an exact isolated source turn failure"
+    )
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--project", required=True)
@@ -442,6 +458,8 @@ def main() -> int:
     parser.add_argument("--registry", type=Path, required=True)
     parser.add_argument("--workdir", type=Path, required=True)
     a = parser.parse_args()
+    event: object = {}
+    selected_id: int | None = None
     try:
         event = json.loads(a.event.read_text(encoding="utf-8"))
         if a.failed_run_id and not re.fullmatch(r"[1-9][0-9]{0,17}", a.failed_run_id):
@@ -452,6 +470,10 @@ def main() -> int:
              a.workdir, a.registry, selected_id)
     except (RecoveryPreparationError, ValueError, KeyError, TypeError,
             subprocess.SubprocessError, OSError, yaml.YAMLError) as exc:
+        if safe_skip_noninitial_source_failure(event, selected_id, exc):
+            print("RECOVERY_PREP_SKIPPED code=NON_INITIAL_SOURCE_MANUAL_GATE; "
+                  "original source/run remain unchanged")
+            return 0
         # Do not stringify arbitrary subprocess/JSON exception bodies into
         # a public GitHub log. Diagnosis remains the separate FAILED state.
         code = SAFE_RECOVERY_CODES.get(
