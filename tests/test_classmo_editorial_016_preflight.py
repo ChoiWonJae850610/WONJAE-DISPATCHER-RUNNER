@@ -96,3 +96,62 @@ def test_transport_failure_keeps_safe_stage_and_no_response_detail(monkeypatch, 
     assert str(caught.value) == "C016_PROVIDER_UNVERIFIED stage=" + stage
     assert "private proxy" not in str(caught.value)
 
+
+def historical_ledger_fixture():
+    # Source filename names are intentionally different from the old deployed
+    # 012 migration ledger name, but all other names must match exactly.
+    source_names = [
+        "001_extensions_types",
+        "002_identity_tenancy",
+        "003_members_catalog",
+        "004_scheduling",
+        "005_booking",
+        "006_entitlement",
+        "007_delivery_events",
+        "008_communication",
+        "009_rls_grants",
+        "010_transaction_rpcs",
+        "011_tenant_catalog_scheduling_rpcs",
+        "012_membership_classification_mutations",
+        "013_enrollment_requests",
+        "014_course_operations_persistence",
+        "015_course_configuration_ambiguity",
+    ]
+    rows = [{"name": name, "version": "synthetic"} for name in source_names]
+    rows[11] = {"name": "membership_classification_mutations",
+                "version": "20260930001200"}
+    return rows, source_names
+
+
+def test_existing_012_ledger_alias_requires_exact_historical_version():
+    rows, expected = historical_ledger_fixture()
+    g.verify_prior_ledger(rows, expected)
+
+
+@pytest.mark.parametrize(
+    ("index", "field", "new_value"),
+    [
+        (11, "name", "012_membership_classification_mutations"),
+        (11, "name", "unreviewed_012_alias"),
+        (11, "version", "20260930001201"),
+        (10, "name", "another_migration"),
+        (14, "name", "016_editorial_drafts"),
+    ],
+)
+def test_012_alias_never_admits_drift_or_premature_016(index, field, new_value):
+    rows, expected = historical_ledger_fixture()
+    rows[index][field] = new_value
+    with pytest.raises(g.Blocked, match="C016_LEDGER_NOT_READY"):
+        g.verify_prior_ledger(rows, expected)
+
+
+def test_012_alias_not_accepted_with_modified_source_name_or_duplicate():
+    rows, expected = historical_ledger_fixture()
+    expected[11] = "changed_source_012"
+    with pytest.raises(g.Blocked, match="C016_LEDGER_NOT_READY"):
+        g.verify_prior_ledger(rows, expected)
+    rows, expected = historical_ledger_fixture()
+    rows[12]["name"] = rows[11]["name"]
+    with pytest.raises(g.Blocked, match="C016_LEDGER_NOT_READY"):
+        g.verify_prior_ledger(rows, expected)
+
