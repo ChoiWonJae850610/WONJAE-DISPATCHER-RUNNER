@@ -152,6 +152,17 @@ class Client:
                 data = response.read()
                 return json.loads(data) if data else None
         except HTTPError as exc:
+            # Report only the fixed endpoint class, never a provider response,
+            # Authorization header, project URL or secret. A 403 identifies the
+            # denied operation; it does not by itself prove the token's root cause.
+            access = {
+                "": "PROJECT_SETTINGS_READ",
+                "/database/query/read-only": "DATABASE_READ",
+                "/postgrest": "DATA_API_CONFIG_READ",
+                "/database/migrations": "DATABASE_WRITE",
+            }.get(path, "UNKNOWN")
+            if exc.code in (401, 403):
+                raise GateBlocked(f"G1_PROVIDER_HTTP_{exc.code}_{access}") from None
             raise GateBlocked(f"G1_PROVIDER_HTTP_{exc.code}") from None
         except (URLError, OSError, ValueError):
             raise GateBlocked("G1_PROVIDER_TRANSPORT_UNVERIFIED") from None
@@ -295,7 +306,17 @@ def main() -> None:
             stream.write("Result: " + info["result"] + "\n")
             stream.write("Runtime/data/Apple acceptance, R2/PDF, EAS/Production/device: NOT_RUN\n")
     except GateBlocked as exc:
-        print("::error::WAFL G1 blocked: " + str(exc))
+        reason = str(exc)
+        print("::error::WAFL G1 blocked: " + reason)
+        if reason.startswith("G1_PROVIDER_HTTP_403_"):
+            print(
+                "::notice::One-time WAFL Development Management API token check: "
+                "Project Settings Read, Database Read, and Data API Config Read "
+                "are required for the read-only G1-R endpoints. The account role "
+                "and target project scope must also allow access. Do not paste "
+                "or print the token, retry blindly, use a writable SQL fallback, "
+                "or change credential permissions automatically."
+            )
         raise SystemExit(1) from None
 
 
