@@ -35,6 +35,26 @@ BASE_FILES = (
 HEX = re.compile(r"^[a-f0-9]{40}$")
 TABLE = re.compile(r"CREATE TABLE (?:IF NOT EXISTS )?public\.([a-z][a-z0-9_]*)", re.I)
 
+# Exact, reviewed metadata reads only. SQL functions or arbitrary SELECT text
+# are not allowed merely because the query begins with "select".
+LEDGER_SQL = (
+    "select version::text as version, name::text as name "
+    "from supabase_migrations.schema_migrations order by version;"
+)
+TABLES_SQL = (
+    "select c.relname::text as name, c.relrowsecurity as rls, "
+    "c.relforcerowsecurity as forced, pg_catalog.pg_get_userbyid(c.relowner) as owner "
+    "from pg_catalog.pg_class c join pg_catalog.pg_namespace n "
+    "on n.oid=c.relnamespace where n.nspname='public' and c.relkind='r' "
+    "order by c.relname;"
+)
+COUNTS_SQL = (
+    "select (select count(*) from auth.users)::int as users, "
+    "(select count(*) from auth.identities where provider='apple')::int as apple, "
+    "(select count(*) from public.wafl_auth_identity_map)::int as bridge;"
+)
+READ_QUERIES = frozenset((LEDGER_SQL, TABLES_SQL, COUNTS_SQL))
+
 
 class GateBlocked(Exception):
     """Never expose raw external response bodies."""
@@ -94,15 +114,30 @@ def verify_source(
 
 
 class Client:
-    def __init__(self, project: str, token: str):
+    def __init__(self, project: str, token: str, mode: str = "read_only",
+                 preflight_accepted: bool = False):
         ensure(re.fullmatch(r"[a-z]{20}", project) is not None, "G1_PROJECT_REF_INVALID")
         ensure(bool(token), "G1_CREDENTIAL_MISSING")
+        ensure(mode in ("read_only", "schema_apply"), "G1_MODE_INVALID")
+        ensure(mode != "read_only" or not preflight_accepted,
+               "G1_R_SCHEMA_AUTHORITY_PRESENT")
         self.project = project
         self.token = token
+        self.mode = mode
+        self.preflight_accepted = preflight_accepted
+        self.schema_apply_ready = False
 
     def api(self, path: str, payload: dict[str, str] | None = None) -> Any:
-        ensure(path in ("", "/postgrest", "/database/query", "/database/migrations"),
-               "G1_ENDPOINT_NOT_ALLOWED")
+        if payload is None:
+            ensure(path in ("", "/postgrest"), "G1_ENDPOINT_NOT_ALLOWED")
+        else:
+            ensure(
+                path == "/database/query/read-only"
+                or (path == "/database/migrations"
+                    and self.mode == "schema_apply" and self.preflight_accepted
+                    and self.schema_apply_ready),
+                "G1_ENDPOINT_NOT_ALLOWED",
+            )
         body = json.dumps(payload).encode() if payload is not None else None
         headers = {"Authorization": "Bearer " + self.token,
                    "Accept": "application/json", "User-Agent": "WAFL-G1-Owner"}
@@ -122,9 +157,11 @@ class Client:
             raise GateBlocked("G1_PROVIDER_TRANSPORT_UNVERIFIED") from None
 
     def query(self, sql: str) -> list[dict[str, Any]]:
-        ensure(sql.lower().startswith("select ") and sql.count(";") <= 1,
-               "G1_READONLY_SQL_REQUIRED")
-        result = self.api("/database/query", {"query": sql})
+        ensure(sql in READ_QUERIES, "G1_READONLY_SQL_REQUIRED")
+        # A SQL query routed through the ordinary Management API can mutate the
+        # database, even when a string starts with SELECT (volatile functions).
+        # Use the dedicated supabase_read_only_user endpoint, with no fallback.
+        result = self.api("/database/query/read-only", {"query": sql})
         if isinstance(result, dict):
             result = result.get("result")
         ensure(isinstance(result, list) and all(isinstance(row, dict) for row in result),
@@ -132,10 +169,7 @@ class Client:
         return result
 
     def ledger(self) -> list[str]:
-        rows = self.query(
-            "select version::text as version, name::text as name "
-            "from supabase_migrations.schema_migrations order by version;"
-        )
+        rows = self.query(LEDGER_SQL)
         names = [row.get("name") for row in rows]
         ensure(all(isinstance(name, str) for name in names)
                and len(names) == len(set(names)), "G1_LEDGER_INVALID")
@@ -163,13 +197,7 @@ class Client:
                "G1_DATA_API_EXPOSURE_UNVERIFIED")
 
     def tables(self) -> dict[str, dict[str, Any]]:
-        rows = self.query(
-            "select c.relname::text as name, c.relrowsecurity as rls, "
-            "c.relforcerowsecurity as forced, pg_catalog.pg_get_userbyid(c.relowner) as owner "
-            "from pg_catalog.pg_class c join pg_catalog.pg_namespace n "
-            "on n.oid=c.relnamespace where n.nspname='public' and c.relkind='r' "
-            "order by c.relname;"
-        )
+        rows = self.query(TABLES_SQL)
         result = {}
         for row in rows:
             name = row.get("name")
@@ -178,11 +206,7 @@ class Client:
         return result
 
     def counts(self) -> dict[str, int]:
-        rows = self.query(
-            "select (select count(*) from auth.users)::int as users, "
-            "(select count(*) from auth.identities where provider='apple')::int as apple, "
-            "(select count(*) from public.wafl_auth_identity_map)::int as bridge;"
-        )
+        rows = self.query(COUNTS_SQL)
         ensure(len(rows) == 1, "G1_AUTH_COUNTS_UNVERIFIED")
         result = {}
         for field in ("users", "apple", "bridge"):
@@ -195,6 +219,8 @@ class Client:
         return result
 
     def apply(self, name: str, sql: str) -> None:
+        ensure(self.mode == "schema_apply" and self.preflight_accepted
+               and self.schema_apply_ready, "G1_SCHEMA_APPLY_NOT_AUTHORIZED")
         ensure(name in (item[0] for item in MIGRATIONS)
                and bool(sql.strip()), "G1_MIGRATION_UNKNOWN")
         self.api("/database/migrations", {"name": name, "query": sql})
@@ -226,6 +252,10 @@ def execute(client: Client, repo: Path, sha: str, baseline: str,
         return {"result": "G1_R_READONLY_PREFLIGHT_PASS_NOT_G1_ACCEPT",
                 **info, "schema_apply": "NOT_RUN", "identity_mapping": "NOT_RUN"}
     ensure(mode == "schema_apply" and accepted, "G1_S_REQUIRES_INDEPENDENT_PREFLIGHT_APPROVAL")
+    ensure(client.mode == "schema_apply" and client.preflight_accepted,
+           "G1_S_REQUIRES_INDEPENDENT_PREFLIGHT_APPROVAL")
+    # Read-only preflight completed first; G1-S remains dormant in Control.
+    client.schema_apply_ready = True
     names = list(BASE_NAMES)
     for migration, rel in MIGRATIONS:
         client.apply(migration, (repo / rel).read_text(encoding="utf-8"))
@@ -250,7 +280,8 @@ def main() -> None:
     args = p.parse_args()
     try:
         info = execute(
-            Client(args.project_ref, os.getenv("WAFL_SUPABASE_ACCESS_TOKEN", "")),
+            Client(args.project_ref, os.getenv("WAFL_SUPABASE_ACCESS_TOKEN", ""),
+                   args.mode, args.preflight_accepted == "true"),
             Path(args.repo).resolve(), args.source_sha, args.source_baseline_sha,
             (args.migration_004_blob, args.migration_005_blob, args.migration_006_blob),
             args.mode, args.preflight_accepted == "true",
