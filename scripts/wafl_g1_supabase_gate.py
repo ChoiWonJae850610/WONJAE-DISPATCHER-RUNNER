@@ -286,7 +286,7 @@ def approved_transaction_sql(name: str, sql: str,
     # Every key/value above is code-owned and bounded; no token, customer data,
     # caller-controlled SQL or fallback to a write-capable generic query API.
     setting_sql = "".join(
-        "SET LOCAL " + key + " = '" + value + "';\\n" for key, value in settings
+        "SET LOCAL " + key + " = '" + value + "';\n" for key, value in settings
     )
     return sql[:begin[0].end()] + "\n" + setting_sql + sql[begin[0].end():]
 
