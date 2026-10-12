@@ -86,7 +86,8 @@ def test_http_403_identifies_only_safe_provider_stage(monkeypatch, path, query, 
     ],
 )
 def test_transport_failure_keeps_safe_stage_and_no_response_detail(monkeypatch, path, query, stage):
-    def unavailable(_request, _timeout):
+    def unavailable(_request, timeout):
+        assert timeout == 45
         raise g.URLError("private proxy diagnostic")
 
     monkeypatch.setattr(g, "urlopen", unavailable)
