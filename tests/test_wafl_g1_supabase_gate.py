@@ -189,3 +189,112 @@ def test_g1_unrelated_provider_http_error_preserves_existing_code(monkeypatch):
     client = g1.Client("a" * 20, "synthetic-only")
     with pytest.raises(g1.GateBlocked, match="^G1_PROVIDER_HTTP_500$"):
         client.api("")
+
+
+def test_g1_observed_data_api_exposure_is_bounded_and_not_db_global(monkeypatch):
+    client = g1.Client("a" * 20, "synthetic-only")
+    monkeypatch.setattr(client, "api", lambda path: {"db_schemas": "public,graphql_public"})
+    client.exposure()
+    assert client.exposed_schemas == ("graphql_public", "public")
+
+
+@pytest.mark.parametrize(
+    ("migration", "expected", "unexpected"),
+    [
+        (
+            "wafl_cloud_auth_004",
+            ["SET LOCAL pgrst.db_schemas = 'graphql_public,public';"],
+            ["wafl.runtime_environment", "domain_005_apply_approved"],
+        ),
+        (
+            "wafl_cloud_domain_005",
+            [
+                "SET LOCAL wafl.runtime_environment = 'development';",
+                "SET LOCAL wafl.domain_005_apply_approved = "
+                "'WAFL-CLOUD-DOMAIN-005-non-production-reviewed';",
+            ],
+            ["pgrst.db_schemas", "rpc_006a_apply_approved"],
+        ),
+        (
+            "wafl_cloud_rpc_006",
+            [
+                "SET LOCAL pgrst.db_schemas = 'graphql_public,public';",
+                "SET LOCAL wafl.runtime_environment = 'development';",
+                "SET LOCAL wafl.rpc_006a_apply_approved = "
+                "'WAFL-CLOUD-RPC-006A-non-production-reviewed';",
+                "SET LOCAL wafl.rpc_006b_apply_approved = "
+                "'WAFL-CLOUD-RPC-006B-non-production-reviewed';",
+                "SET LOCAL wafl.rpc_006c_apply_approved = "
+                "'WAFL-CLOUD-RPC-006C-non-production-reviewed';",
+                "SET LOCAL wafl.rpc_006d_apply_approved = "
+                "'WAFL-CLOUD-RPC-006D-non-production-reviewed';",
+            ],
+            ["domain_005_apply_approved"],
+        ),
+    ],
+)
+def test_g1_s_local_context_is_exact_and_only_on_migration_transaction(
+    migration, expected, unexpected,
+):
+    source = (
+        "-- reviewed original source bytes\n"
+        "BEGIN;\nSET LOCAL search_path = pg_catalog;\nCOMMIT;"
+    )
+    wrapped = g1.approved_transaction_sql(
+        migration, source, ("graphql_public", "public"))
+    assert wrapped.startswith("-- reviewed original source bytes\nBEGIN;\nSET LOCAL ")
+    assert wrapped.endswith("SET LOCAL search_path = pg_catalog;\nCOMMIT;")
+    assert wrapped.count("BEGIN;") == 1 and wrapped.count("COMMIT;") == 1
+    assert wrapped.count("SET LOCAL ") == len(expected) + 1
+    for part in expected:
+        assert part in wrapped
+    for forbidden in unexpected:
+        assert forbidden not in wrapped
+    assert "SET GLOBAL" not in wrapped and "ALTER DATABASE" not in wrapped
+
+
+@pytest.mark.parametrize(
+    ("schemas", "sql", "code"),
+    [
+        ((), "BEGIN;\nCOMMIT;", "G1_GUARDED_DATA_API_CONTEXT_MISSING"),
+        (("public", "wafl_private"), "BEGIN;\nCOMMIT;",
+         "G1_GUARDED_DATA_API_CONTEXT_MISSING"),
+        (("public", "auth"), "BEGIN;\nCOMMIT;",
+         "G1_GUARDED_DATA_API_CONTEXT_UNSAFE"),
+        (("public'); DROP SCHEMA public; --",), "BEGIN;\nCOMMIT;",
+         "G1_GUARDED_DATA_API_CONTEXT_MISSING"),
+        (("public",), "SELECT 1;", "G1_SOURCE_TRANSACTION_SHAPE_CHANGED"),
+        (("public",), "BEGIN;\nBEGIN;\nCOMMIT;",
+         "G1_SOURCE_TRANSACTION_SHAPE_CHANGED"),
+    ],
+)
+def test_g1_s_context_never_accepts_unverified_or_forged_guards(
+    schemas, sql, code,
+):
+    with pytest.raises(g1.GateBlocked, match=code):
+        g1.approved_transaction_sql("wafl_cloud_auth_004", sql, schemas)
+
+
+def test_g1_s_owner_authority_and_exact_wrapped_payload_no_network(monkeypatch):
+    client = g1.Client("a" * 20, "synthetic-only", "schema_apply", True)
+    original = "BEGIN;\nSET LOCAL search_path = pg_catalog;\nCOMMIT;"
+    requests = []
+    monkeypatch.setattr(client, "api", lambda path, body: requests.append((path, body)))
+    # Earlier Supabase read-only observations alone are not schema-write authority.
+    with pytest.raises(g1.GateBlocked, match="G1_SCHEMA_APPLY_NOT_AUTHORIZED"):
+        client.apply("wafl_cloud_auth_004", original)
+    assert requests == []
+    client.schema_apply_ready = True
+    # Authenticated Owner click must also have observed real Data API exposure.
+    with pytest.raises(g1.GateBlocked, match="G1_GUARDED_DATA_API_CONTEXT_MISSING"):
+        client.apply("wafl_cloud_auth_004", original)
+    assert requests == []
+    client.exposed_schemas = ("public",)
+    client.apply("wafl_cloud_auth_004", original)
+    assert len(requests) == 1
+    path, payload = requests[0]
+    assert path == "/database/migrations"
+    assert payload["name"] == "wafl_cloud_auth_004"
+    assert payload["query"].startswith("BEGIN;\nSET LOCAL pgrst.db_schemas = 'public';")
+    assert client.applied_payload_hashes[0]["migration"] == "wafl_cloud_auth_004"
+    assert len(client.applied_payload_hashes[0]["applied_sql_sha256"]) == 64
