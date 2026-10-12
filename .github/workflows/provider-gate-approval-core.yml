@@ -121,7 +121,7 @@ jobs:
           abort("provider gate is not registered") unless config.is_a?(Hash)
           abort("provider gate approval mode mismatch") unless config["approval_mode"] == "sanjinworks_owner_button"
           executor = config["executor"]
-          abort("provider gate executor is unsupported") unless ["approval_only", "classmo_supabase_migration", "classmo_eas_build", "classmo_eas_update", "wafl_supabase_hardening", "wafl_eas_update", "wafl_eas_build", "wafl_r2_preview_deploy", "wafl_supabase_g1_readonly", "wafl_supabase_g1_schema_apply", "classmo_editorial_016_readonly"].include?(executor)
+          abort("provider gate executor is unsupported") unless ["approval_only", "classmo_supabase_migration", "classmo_eas_build", "classmo_eas_update", "wafl_supabase_hardening", "wafl_eas_update", "wafl_eas_build", "wafl_r2_preview_deploy", "wafl_supabase_g1_readonly", "wafl_supabase_g1_schema_apply", "classmo_editorial_016_readonly", "classmo_editorial_016_schema_apply"].include?(executor)
           label = config["label"]
           abort("provider gate label missing") unless label.is_a?(String) && !label.strip.empty?
 
@@ -224,6 +224,31 @@ jobs:
             }
             expected.each do |key, value|
               abort("CLASSMO 016 metadata #{key} mismatch") unless config[key] == value
+            end
+            values.merge!(
+              "PROVIDER_C016_PROJECT_REF" => config["project_ref"],
+              "PROVIDER_C016_BLOB" => config["migration_016_blob"],
+            )
+          elsif executor == "classmo_editorial_016_schema_apply"
+            abort("CLASSMO 016 schema gate mismatch") unless project == "CLASSMO" && gate == "editorial_016_schema_apply"
+            abort("CLASSMO 016 schema gate not ready") unless config["ready_for_owner"] == true
+            expected = {
+              "provider" => "supabase_management_api",
+              "environment" => "development",
+              "project_ref" => "hfclkbqzxiqhcckwknih",
+              "source_baseline_sha" => "cac8ef5f76e02cc7d14b451e8fb494fbd82b9a2e",
+              "migration_name" => "016_editorial_drafts",
+              "migration_path" => "supabase/migrations/20261012001600_016_editorial_drafts.sql",
+              "checksum_path" => "supabase/migrations/SHA256SUMS",
+              "expected_prior_migration_name" => "015_course_configuration_ambiguity",
+              "migration_016_blob" => "d371b55d50ae1d50d8d4cb71d7abd6ed790055a3",
+              "production" => false,
+              "destructive" => false,
+              "credential_mutation" => false,
+              "device_mutation" => false,
+            }
+            expected.each do |key, value|
+              abort("CLASSMO 016 apply metadata #{key} mismatch") unless config[key] == value
             end
             values.merge!(
               "PROVIDER_C016_PROJECT_REF" => config["project_ref"],
@@ -900,6 +925,34 @@ jobs:
           path: ${{ runner.temp }}/classmo-016-readonly.json
           if-no-files-found: error
           retention-days: 14
+
+      - name: CLASSMO 016 · guarded Development schema apply and readback
+        if: env.PROVIDER_EXECUTOR == 'classmo_editorial_016_schema_apply'
+        env:
+          CLASSMO_SUPABASE_ACCESS_TOKEN: ${{ secrets.supabase_access_token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CLASSMO_SUPABASE_ACCESS_TOKEN" || {
+            echo "::error::CLASSMO Development credential is unavailable."
+            exit 1
+          }
+          python scripts/classmo_editorial_016_schema_apply.py \
+            --repo "$GITHUB_WORKSPACE/.approval/product" \
+            --source-sha "$SOURCE_SHA" \
+            --project-ref "$PROVIDER_C016_PROJECT_REF" \
+            --migration-blob "$PROVIDER_C016_BLOB" \
+            --summary "$GITHUB_STEP_SUMMARY" \
+            --evidence "$RUNNER_TEMP/classmo-016-schema.json"
+
+      - name: CLASSMO 016 · archive bounded schema receipt
+        if: env.PROVIDER_EXECUTOR == 'classmo_editorial_016_schema_apply' && success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: classmo-016-schema-${{ inputs.source_sha }}
+          path: ${{ runner.temp }}/classmo-016-schema.json
+          if-no-files-found: error
+          retention-days: 30
 
       - name: CLASSMO · require scoped Supabase credential
         if: env.PROVIDER_EXECUTOR == 'classmo_supabase_migration'
