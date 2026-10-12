@@ -143,8 +143,38 @@ def test_non_timeout_failure_remains_distinct(source, tmp_path, monkeypatch, cap
             raise RuntimeError("synthetic-account-denial")
 
     monkeypatch.setattr(worker, "Codex", FakeCodex)
-    with pytest.raises(RuntimeError, match="synthetic-account-denial"):
+    with pytest.raises(worker.CodexAccountLookupFailed, match="Codex account lookup failed"):
         worker.run_direct_worker(repo, route, "next", tmp_path / "auth")
     output = capsys.readouterr().out
     assert "DIRECT_CODEX_PHASE phase=account_lookup" in output
+    assert "DIRECT_CODEX_FAILURE code=CODEX_AUTH_LOOKUP_ERROR phase=account_lookup" in output
+    assert "synthetic-account-denial" not in output
     assert "DIRECT_CODEX_TIMEOUT_PHASE" not in output
+
+
+def test_missing_account_after_restored_json_remains_blocked_with_fixed_marker(
+    source, tmp_path, monkeypatch, capsys,
+):
+    repo, route = source
+
+    class FakeCodex:
+        def __init__(self, config):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def account(self, **kwargs):
+            assert kwargs == {"refresh_token": False}
+            return SimpleNamespace(account=None)
+
+    monkeypatch.setattr(worker, "Codex", FakeCodex)
+    with pytest.raises(worker.CodexAccountSessionMissing, match="Codex account session is missing"):
+        worker.run_direct_worker(repo, route, "resume", tmp_path / "auth")
+    output = capsys.readouterr().out
+    assert "DIRECT_CODEX_FAILURE code=CODEX_AUTH_ACCOUNT_UNAVAILABLE phase=account_lookup" in output
+    assert "synthetic-sensitive-material" not in output
+    assert worker.changed_paths(repo) == ()
