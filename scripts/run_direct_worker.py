@@ -5,8 +5,14 @@ import json
 import os
 from pathlib import Path
 
-from wonjae_dispatcher_runner.auth_store import restore_auth_json
+from wonjae_dispatcher_runner.auth_store import (
+    restore_auth_json,
+    restored_auth_shape,
+    write_account_failure_output,
+)
 from wonjae_dispatcher_runner.direct_worker import (
+    CodexAccountLookupFailed,
+    CodexAccountSessionMissing,
     DirectWorkerTurnTimeout,
     load_direct_worker_route,
     run_direct_worker,
@@ -24,7 +30,14 @@ def main() -> int:
     args = parser.parse_args()
 
     codex_home = Path(os.environ["CODEX_HOME"]).resolve()
-    restore_auth_json(codex_home, os.environ["CODEX_AUTH_JSON"])
+    step_output = os.environ.get("GITHUB_OUTPUT")
+    auth_json = os.environ["CODEX_AUTH_JSON"]
+    restore_auth_json(codex_home, auth_json)
+    print(
+        "DIRECT_CODEX_AUTH_RESTORE result=JSON_OBJECT_WRITTEN "
+        "shape=" + restored_auth_shape(auth_json),
+        flush=True,
+    )
     route = load_direct_worker_route(Path(args.registry), args.project)
     failure = ""
     if args.failure_log:
@@ -36,6 +49,12 @@ def main() -> int:
         result = run_direct_worker(
             Path(args.product_checkout).resolve(), route, args.command, codex_home, failure,
         )
+    except CodexAccountSessionMissing:
+        write_account_failure_output(step_output, "CODEX_AUTH_ACCOUNT_UNAVAILABLE")
+        raise
+    except CodexAccountLookupFailed:
+        write_account_failure_output(step_output, "CODEX_AUTH_LOOKUP_ERROR")
+        raise
     except DirectWorkerTurnTimeout:
         print("INITIAL_CODEX_TIMEOUT_480_SECONDS", flush=True)
         return 75
