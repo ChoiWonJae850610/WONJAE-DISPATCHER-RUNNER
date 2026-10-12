@@ -146,3 +146,15 @@ def test_trusted_retry_state_advance_then_idempotent_noop(tmp_path: Path):
         env=env, text=True, capture_output=True, check=False,
     )
     assert third.returncode != 0  # New next cannot advance a terminal gate.
+
+
+def test_known_codex_account_failure_is_bounded_pr_evidence_only():
+    source = (ROOT / ".github/workflows/direct-worker-core.yml").read_text()
+    failure = source.split(
+        "      - name: Record Direct Worker failure on open PR", 1
+    )[1].split("      - name: Cleanup exact ephemeral Direct Worker storage", 1)[0]
+    assert "CODEX_FAILURE_CODE: ${{ steps.codex.outputs.failure_code }}" in failure
+    assert "CODEX_AUTH_ACCOUNT_UNAVAILABLE|CODEX_AUTH_LOOKUP_ERROR" in failure
+    assert "failure_code:" in failure
+    assert "gh pr comment" in failure
+    assert "gh secret set" not in failure
