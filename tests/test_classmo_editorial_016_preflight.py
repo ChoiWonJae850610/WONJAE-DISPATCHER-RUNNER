@@ -38,7 +38,8 @@ def test_preflight_fails_if_016_already_present(monkeypatch):
         g.execute(Mock(),Path("."),"a"*40,"b"*40)
 
 def test_runner_routes_only_dedicated_readonly_script():
-    w=(Path(__file__).resolve().parents[1]/".github/workflows/provider-gate-approval-core.yml").read_text()
+    workflow = Path(__file__).resolve().parents[1] / ".github/workflows/provider-gate-approval-core.yml"
+    w = workflow.read_text()
     assert "classmo_editorial_016_readonly" in w
     assert "scripts/classmo_editorial_016_preflight.py" in w
     assert "PROVIDER_C016_BLOB" in w
