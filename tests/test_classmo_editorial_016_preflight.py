@@ -1,11 +1,16 @@
 """No-network guard assertions for CLASSMO 016 Provider route."""
 from __future__ import annotations
 
+import importlib.util
 from pathlib import Path
 
 import pytest
 
-from scripts import classmo_editorial_016_preflight as g
+SCRIPT = Path(__file__).resolve().parents[1] / "scripts/classmo_editorial_016_preflight.py"
+SPEC = importlib.util.spec_from_file_location("classmo_editorial_016_preflight", SCRIPT)
+assert SPEC is not None and SPEC.loader is not None
+g = importlib.util.module_from_spec(SPEC)
+SPEC.loader.exec_module(g)
 
 
 def test_reject_all_write_endpoints_and_unreviewed_sql(monkeypatch):
