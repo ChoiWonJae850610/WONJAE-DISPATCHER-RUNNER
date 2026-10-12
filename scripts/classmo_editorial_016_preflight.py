@@ -115,6 +115,24 @@ class Client:
                 "C016_QUERY_SHAPE_UNVERIFIED")
         return rows
 
+def verify_prior_ledger(rows, source_names):
+    """Accept only the existing 012 ledger name/version alias; all other names remain exact."""
+    require(len(source_names) == 15 and
+            source_names[11] == "012_membership_classification_mutations",
+            "C016_LEDGER_NOT_READY")
+    expected_names = list(source_names)
+    # This already-applied migration has a historical Supabase ledger name without
+    # the source filename's 012_ prefix. Do not mutate ledger or migration bytes.
+    expected_names[11] = "membership_classification_mutations"
+    actual_names = [row.get("name") for row in rows]
+    require(len(actual_names) >= 15 and
+            all(isinstance(name, str) for name in actual_names) and
+            len(set(actual_names)) == len(actual_names) and
+            actual_names[-15:] == expected_names and
+            str(rows[-15:][11].get("version")) == "20260930001200",
+            "C016_LEDGER_NOT_READY")
+
+
 def execute(client, repo, source_sha, blob):
     prior_names, sha256 = verify(repo, source_sha, blob)
     project = client.request("")
@@ -127,9 +145,7 @@ def execute(client, repo, source_sha, blob):
     except (KeyError, TypeError, ValueError):
         valid = False
     require(valid, "C016_NONPRODUCTION_GUARD_FAILED")
-    names = [row.get("name") for row in client.read(LEDGER)]
-    require(len(names) >= 15 and names[-15:] == prior_names and
-            len(names) == len(set(names)), "C016_LEDGER_NOT_READY")
+    verify_prior_ledger(client.read(LEDGER), prior_names)
     require(client.read(DRAFT) == [], "C016_ALREADY_APPLIED_OR_SCHEMA_DRIFT")
     return {"result": "C016_READONLY_PASS_NOT_APPLIED", "project": "CLASSMO",
             "project_ref": client.ref, "source_sha": source_sha,
