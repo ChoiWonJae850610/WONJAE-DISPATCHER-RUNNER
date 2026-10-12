@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """CLASSMO 016: strictly read-only Development preflight; no migration execution."""
 from __future__ import annotations
+
 import argparse
 import hashlib
 import json
@@ -14,9 +15,20 @@ from urllib.request import Request, urlopen
 ROOT = "https://api.supabase.com/v1/projects/"
 MIGRATION = "supabase/migrations/20261012001600_016_editorial_drafts.sql"
 MANIFEST = "supabase/migrations/SHA256SUMS"
-LEDGER = "select version::text as version, name::text as name from supabase_migrations.schema_migrations order by version;"
-ENV = "select count(*) filter (where environment in ('development','preview'))::int as allowed, count(*) filter (where environment not in ('development','preview'))::int as forbidden from public.classmo_environment;"
-DRAFT = "select c.relname::text as name from pg_catalog.pg_class c join pg_catalog.pg_namespace n on n.oid=c.relnamespace where n.nspname='public' and c.relname='class_page_drafts' and c.relkind='r';"
+LEDGER = (
+    "select version::text as version, name::text as name "
+    "from supabase_migrations.schema_migrations order by version;"
+)
+ENV = (
+    "select count(*) filter (where environment in ('development','preview'))::int as allowed, "
+    "count(*) filter (where environment not in ('development','preview'))::int as forbidden "
+    "from public.classmo_environment;"
+)
+DRAFT = (
+    "select c.relname::text as name from pg_catalog.pg_class c "
+    "join pg_catalog.pg_namespace n on n.oid=c.relnamespace "
+    "where n.nspname='public' and c.relname='class_page_drafts' and c.relkind='r';"
+)
 ALLOWED_SQL = frozenset((LEDGER, ENV, DRAFT))
 NAME = re.compile(r"^[0-9]{14}_([0-9]{3}_[a-z0-9_]+)\.sql$")
 
@@ -31,8 +43,10 @@ def verify(repo, source_sha, blob):
     require(re.fullmatch(r"[a-f0-9]{40}", source_sha) is not None and
             re.fullmatch(r"[a-f0-9]{40}", blob) is not None, "C016_IDENTITY_INVALID")
     try:
-        actual = subprocess.run(["git", "-C", str(repo), "rev-parse", "HEAD"],
-                                check=True, text=True, capture_output=True, timeout=15).stdout.strip()
+        actual = subprocess.run(
+            ["git", "-C", str(repo), "rev-parse", "HEAD"],
+            check=True, text=True, capture_output=True, timeout=15,
+        ).stdout.strip()
     except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired):
         raise Blocked("C016_GIT_UNVERIFIED") from None
     require(actual == source_sha, "C016_SOURCE_SHA_CHANGED")
@@ -56,7 +70,9 @@ def verify(repo, source_sha, blob):
         names.append(m.group(1))
         require(hashlib.sha256(read("supabase/migrations/" + parts[1])).hexdigest() == parts[0],
                 "C016_MIGRATION_HASH_INVALID")
-    require(len(set(names)) == 16 and names[-2:] == ["015_course_configuration_ambiguity", "016_editorial_drafts"],
+    require(len(set(names)) == 16 and names[-2:] == [
+        "015_course_configuration_ambiguity", "016_editorial_drafts",
+    ],
             "C016_MIGRATION_SEQUENCE_INVALID")
     return names[:15], hashlib.sha256(data).hexdigest()
 
