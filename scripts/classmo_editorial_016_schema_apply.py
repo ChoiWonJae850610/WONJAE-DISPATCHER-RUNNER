@@ -14,7 +14,10 @@ from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
-import classmo_editorial_016_preflight as g1
+try:
+    from scripts import classmo_editorial_016_preflight as g1
+except ModuleNotFoundError:
+    import classmo_editorial_016_preflight as g1
 
 MIGRATION_NAME = "016_editorial_drafts"
 POST_TABLE = (
