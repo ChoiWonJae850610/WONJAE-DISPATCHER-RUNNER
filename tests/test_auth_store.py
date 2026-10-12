@@ -37,8 +37,12 @@ def test_auth_shape_reports_only_fields_not_token_values(capsys):
         "tokens": {"access_token": "synthetic-secret-a", "refresh_token": "synthetic-secret-r"},
     })
     assert restored_auth_shape(payload) == "CHATGPT_TOKEN_FIELDS_PRESENT"
-    assert restored_auth_shape('{"auth_mode":"chatgpt","tokens":{}}') == "CHATGPT_TOKEN_FIELDS_INCOMPLETE"
-    assert restored_auth_shape('{"auth_mode":"api-key","OPENAI_API_KEY":"synthetic"}') == "OTHER_OR_UNRECOGNIZED_MODE"
+    assert restored_auth_shape(
+        '{"auth_mode":"chatgpt","tokens":{}}'
+    ) == "CHATGPT_TOKEN_FIELDS_INCOMPLETE"
+    assert restored_auth_shape(
+        '{"auth_mode":"api-key","OPENAI_API_KEY":"synthetic"}'
+    ) == "OTHER_OR_UNRECOGNIZED_MODE"
     assert restored_auth_shape("{}") == "OTHER_OR_UNRECOGNIZED_MODE"
     assert restored_auth_shape("not-json") == "INVALID_JSON"
     assert not capsys.readouterr().out
