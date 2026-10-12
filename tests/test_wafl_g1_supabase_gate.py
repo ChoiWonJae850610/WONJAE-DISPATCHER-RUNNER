@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import pytest
+from urllib.error import HTTPError
 
 from scripts import wafl_g1_supabase_gate as g1
 
@@ -135,3 +136,55 @@ def test_g1_schema_apply_remains_locked_without_preflight_and_distinct_approval(
                         lambda path, payload=None: mock.append((path, payload)) or [])
     assert client.query(g1.LEDGER_SQL) == []
     assert mock == [("/database/query/read-only", {"query": g1.LEDGER_SQL})]
+
+
+@pytest.mark.parametrize(("path", "payload", "stage"), [
+    ("", None, "PROJECT_SETTINGS_READ"),
+    ("/database/query/read-only", {"query": g1.LEDGER_SQL}, "DATABASE_READ"),
+    ("/postgrest", None, "DATA_API_CONFIG_READ"),
+])
+@pytest.mark.parametrize("status", [401, 403])
+def test_g1_http_access_denial_has_fixed_endpoint_class_only(
+    monkeypatch, path, payload, stage, status,
+):
+    token = "synthetic-private-token"
+    hidden = "untrusted-provider-error-with-private-information"
+
+    def denied(request, timeout):
+        assert timeout == 60
+        assert request.headers["Authorization"] == "Bearer " + token
+        raise HTTPError(request.full_url, status, hidden, {}, None)
+
+    monkeypatch.setattr(g1, "urlopen", denied)
+    client = g1.Client("a" * 20, token)
+    with pytest.raises(g1.GateBlocked) as error:
+        client.api(path, payload)
+    assert str(error.value) == f"G1_PROVIDER_HTTP_{status}_{stage}"
+    assert token not in str(error.value)
+    assert hidden not in str(error.value)
+    assert "a" * 20 not in str(error.value)
+
+
+def test_g1_schema_apply_http_denial_is_labeled_but_not_retried(monkeypatch):
+    calls = []
+
+    def denied(request, timeout):
+        calls.append(request.get_method())
+        raise HTTPError(request.full_url, 403, "do not leak response", {}, None)
+
+    monkeypatch.setattr(g1, "urlopen", denied)
+    client = g1.Client("a" * 20, "synthetic-only", "schema_apply", True)
+    client.schema_apply_ready = True
+    with pytest.raises(g1.GateBlocked, match="G1_PROVIDER_HTTP_403_DATABASE_WRITE"):
+        client.api("/database/migrations", {"name": g1.MIGRATIONS[0][0], "query": "select 1"})
+    assert calls == ["POST"]
+
+
+def test_g1_unrelated_provider_http_error_preserves_existing_code(monkeypatch):
+    def unavailable(request, timeout):
+        raise HTTPError(request.full_url, 500, "untrusted", {}, None)
+
+    monkeypatch.setattr(g1, "urlopen", unavailable)
+    client = g1.Client("a" * 20, "synthetic-only")
+    with pytest.raises(g1.GateBlocked, match="^G1_PROVIDER_HTTP_500$"):
+        client.api("")
