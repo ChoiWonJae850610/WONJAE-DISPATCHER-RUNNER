@@ -163,3 +163,32 @@ def test_owner_workflows_are_project_scoped_and_non_deploying():
         assert forbidden not in core.lower()
     assert "--docs-head" in core and "--source-head" in core
     assert "--control-sha" in core and "--failed-run-id" in core
+
+
+def test_exact_one_mobile_typescript_test_scope_is_accepted_without_loosening_old_checks():
+    old, proposed = states()
+    proposed["project"] = old["project"] = "CLASSMO"
+    proposed["next_action"]["source_scope"][-1] = (
+        f"Owner-approved PR #66 head {SOURCE} failed run {RUN} only "
+        "apps/mobile/test/owner-home-session-polish.test.ts "
+        "for exact 016 SHA256SUMS; preserve 001-015 hashes and every negative check"
+    )
+    check(old, proposed)
+    proposed["next_action"]["source_scope"][-1] += (
+        " apps/mobile/test/other-unapproved.test.ts"
+    )
+    with pytest.raises(guard.DocumentMergeError):
+        check(old, proposed)
+
+
+def test_docs_attachment_failed_ci_is_not_source_pass():
+    assert guard.attached_failed_source_ci_requires_owner_resume(
+        {"status": "completed", "conclusion": "failure"}
+    )
+    for status, conclusion in (
+        ("in_progress", None), ("completed", "success"),
+        ("completed", "cancelled"), ("completed", "timed_out"),
+    ):
+        assert not guard.attached_failed_source_ci_requires_owner_resume(
+            {"status": status, "conclusion": conclusion}
+        )

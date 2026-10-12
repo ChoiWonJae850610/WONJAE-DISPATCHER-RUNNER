@@ -111,7 +111,10 @@ def check_scope(original: str, doc: str, source_pr: int,
     if (not isinstance(extra, str) or len(extra) > 2600
         or f"PR #{source_pr}" not in extra or source_sha not in extra
         or str(failed_run_id) not in extra
-        or len(set(re.findall(r"tests/[A-Za-z0-9_./-]+\.mjs", extra))) != 1):
+        or len(set(re.findall(
+            r"(?:tests/[A-Za-z0-9_./-]+\.mjs|"
+            r"apps/mobile/test/[A-Za-z0-9_./-]+\.test\.ts)", extra,
+        ))) != 1):
         raise DocumentMergeError("narrow exact-PR/test/manual exception missing")
     remaining_old = {k: v for k, v in old_action.items() if k != "source_scope"}
     remaining_new = {k: v for k, v in new_action.items() if k != "source_scope"}
@@ -162,6 +165,19 @@ def wait_attached_pr_head(
         if attempt + 1 < attempts:
             time.sleep(interval)
     raise DocumentMergeError("POST_PUSH_READBACK_DELAY")
+
+
+def attached_failed_source_ci_requires_owner_resume(run: object) -> bool:
+    """An attached source PR can still require a separate Owner source repair.
+
+    The CI failure is reported as FAILED, never transformed into source PASS
+    or a merge permission; the document attachment changes only docs/state.
+    """
+    return (
+        isinstance(run, dict)
+        and run.get("status") == "completed"
+        and run.get("conclusion") == "failure"
+    )
 
 
 def attach(args: argparse.Namespace) -> None:
@@ -292,8 +308,19 @@ def attach(args: argparse.Namespace) -> None:
                         and run.get("event") == "pull_request"
                         and str(run.get("path", "")).split("@", 1)[0] == route["workflow"]
                         and run.get("name") == route["workflow_name"]]
-            if matching and max(matching, key=lambda item: item["id"]).get("status") == "completed":
-                raise DocumentMergeError("attached PR-head canonical CI failed") from None
+            if matching:
+                latest = max(matching, key=lambda item: item["id"])
+                if attached_failed_source_ci_requires_owner_resume(latest):
+                    print(
+                        f"RECOVERY_DOCS_ATTACHED source_pr={args.source_pr} "
+                        f"docs_pr={args.docs_pr} source_head={attached} "
+                        "ci=FAILED_SOURCE_REPAIR_REQUIRED "
+                        "resume=SEPARATE_OWNER_ACTION; "
+                        "docs-only attachment did NOT pass product source validation"
+                    )
+                    return
+                if latest.get("status") == "completed":
+                    raise DocumentMergeError("attached PR-head canonical CI failed") from None
         time.sleep(10)
     raise DocumentMergeError("document attachment published; exact PR-head CI not terminal")
 

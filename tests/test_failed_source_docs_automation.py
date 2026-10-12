@@ -564,3 +564,19 @@ def test_owner_recovery_dispatch_identity_fails_before_github_read(
     with pytest.raises(RecoveryPreparationError, match="Owner recovery dispatch identity"):
         prep.plan(event, "WAFL", "read", "product", "control", tmp_path / "work",
                   tmp_path / "registry.yaml", run_id)
+
+
+def test_auto_recovery_skips_only_noninitial_manual_gate_not_owner_or_unknown_failure():
+    event = {"action": "completed", "workflow_run": {"id": 38189516050}}
+    manual = RecoveryPreparationError("not an exact isolated source turn failure")
+    assert prep.safe_skip_noninitial_source_failure(event, None, manual)
+    assert not prep.safe_skip_noninitial_source_failure(event, 38189516050, manual)
+    assert not prep.safe_skip_noninitial_source_failure(
+        {"action": "requested"}, None, manual
+    )
+    assert not prep.safe_skip_noninitial_source_failure(
+        event, None, RecoveryPreparationError("failed source job ambiguous")
+    )
+    assert not prep.safe_skip_noninitial_source_failure(
+        event, None, ValueError("bad")
+    )
