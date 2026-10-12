@@ -121,7 +121,7 @@ jobs:
           abort("provider gate is not registered") unless config.is_a?(Hash)
           abort("provider gate approval mode mismatch") unless config["approval_mode"] == "sanjinworks_owner_button"
           executor = config["executor"]
-          abort("provider gate executor is unsupported") unless ["approval_only", "classmo_supabase_migration", "classmo_eas_build", "classmo_eas_update", "wafl_supabase_hardening", "wafl_eas_update", "wafl_eas_build", "wafl_r2_preview_deploy"].include?(executor)
+          abort("provider gate executor is unsupported") unless ["approval_only", "classmo_supabase_migration", "classmo_eas_build", "classmo_eas_update", "wafl_supabase_hardening", "wafl_eas_update", "wafl_eas_build", "wafl_r2_preview_deploy", "wafl_supabase_g1_readonly", "wafl_supabase_g1_schema_apply"].include?(executor)
           label = config["label"]
           abort("provider gate label missing") unless label.is_a?(String) && !label.strip.empty?
 
@@ -144,6 +144,29 @@ jobs:
           if executor == "wafl_supabase_hardening"
             abort("WAFL executor routed to another project") unless project == "WAFL"
             abort("WAFL provider gate mismatch") unless gate == "separate_explicit_provider_authority"
+          elsif %w[wafl_supabase_g1_readonly wafl_supabase_g1_schema_apply].include?(executor)
+            abort("WAFL G1 project or gate mismatch") unless project == "WAFL" && gate ==
+              (executor == "wafl_supabase_g1_readonly" ? "g1_supabase_readonly" : "g1_supabase_schema_apply")
+            abort("WAFL G1 is not yet Owner activated") unless config["ready_for_owner"] == true
+            abort("WAFL G1 provider/environment mismatch") unless config["provider"] == "supabase_management_api" && config["environment"] == "development"
+            abort("WAFL G1 target ref invalid") unless config["project_ref"].is_a?(String) && config["project_ref"].match?(/\A[a-z]{20}\z/)
+            %w[source_baseline_sha migration_004_blob migration_005_blob migration_006_blob].each do |key|
+              abort("WAFL G1 pinned source identity invalid") unless config[key].is_a?(String) && config[key].match?(/\A[0-9a-f]{40}\z/)
+            end
+            if executor == "wafl_supabase_g1_schema_apply"
+              abort("G1 schema apply requires separately reviewed preflight acceptance") unless config["preflight_accepted"] == true
+            else
+              abort("G1 read-only must not have mutation approval") if config.key?("preflight_accepted")
+            end
+            values.merge!(
+              "PROVIDER_G1_MODE" => executor == "wafl_supabase_g1_readonly" ? "read_only" : "schema_apply",
+              "PROVIDER_G1_PROJECT_REF" => config["project_ref"],
+              "PROVIDER_G1_BASELINE_SHA" => config["source_baseline_sha"],
+              "PROVIDER_G1_004_BLOB" => config["migration_004_blob"],
+              "PROVIDER_G1_005_BLOB" => config["migration_005_blob"],
+              "PROVIDER_G1_006_BLOB" => config["migration_006_blob"],
+              "PROVIDER_G1_PREFLIGHT_ACCEPTED" => config["preflight_accepted"] == true ? "true" : "false",
+            )
           elsif executor == "wafl_r2_preview_deploy"
             abort("WAFL R2 executor routed to another project") unless project == "WAFL"
             abort("WAFL R2 gate mismatch") unless gate == "r2_preview_worker_delivery"
@@ -389,6 +412,38 @@ jobs:
           path: ${{ runner.temp }}/wafl-provider-evidence.json
           if-no-files-found: error
           retention-days: 30
+
+      - name: WAFL G1 · separately gated read-only check or source-only schema apply
+        if: env.PROVIDER_EXECUTOR == 'wafl_supabase_g1_readonly' || env.PROVIDER_EXECUTOR == 'wafl_supabase_g1_schema_apply'
+        env:
+          WAFL_SUPABASE_ACCESS_TOKEN: ${{ secrets.supabase_access_token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$WAFL_SUPABASE_ACCESS_TOKEN" || {
+            echo "::error::The existing WAFL-scoped Supabase credential is unavailable."
+            exit 1
+          }
+          python scripts/wafl_g1_supabase_gate.py \
+            --repo "$GITHUB_WORKSPACE/.approval/product" \
+            --source-sha "$SOURCE_SHA" \
+            --source-baseline-sha "$PROVIDER_G1_BASELINE_SHA" \
+            --project-ref "$PROVIDER_G1_PROJECT_REF" \
+            --migration-004-blob "$PROVIDER_G1_004_BLOB" \
+            --migration-005-blob "$PROVIDER_G1_005_BLOB" \
+            --migration-006-blob "$PROVIDER_G1_006_BLOB" \
+            --mode "$PROVIDER_G1_MODE" \
+            --preflight-accepted "$PROVIDER_G1_PREFLIGHT_ACCEPTED" \
+            --summary "$GITHUB_STEP_SUMMARY" \
+            --evidence "$RUNNER_TEMP/wafl-g1-evidence.json"
+
+      - name: WAFL G1 · archive aggregate-only provider receipt
+        if: (env.PROVIDER_EXECUTOR == 'wafl_supabase_g1_readonly' || env.PROVIDER_EXECUTOR == 'wafl_supabase_g1_schema_apply') && success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: wafl-g1-${{ inputs.gate }}-${{ inputs.source_sha }}
+          path: ${{ runner.temp }}/wafl-g1-evidence.json
+          retention-days: 14
 
       - name: WAFL R2 · set up reviewed Wrangler CLI
         if: env.PROVIDER_EXECUTOR == 'wafl_r2_preview_deploy'
