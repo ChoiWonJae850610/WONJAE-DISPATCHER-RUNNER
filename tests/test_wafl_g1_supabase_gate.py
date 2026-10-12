@@ -1,8 +1,9 @@
 """WAFL G1 isolated safety tests, without tokens or provider requests."""
 from __future__ import annotations
 
-import pytest
 from urllib.error import HTTPError
+
+import pytest
 
 from scripts import wafl_g1_supabase_gate as g1
 
