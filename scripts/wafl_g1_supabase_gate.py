@@ -62,7 +62,9 @@ def blob_sha(path: Path) -> str:
     return hashlib.sha1(b"blob " + str(len(data)).encode() + b"\0" + data).hexdigest()
 
 
-def verify_source(repo: Path, sha: str, baseline: str, blobs: tuple[str, ...]) -> tuple[set[str], set[str]]:
+def verify_source(
+    repo: Path, sha: str, baseline: str, blobs: tuple[str, ...]
+) -> tuple[set[str], set[str]]:
     ensure(HEX.fullmatch(sha) is not None and HEX.fullmatch(baseline) is not None
            and len(blobs) == 3 and all(HEX.fullmatch(v) for v in blobs),
            "G1_SOURCE_IDENTITY_INVALID")
