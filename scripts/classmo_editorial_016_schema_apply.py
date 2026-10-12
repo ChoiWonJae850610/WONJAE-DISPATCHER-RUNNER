@@ -8,16 +8,19 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import importlib.util
 import json
 import os
 from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
-try:
-    from scripts import classmo_editorial_016_preflight as g1
-except ModuleNotFoundError:
-    import classmo_editorial_016_preflight as g1
+_G1_SPEC = importlib.util.spec_from_file_location(
+    "classmo_editorial_016_preflight", Path(__file__).resolve().with_name(
+        "classmo_editorial_016_preflight.py"))
+assert _G1_SPEC is not None and _G1_SPEC.loader is not None
+g1 = importlib.util.module_from_spec(_G1_SPEC)
+_G1_SPEC.loader.exec_module(g1)
 
 MIGRATION_NAME = "016_editorial_drafts"
 POST_TABLE = (
