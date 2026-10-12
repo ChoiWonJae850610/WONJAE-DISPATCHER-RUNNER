@@ -40,6 +40,45 @@ def restore_auth_json(codex_home: Path, payload: str) -> Path:
     return target
 
 
+
+# This is a non-secret, offline shape observation, NOT authentication proof.
+# Never serialize values, fields or SDK account objects into Actions logs.
+SAFE_ACCOUNT_FAILURE_CODES = frozenset({
+    "CODEX_AUTH_ACCOUNT_UNAVAILABLE",
+    "CODEX_AUTH_LOOKUP_ERROR",
+})
+
+
+def restored_auth_shape(payload: str) -> str:
+    """Classify only expected field presence; never check expiry or online identity."""
+    try:
+        value = json.loads(payload)
+    except (TypeError, ValueError):
+        return "INVALID_JSON"
+    if not isinstance(value, dict):
+        return "INVALID_ROOT"
+    if value.get("auth_mode") != "chatgpt":
+        return "OTHER_OR_UNRECOGNIZED_MODE"
+    tokens = value.get("tokens")
+    if not isinstance(tokens, dict):
+        return "CHATGPT_TOKEN_FIELDS_INCOMPLETE"
+    if all(isinstance(tokens.get(key), str) and bool(tokens[key])
+           for key in ("access_token", "refresh_token")):
+        return "CHATGPT_TOKEN_FIELDS_PRESENT"
+    return "CHATGPT_TOKEN_FIELDS_INCOMPLETE"
+
+
+def write_account_failure_output(step_output: str | None, failure_code: str) -> None:
+    """Send a fixed code to the trusted GitHub Actions output, never secret data."""
+    if not step_output or failure_code not in SAFE_ACCOUNT_FAILURE_CODES:
+        return
+    path = Path(step_output)
+    if not path.is_file() or path.is_symlink():
+        return
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write("failure_code=" + failure_code + "\n")
+
+
 def load_auth_json_for_rotation(codex_home: Path) -> str:
     target = codex_home / "auth.json"
     if not target.is_file():

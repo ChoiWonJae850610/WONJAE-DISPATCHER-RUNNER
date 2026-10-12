@@ -553,6 +553,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.product_write_token }}
           PRODUCT_REPOSITORY: ${{ steps.route.outputs.repository }}
+          CODEX_FAILURE_CODE: ${{ steps.codex.outputs.failure_code }}
         working-directory: ${{ env.DW_RUNNER }}
         run: |
           result_file="$DW_JOB_ROOT/direct-worker-failed.md"
@@ -561,6 +562,14 @@ jobs:
             echo
             printf -- '- result: `%s`\n' "FAILED"
             printf -- '- runner_run_id: `%s`\n' "$GITHUB_RUN_ID"
+            # Only these trusted, fixed marker values may become PR evidence.
+            case "$CODEX_FAILURE_CODE" in
+              CODEX_AUTH_ACCOUNT_UNAVAILABLE|CODEX_AUTH_LOOKUP_ERROR)
+                if [[ "${START_HEAD:-}" =~ ^[0-9a-f]{40}$ ]]; then
+                  printf -- '- failure_code: `%s`\n' "$CODEX_FAILURE_CODE"
+                  printf -- '- source_pr_head: `%s`\n' "$START_HEAD"
+                fi ;;
+            esac
             if [ -n "${DIRECT_HEAD:-}" ]; then printf -- '- head_sha: `%s`\n' "$DIRECT_HEAD"; fi
             printf -- '- action: `%s`\n' "Use Direct Worker retry; preserve this PR."
             printf -- '- provider/runtime/device/physical: `%s`\n' "NOT_INFERRED"
