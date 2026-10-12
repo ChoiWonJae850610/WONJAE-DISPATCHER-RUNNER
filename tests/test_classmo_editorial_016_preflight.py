@@ -7,6 +7,7 @@ import pytest
 
 from scripts import classmo_editorial_016_preflight as g
 
+
 def test_reject_all_write_endpoints_and_unreviewed_sql(monkeypatch):
     c = g.Client("a"*20, "synthetic")
     monkeypatch.setattr(g, "urlopen", lambda *_args, **_kwargs: pytest.fail("network"))
@@ -38,7 +39,8 @@ def test_preflight_fails_if_016_already_present(monkeypatch):
         g.execute(Mock(),Path("."),"a"*40,"b"*40)
 
 def test_runner_routes_only_dedicated_readonly_script():
-    workflow = Path(__file__).resolve().parents[1] / ".github/workflows/provider-gate-approval-core.yml"
+    workflow = (Path(__file__).resolve().parents[1] /
+                ".github/workflows/provider-gate-approval-core.yml")
     w = workflow.read_text()
     assert "classmo_editorial_016_readonly" in w
     assert "scripts/classmo_editorial_016_preflight.py" in w
