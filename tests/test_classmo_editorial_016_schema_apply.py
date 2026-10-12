@@ -2,11 +2,17 @@
 from __future__ import annotations
 
 import hashlib
+import importlib.util
+from pathlib import Path
 from urllib.error import HTTPError
 
 import pytest
 
-from scripts import classmo_editorial_016_schema_apply as m
+SCRIPT = Path(__file__).resolve().parents[1] / "scripts/classmo_editorial_016_schema_apply.py"
+SPEC = importlib.util.spec_from_file_location("classmo_editorial_016_schema_apply", SCRIPT)
+assert SPEC is not None and SPEC.loader is not None
+m = importlib.util.module_from_spec(SPEC)
+SPEC.loader.exec_module(m)
 
 
 def test_new_runner_endpoint_allowlist_and_errors_no_secrets(monkeypatch):
