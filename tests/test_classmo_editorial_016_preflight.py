@@ -50,3 +50,49 @@ def test_runner_routes_only_dedicated_readonly_script():
     assert "classmo_editorial_016_readonly" in w
     assert "scripts/classmo_editorial_016_preflight.py" in w
     assert "PROVIDER_C016_BLOB" in w
+
+@pytest.mark.parametrize(
+    ("path", "query", "stage"),
+    [
+        ("", None, "project_metadata"),
+        ("/database/query/read-only", g.ENV, "environment_readonly_sql"),
+        ("/database/query/read-only", g.LEDGER, "migration_ledger_readonly_sql"),
+        ("/database/query/read-only", g.DRAFT, "draft_catalog_readonly_sql"),
+    ],
+)
+def test_http_403_identifies_only_safe_provider_stage(monkeypatch, path, query, stage):
+    """Do not misclassify a project-access 403 as database-read permission failure."""
+    secret = "synthetic-private-token"
+    client = g.Client("a" * 20, secret)
+
+    def denied(request, timeout):
+        assert timeout == 45
+        raise g.HTTPError(request.full_url, 403, "private response " + secret, None, None)
+
+    monkeypatch.setattr(g, "urlopen", denied)
+    with pytest.raises(g.Blocked) as caught:
+        client.request(path, query)
+
+    assert str(caught.value) == "C016_PROVIDER_HTTP_403 stage=" + stage
+    assert secret not in str(caught.value)
+    assert "private response" not in str(caught.value)
+
+
+@pytest.mark.parametrize(
+    ("path", "query", "stage"),
+    [
+        ("", None, "project_metadata"),
+        ("/database/query/read-only", g.ENV, "environment_readonly_sql"),
+    ],
+)
+def test_transport_failure_keeps_safe_stage_and_no_response_detail(monkeypatch, path, query, stage):
+    def unavailable(_request, timeout):
+        assert timeout == 45
+        raise g.URLError("private proxy diagnostic")
+
+    monkeypatch.setattr(g, "urlopen", unavailable)
+    with pytest.raises(g.Blocked) as caught:
+        g.Client("a" * 20, "synthetic").request(path, query)
+    assert str(caught.value) == "C016_PROVIDER_UNVERIFIED stage=" + stage
+    assert "private proxy" not in str(caught.value)
+

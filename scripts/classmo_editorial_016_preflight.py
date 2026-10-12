@@ -86,6 +86,11 @@ class Client:
         require((path == "" and query is None) or
                 (path == "/database/query/read-only" and query in ALLOWED_SQL),
                 "C016_MUTATING_OR_UNREVIEWED_ENDPOINT")
+        # Report only a bounded stage name. Never print endpoint responses, SQL or tokens.
+        stage = ("project_metadata" if path == "" else
+                 "environment_readonly_sql" if query == ENV else
+                 "migration_ledger_readonly_sql" if query == LEDGER else
+                 "draft_catalog_readonly_sql")
         body = None if query is None else json.dumps({"query": query}).encode()
         headers = {"Authorization": "Bearer " + self.token, "Accept": "application/json",
                    "User-Agent": "CLASSMO-016-readonly"}
@@ -97,9 +102,9 @@ class Client:
             with urlopen(req, timeout=45) as response:
                 return json.loads(response.read())
         except HTTPError as exc:
-            raise Blocked("C016_PROVIDER_HTTP_" + str(exc.code)) from None
+            raise Blocked("C016_PROVIDER_HTTP_" + str(exc.code) + " stage=" + stage) from None
         except (URLError, OSError, ValueError):
-            raise Blocked("C016_PROVIDER_UNVERIFIED") from None
+            raise Blocked("C016_PROVIDER_UNVERIFIED stage=" + stage) from None
 
     def read(self, sql):
         require(sql in ALLOWED_SQL, "C016_SQL_NOT_ALLOWED")
