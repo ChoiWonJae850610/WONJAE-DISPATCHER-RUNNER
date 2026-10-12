@@ -565,7 +565,10 @@ jobs:
             # Only these trusted, fixed marker values may become PR evidence.
             case "$CODEX_FAILURE_CODE" in
               CODEX_AUTH_ACCOUNT_UNAVAILABLE|CODEX_AUTH_LOOKUP_ERROR)
-                printf -- '- failure_code: `%s`\n' "$CODEX_FAILURE_CODE" ;;
+                if [[ "${START_HEAD:-}" =~ ^[0-9a-f]{40}$ ]]; then
+                  printf -- '- failure_code: `%s`\n' "$CODEX_FAILURE_CODE"
+                  printf -- '- source_pr_head: `%s`\n' "$START_HEAD"
+                fi ;;
             esac
             if [ -n "${DIRECT_HEAD:-}" ]; then printf -- '- head_sha: `%s`\n' "$DIRECT_HEAD"; fi
             printf -- '- action: `%s`\n' "Use Direct Worker retry; preserve this PR."
