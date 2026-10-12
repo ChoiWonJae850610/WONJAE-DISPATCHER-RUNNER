@@ -236,7 +236,10 @@ def test_g1_observed_data_api_exposure_is_bounded_and_not_db_global(monkeypatch)
 def test_g1_s_local_context_is_exact_and_only_on_migration_transaction(
     migration, expected, unexpected,
 ):
-    source = "-- reviewed original source bytes\nBEGIN;\nSET LOCAL search_path = pg_catalog;\nCOMMIT;"
+    source = (
+        "-- reviewed original source bytes\n"
+        "BEGIN;\nSET LOCAL search_path = pg_catalog;\nCOMMIT;"
+    )
     wrapped = g1.approved_transaction_sql(
         migration, source, ("graphql_public", "public"))
     assert wrapped.startswith("-- reviewed original source bytes\nBEGIN;\nSET LOCAL ")
