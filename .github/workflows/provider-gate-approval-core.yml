@@ -365,9 +365,7 @@ jobs:
             exit 1
           }
           echo "SOURCE_VALIDATION_RUN_ID=$validation_run" >> "$GITHUB_ENV"
-          {
-            echo "- source validation run: `$validation_run`"
-          } >> "$GITHUB_STEP_SUMMARY"
+          printf -- '- source validation run: %s\n' "$validation_run" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Record approval-only boundary
         if: env.PROVIDER_EXECUTOR == 'approval_only'
