@@ -126,6 +126,8 @@ class Client:
         self.mode = mode
         self.preflight_accepted = preflight_accepted
         self.schema_apply_ready = False
+        self.exposed_schemas: tuple[str, ...] = ()
+        self.applied_payload_hashes: list[dict[str, str]] = []
 
     def api(self, path: str, payload: dict[str, str] | None = None) -> Any:
         if payload is None:
@@ -206,6 +208,12 @@ class Client:
         walk(response)
         ensure("public" in found and "wafl_private" not in found,
                "G1_DATA_API_EXPOSURE_UNVERIFIED")
+        # The trusted source-apply context must reflect ACTUAL Management API
+        # Data API exposure; never assume SQL current_setting() mirrors PostgREST.
+        unique = tuple(sorted(set(found)))
+        ensure(all(re.fullmatch(r"[a-z_][a-z0-9_]*", item) for item in unique),
+               "G1_DATA_API_EXPOSURE_UNVERIFIED")
+        self.exposed_schemas = unique
 
     def tables(self) -> dict[str, dict[str, Any]]:
         rows = self.query(TABLES_SQL)
@@ -234,7 +242,54 @@ class Client:
                and self.schema_apply_ready, "G1_SCHEMA_APPLY_NOT_AUTHORIZED")
         ensure(name in (item[0] for item in MIGRATIONS)
                and bool(sql.strip()), "G1_MIGRATION_UNKNOWN")
-        self.api("/database/migrations", {"name": name, "query": sql})
+        payload = approved_transaction_sql(name, sql, self.exposed_schemas)
+        self.api("/database/migrations", {"name": name, "query": payload})
+        self.applied_payload_hashes.append({
+            "migration": name, "applied_sql_sha256": hashlib.sha256(
+                payload.encode("utf-8")).hexdigest()
+        })
+
+
+def approved_transaction_sql(name: str, sql: str,
+                             schemas: tuple[str, ...]) -> str:
+    """Bind audited Owner/Development evidence to one exact migration transaction.
+
+    Source SQL remains Git-blob pinned. Only the fixed transaction-local
+    attestation statements below may be added after its unique BEGIN, never
+    persisted as a database/project/role setting and never used for G1-R.
+    """
+    ensure(name in (item[0] for item in MIGRATIONS), "G1_MIGRATION_UNKNOWN")
+    ensure(bool(schemas) and "public" in schemas and
+           "wafl_private" not in schemas and
+           all(re.fullmatch(r"[a-z_][a-z0-9_]*", x) for x in schemas),
+           "G1_GUARDED_DATA_API_CONTEXT_MISSING")
+    # Reject non-public exposed schemas rather than creating a session value
+    # which could conceal a materially broader actual Data API configuration.
+    ensure(set(schemas).issubset({"public", "graphql_public"}),
+           "G1_GUARDED_DATA_API_CONTEXT_UNSAFE")
+    begin = list(re.finditer(r"(?m)^BEGIN;\r?$", sql))
+    ensure(len(begin) == 1 and begin[0].start() < 1500 and
+           sql.rstrip().endswith("COMMIT;"),
+           "G1_SOURCE_TRANSACTION_SHAPE_CHANGED")
+    settings = []
+    if name in ("wafl_cloud_auth_004", "wafl_cloud_rpc_006"):
+        settings.append(("pgrst.db_schemas", ",".join(schemas)))
+    if name in ("wafl_cloud_domain_005", "wafl_cloud_rpc_006"):
+        settings.append(("wafl.runtime_environment", "development"))
+    if name == "wafl_cloud_domain_005":
+        settings.append(("wafl.domain_005_apply_approved",
+                         "WAFL-CLOUD-DOMAIN-005-non-production-reviewed"))
+    if name == "wafl_cloud_rpc_006":
+        for stage in "abcd":
+            settings.append((f"wafl.rpc_006{stage}_apply_approved",
+                             f"WAFL-CLOUD-RPC-006{stage.upper()}-non-production-reviewed"))
+    # Every key/value above is code-owned and bounded; no token, customer data,
+    # caller-controlled SQL or fallback to a write-capable generic query API.
+    setting_sql = "".join(
+        "SET LOCAL " + key + " = '" + value + "';\\n" for key, value in settings
+    )
+    return sql[:begin[0].end()] + "\n" + setting_sql + sql[begin[0].end():]
+
 
 
 def preflight(client: Client, foundation: set[str], domain: set[str]) -> dict[str, Any]:
@@ -276,6 +331,7 @@ def execute(client: Client, repo: Path, sha: str, baseline: str,
     client.exposure()
     return {"result": "G1_S_SCHEMA_APPLIED_NOT_G1_ACCEPT",
             "migration_count": len(MIGRATIONS), "domain_relations": len(domain),
+            "applied_sql_sha256": client.applied_payload_hashes,
             "data_copy": "NOT_RUN", "constraints_validated": 0,
             "identity_mapping": "NOT_RUN", "runtime_rls": "NOT_RUN"}
 
