@@ -43,6 +43,14 @@ class DirectWorkerTurnTimeout(DirectWorkerError):
     """The exact 480-second turn deadline, distinct from other failures."""
 
 
+class CodexAccountSessionMissing(DirectWorkerError):
+    """SDK returned no account after a locally restored auth JSON object."""
+
+
+class CodexAccountLookupFailed(DirectWorkerError):
+    """SDK account lookup failed without a safe authentication diagnosis."""
+
+
 @dataclass(frozen=True)
 class DirectWorkerHandoff:
     project: str
@@ -721,9 +729,24 @@ def run_direct_worker(
             report_codex_phase("sdk_start")
             with Codex(config=config) as codex:
                 report_codex_phase("account_lookup")
-                account = codex.account(refresh_token=False)
-                if account.account is None:
-                    raise DirectWorkerError("Codex account session is missing")
+                try:
+                    account = codex.account(refresh_token=False)
+                except RepairPlanTimeout:
+                    raise
+                except Exception:
+                    print(
+                        "DIRECT_CODEX_FAILURE code=CODEX_AUTH_LOOKUP_ERROR "
+                        "phase=account_lookup",
+                        flush=True,
+                    )
+                    raise CodexAccountLookupFailed("Codex account lookup failed") from None
+                if getattr(account, "account", None) is None:
+                    print(
+                        "DIRECT_CODEX_FAILURE code=CODEX_AUTH_ACCOUNT_UNAVAILABLE "
+                        "phase=account_lookup",
+                        flush=True,
+                    )
+                    raise CodexAccountSessionMissing("Codex account session is missing")
                 report_codex_phase("thread_start")
                 thread = codex.thread_start(
                     approval_mode=ApprovalMode.deny_all,
