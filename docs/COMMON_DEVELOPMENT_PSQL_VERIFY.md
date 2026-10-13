@@ -273,3 +273,60 @@ offline CI.
 SQL execution, synthetic writes, real cleanup, credential change,
 provider dispatch, paid add-on, EAS/OTA or Production work is part of
 the preparation PR.
+
+
+## 2026-10-13 — actual G1-V failed preflight and Supavisor backend GUC recovery
+
+**Observed failure, not a PASS:** authenticated SANJINWORKS Owner
+workflow [#38349605506](https://github.com/ChoiWonJae850610/WONJAE-DISPATCHER-RUNNER/actions/runs/38349605506),
+registered project/classmo gate, exact registered DEV-CONTROL SHA
+`26b95d6b637980651d10b21fa266eec96c767aae`,
+CLASSMO source SHA `6b3ad10edbe0999316964d68e3214393fb0c60ed`.
+Both the exact Owner gate and integrated source-validation admission
+passed. The first **read-only preflight SQL** then failed with
+`PSQL_SCRIPT_FAILED`. Its archived receipt reports preflight/runtime/
+race/cleanup/zero-residue `NOT_RUN`; no persistent fixture was created.
+
+A read-only investigation of Supabase Development PostgreSQL/Supavisor
+logs from 2026-10-13T05:05:18–23Z proves successful Session Pooler SCRAM
+authentication and an actual PostgreSQL backend query (not a DNS,
+password or TLS failure). The first `DO` block raised SQLSTATE
+`P0001` at its initial authorization check, which tests the
+`postgres` session/current user and fixed
+`current_setting('classmo.g1v_authorized', true)` value. The server
+connection logs identify `postgres` as the database user. A session
+GUC not carried from libpq startup `PGOPTIONS` through Supavisor is
+a plausible cause; the initial failure receipt alone cannot prove
+which predicate failed. No further SQL query was executed during
+diagnosis.
+
+**Narrow common Runner correction:** keep the original exact project,
+Session Pooler hostname, port `5432`, TLS `verify-full`, existing
+Owner-entered Secrets and product SQL unchanged. Once the original
+registered Development-only GUC contract is validated, issue an
+allowlisted fixed literal `SET classmo.g1v_authorized` **inside each
+psql connection**, before any file or query. For independently held
+race sessions A/B, issue and verify the same fixed GUC with a server
+`current_setting` readback before launching their pinned SQL. This
+is supported by Supabase Session Pooler mode, which preserves
+session-level `SET`:
+https://supabase.com/docs/guides/database/postgres/timeouts
+
+No arbitrary source-authored session options, SQL commands, credentials,
+unreviewed PostgreSQL users or connection strings are accepted.
+The verifier categorizes a small set of known psql errors into fixed
+non-secret codes instead of publishing raw stderr. Unsupported cases
+remain `PSQL_SCRIPT_FAILED`; no database output, secrets, external
+user records or SQL bodies are included in GitHub receipts.
+
+Offline mocked subprocess regressions prove the exact fixed SET
+precedes every preflight/runtime/readback/cleanup file and lock probe,
+and each independent backend rejects an unverified setting. They
+also assert no real PostgreSQL call, no arbitrary GUC, no secret in
+arguments/logs, and preservation of previous product behavior.
+
+**Status: correction PR PREPARED ONLY; no merge, no retry, no Provider
+dispatch, no DB/SQL, no credential or privilege changes, no Production
+or paid add-on.** A separate approved Runner merge and exact integrated
+Validation/Sweeper must succeed. Only a later authenticated SANJINWORKS
+Owner retry can provide real PostgreSQL preflight/race/cleanup evidence.
