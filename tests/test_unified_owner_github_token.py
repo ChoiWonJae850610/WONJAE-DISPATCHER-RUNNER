@@ -44,7 +44,7 @@ def test_owner_token_is_available_to_every_active_product_route() -> None:
 
 
 def test_archived_product_workflows_accept_shared_token_without_cross_project() -> None:
-    for project, filename in zip(PROJECTS, LEGACY):
+    for project, filename in zip(PROJECTS, LEGACY, strict=True):
         raw = caller(filename)
         expected = (
             "secrets.OWNER_GITHUB_TOKEN || "
