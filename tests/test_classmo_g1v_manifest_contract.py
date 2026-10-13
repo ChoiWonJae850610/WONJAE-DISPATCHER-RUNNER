@@ -245,3 +245,34 @@ def test_connection_env_rejects_direct_arbitrary_setting_even_with_classmo_targe
             "classmo.g1v_authorized": "CLASSMO-EDITORIAL-G1V-FIXTURE-001",
             "search_path": "public",
         })
+
+
+def test_offline_classmo_git_blob_plan_and_registered_ipv4_route_without_db(
+    tmp_path,
+):
+    import sys
+
+    repo, sha, plan_path, blob = classmo_style_repo(tmp_path)
+    evidence = tmp_path / "no-runtime-execution.json"
+    summary = tmp_path / "no-runtime-summary.md"
+    argv = [
+        sys.executable, str(MODULE), "--repo", str(repo),
+        "--source-sha", sha, "--project-ref", m.CLASSMO_G1V_REF,
+        "--plan-path", plan_path, "--plan-blob", blob,
+        "--evidence", str(evidence), "--summary", str(summary),
+        "--connection-mode", "session_pooler",
+        "--pooler-host", "aws-0-ap-northeast-2.pooler.supabase.com",
+        "--require-race",
+    ]
+    result = subprocess.run(argv, capture_output=True, text=True, check=False)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "PSQL_VERIFIER=SOURCE_PLAN_VALIDATED_ONLY" in result.stdout
+    assert not evidence.exists()
+    assert not summary.exists()
+    argv[argv.index("aws-0-ap-northeast-2.pooler.supabase.com")] = (
+        "aws-0-ap-northeast-1.pooler.supabase.com"
+    )
+    blocked = subprocess.run(argv, capture_output=True, text=True, check=False)
+    assert blocked.returncode == 1
+    assert "PSQL_POOLER_TARGET_NOT_REGISTERED" in blocked.stdout
+    assert not evidence.exists()
