@@ -30,7 +30,8 @@ def test_provider_gate_core_rechecks_identity_validation_and_registered_executor
         '"wafl_supabase_g1_readonly", "wafl_supabase_g1_schema_apply", '
         '"classmo_editorial_016_readonly", '
         '"classmo_editorial_016_schema_apply", '
-        '"registered_supabase_migration_v1"].include?(executor)' in raw
+        '"registered_supabase_migration_v1", '
+        '"registered_development_psql_verify_v1"].include?(executor)' in raw
     )
     assert 'action["type"] == "PROVIDER_GATE"' in raw
     assert 'action["gate"] == gate' in raw
@@ -178,3 +179,29 @@ def test_wafl_r2_existing_worker_gate_is_disabled_without_separate_owner_activat
     assert "wrangler r2 bucket create" not in core
     assert "wrangler deploy --prod" not in core
 
+
+
+def test_psql_verifier_owner_workflow_uses_scoped_development_only_secrets():
+    from pathlib import Path
+
+    caller = Path(".github/workflows/provider-gate-approval.yml").read_text()
+    core = Path(".github/workflows/provider-gate-approval-core.yml").read_text()
+    assert "CLASSMO_G1V_DEV_DB_PASSWORD" in caller
+    assert "CLASSMO_G1V_DEV_DB_CA_PEM" in caller
+    assert "development_db_password:" in core
+    assert "development_db_ca_pem:" in core
+    for check in [
+        'config["provider"] == "postgresql_psql"',
+        'config["environment"] == "development"',
+        'config["ready_for_owner"] == true',
+        'config["production"] == false',
+        'config["destructive"] == false',
+        'config["require_independent_race"] == true',
+        'config["connection_mode"] == "direct"',
+        "scripts/common_development_psql_verify.py",
+        "--require-race --execute",
+        'WONJAE_OWNER_PSQL_APPROVED="yes"',
+    ]:
+        assert check in core
+    assert "if: env.PROVIDER_EXECUTOR == 'registered_development_psql_verify_v1'" in core
+    assert "if: env.PROVIDER_EXECUTOR == 'registered_development_psql_verify_v1' && always()" in core
