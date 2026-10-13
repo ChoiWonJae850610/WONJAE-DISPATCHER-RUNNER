@@ -81,6 +81,8 @@ def exact_file(repo: Path, source_sha: str, rel: str, blob: str, *, plan: bool) 
                 found = re.match(r"\\([a-zA-Z_]+)", stripped)
                 require(found is not None and found.group(1).lower() in allowed and
                         "`" not in stripped, "PSQL_META_COMMAND_UNSAFE")
+        if re.search(r"(?im)^\s*\\set\s+ON_ERROR_STOP\s+(?:off|0|false)\b", sql):
+            raise VerificationBlocked("PSQL_ERROR_STOP_OVERRIDE_UNSAFE")
         if re.search(r"(?is)\bcopy\b[^;]*\bprogram\b", sql):
             raise VerificationBlocked("PSQL_PROGRAM_EXECUTION_UNSAFE")
     return path
