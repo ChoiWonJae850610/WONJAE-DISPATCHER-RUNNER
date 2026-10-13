@@ -173,3 +173,58 @@ A successful G1-V result attests only the registered synthetic DB runtime,
 distinct-session lock conflict, cleanup and zero-residue assertions. A
 separate Provider-success product document PR and authenticated Owner
 merge are still required to expose the next source task.
+
+
+## G1-V source plan compatibility (2026-10-13, preparation only)
+
+The exact integrated CLASSMO source
+6b3ad10edbe0999316964d68e3214393fb0c60ed contains
+supabase/tests/editorial_g1v_plan.json with eight phase objects in the
+shape {"path": "...", "git_blob": "<40 lowercase Git blob SHA>"}.
+The earlier common harness demanded the key "blob" instead.
+
+The shared verifier now accepts **either** the original
+{"path", "blob"} contract or exactly {"path", "git_blob"} for each
+phase. Both continue to run the same immutable on-disk Git-blob SHA-1
+and "exact source commit:path" verification. Supplying both keys,
+unknown keys, malformed hashes, changed local SQL or a stale source
+still blocks before any connection. No product manifest or SQL is changed.
+
+The integrated CLASSMO plan also declares the fixed custom setting
+"classmo.g1v_authorized" with value
+"CLASSMO-EDITORIAL-G1V-FIXTURE-001" under its
+execution_contract.required_session_settings.
+No arbitrary product-authored session settings, generic SQL editor or
+libpq connection options may flow through.
+
+Only this exact checked product ref and task identity, single matching
+GUC name/value, postgres session role, on-error-stop and distinct
+read-committed session expectation are accepted. The Python harness
+constructs a **constant** PGOPTIONS value from its audited allowlist,
+never from arbitrary plan-provided option text, and does not inherit
+the caller's PGOPTIONS/PGSERVICE. All preflight, runtime, independent
+A/B sessions, lock probes, readback, cleanup and zero-residue subprocess
+connections inherit the same private, isolated libpq environment.
+The custom GUC is not a password, deployment token or permission grant.
+The database SQL itself checks the fixed GUC and trusted Development
+project/environment before performing task-scoped fixture writes.
+
+PostgreSQL documents PGOPTIONS as a libpq environment setting for
+per-connection options using -c name=value:
+https://www.postgresql.org/docs/current/config-setting.html
+
+Offline regressions reproduce CLASSMO's actual manifest **shape**
+with synthetic SQL files and exact new Git blob pins, including
+unregistered keys, injected option strings, target/task mismatch and
+environment propagation through each type of connection. The eight
+actual CLASSMO phase blobs were also cross-checked against the
+corresponding files at the integrated CLASSMO source SHA; the private
+product SQL and full manifest are not copied into the public common
+Runner tests.
+
+This common-code PR neither invokes the Owner gate nor opens a
+PostgreSQL connection. It cannot establish real SQL, independent
+concurrency, cleanup or device PASS. The separate G1-V Owner workflow
+still needs configured Development DB password/CA secrets and explicit
+SANJINWORKS authentication when the Runner update is actually
+integrated under independent approval.

@@ -28,6 +28,11 @@ RACE = {"fixture_setup", "race_a", "race_b", "race_readback"}
 MAX_FILE = 256 * 1024
 MAX_OUTPUT = 64 * 1024
 STEP_TIMEOUT = 60
+# The only currently registered GUC contract is CLASSMO Development G1-V.
+# Do not accept plan-authored libpq options, alternate GUCs or arbitrary values.
+CLASSMO_G1V_REF = "hfclkbqzxiqhcckwknih"
+CLASSMO_G1V_TASK = "CLASSMO-EDITORIAL-G1V-FIXTURE-001"
+CLASSMO_G1V_SETTINGS = {"classmo.g1v_authorized": CLASSMO_G1V_TASK}
 
 
 class VerificationBlocked(Exception):
@@ -111,10 +116,15 @@ def load_plan(repo: Path, source_sha: str, project_ref: str,
     require(not (set(phases) & RACE) or RACE.issubset(phases),
             "PSQL_RACE_PHASES_INCOMPLETE")
     for value in phases.values():
-        require(isinstance(value, dict) and set(value) == {"path", "blob"} and
-                isinstance(value["path"], str) and isinstance(value["blob"], str),
-                "PSQL_PHASE_PIN_INVALID")
-        exact_file(repo, source_sha, value["path"], value["blob"], plan=False)
+        # Both contracts are supported, but the pin is always checked against
+        # the exact source commit AND Git's on-disk blob. Never trust either
+        # manifest spelling as proof that the SQL matches the source SHA.
+        require(isinstance(value, dict) and
+                set(value) in ({"path", "blob"}, {"path", "git_blob"}) and
+                isinstance(value["path"], str), "PSQL_PHASE_PIN_INVALID")
+        pinned_blob = value.get("blob", value.get("git_blob"))
+        require(isinstance(pinned_blob, str), "PSQL_PHASE_PIN_INVALID")
+        exact_file(repo, source_sha, value["path"], pinned_blob, plan=False)
     variables = plan.get("variables", {})
     require(isinstance(variables, dict) and len(variables) <= 20,
             "PSQL_VARIABLES_INVALID")
@@ -129,10 +139,30 @@ def load_plan(repo: Path, source_sha: str, project_ref: str,
             (isinstance(marker, str) and ERROR_MARKER.fullmatch(marker) is not None),
             "PSQL_RACE_EXPECTATION_INVALID")
     require(marker is None or RACE.issubset(phases), "PSQL_RACE_EXPECTATION_INVALID")
+    registered_session_settings(plan)
     return plan
 
 
-def connection_env(project_ref: str, settings: dict[str, str]) -> dict[str, str]:
+def registered_session_settings(plan: dict[str, Any]) -> dict[str, str]:
+    """Only the approved CLASSMO G1-V custom GUC may reach libpq sessions."""
+    contract = plan.get("execution_contract", {})
+    require(isinstance(contract, dict), "PSQL_SESSION_CONTRACT_INVALID")
+    required = contract.get("required_session_settings", {})
+    require(isinstance(required, dict), "PSQL_SESSION_SETTINGS_INVALID")
+    if required:
+        require(plan.get("project_ref") == CLASSMO_G1V_REF and
+                plan.get("source_task_id") == CLASSMO_G1V_TASK and
+                required == CLASSMO_G1V_SETTINGS and
+                contract.get("session_user") == "postgres" and
+                contract.get("psql_on_error_stop") is True and
+                contract.get("distinct_backend_sessions") is True and
+                contract.get("race_isolation") == "read committed",
+                "PSQL_SESSION_SETTINGS_NOT_REGISTERED")
+    return dict(required)
+
+
+def connection_env(project_ref: str, settings: dict[str, str], *,
+                   session_settings: dict[str, str] | None = None) -> dict[str, str]:
     host = settings.get("WONJAE_DEV_PGHOST", "")
     user = settings.get("WONJAE_DEV_PGUSER", "")
     port = settings.get("WONJAE_DEV_PGPORT", "")
@@ -147,6 +177,11 @@ def connection_env(project_ref: str, settings: dict[str, str]) -> dict[str, str]
     require(direct or session_pool, "PSQL_TARGET_NOT_PROJECT_SCOPED")
     require(port == "5432" and database == "postgres" and bool(password),
             "PSQL_CONNECTION_FIELDS_INVALID")
+    requested = session_settings if session_settings is not None else {}
+    require(isinstance(requested, dict) and
+            (not requested or (project_ref == CLASSMO_G1V_REF and
+                               requested == CLASSMO_G1V_SETTINGS)),
+            "PSQL_SESSION_SETTINGS_NOT_REGISTERED")
     certificate = Path(cert)
     require(bool(cert) and certificate.is_file() and
             not certificate.is_symlink(), "PSQL_SSL_CERT_MISSING")
@@ -161,6 +196,11 @@ def connection_env(project_ref: str, settings: dict[str, str]) -> dict[str, str]
         "PGCONNECT_TIMEOUT": "10", "PGAPPNAME": "wonjae-dev-psql-verify",
         "PGCLIENTENCODING": "UTF8",
     })
+    if requested:
+        # Fixed literal, NOT a concatenation of untrusted plan values. The
+        # server applies it to every new connection (preflight, runtime,
+        # race A/B, readback, teardown); no psql CLI or raw PGOPTIONS passthrough.
+        env["PGOPTIONS"] = "-c classmo.g1v_authorized=" + CLASSMO_G1V_TASK
     return env
 
 
@@ -409,7 +449,10 @@ def main() -> int:
             return 0
         require(os.getenv("WONJAE_OWNER_PSQL_APPROVED") == "yes",
                 "PSQL_OWNER_WORKFLOW_APPROVAL_MISSING")
-        env = connection_env(args.project_ref, dict(os.environ))
+        env = connection_env(
+            args.project_ref, dict(os.environ),
+            session_settings=registered_session_settings(plan),
+        )
         result = verify(plan, repo, args.source_sha,
                         PsqlRunner(env, plan.get("variables", {})))
         evidence = Path(args.evidence)
