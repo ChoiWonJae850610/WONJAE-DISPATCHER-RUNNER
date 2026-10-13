@@ -98,3 +98,32 @@ actual runtime/DB readback.
 4. Future source/provider successor scopes must be prepared in the
    applicable **product repository** with Owner merge; the common Runner
    does not infer product requirements from a historical roadmap.
+
+
+## Provider -> SOURCE_READY -> next source terminal (2026-10-13)
+
+A source task that ends at an independent Provider gate consumes its own
+after_source_success. Do **not** reuse that now-null terminal as the follow-on
+source task's after_source_success. When a Provider gate has a predeclared
+after_provider_success SOURCE_READY, the product may additionally declare:
+
+    after_provider_source_success:
+      type: DECISION_REQUIRED
+      title: Pending separately scoped post-source provider/media registration
+      source_task_id: null
+      owner_action: Prepare bounded next Owner registration
+      source_scope: []
+      gate: null
+    after_provider_source_success_queue: []
+
+After a verified Provider PASS, the generic document-only handoff copies
+this separately declared, reviewed follow-on terminal into the emitted product
+execution-state PR and clears the staging keys. Existing direct
+after_source_success declarations remain backward compatible where they were
+not consumed by a preceding Source stage. Conflicting or invalid terminals
+are rejected before opening any product PR. Each new source remains an
+authenticated separate SANJINWORKS Owner click and canonical CI event.
+
+For CLASSMO, after its *future* G1-V PASS this can make 026-003 source work
+READY once a new **state-only product document PR** has passed its own CI and
+the Owner merges it. It does not backfill G1-S's historical SUCCESS.
