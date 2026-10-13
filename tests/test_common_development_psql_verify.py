@@ -285,3 +285,33 @@ def test_psql_binary_invocation_is_non_shell_and_stops_on_error(monkeypatch):
     assert "-X" in args and "ON_ERROR_STOP=1" in args
     assert "-f" in args and args[-1] == "-"
     assert "PGPASSWORD" not in " ".join(args)
+
+
+def test_g1v_requires_both_real_race_phases_and_conflict_expectation(tmp_path):
+    import sys
+
+    def attempt(race):
+        target = tmp_path / ("withrace" if race else "norace")
+        target.mkdir()
+        root, sha, plan_path, blob = repo_plan(target, race=race)
+        return subprocess.run(
+            [
+                sys.executable, str(SOURCE),
+                "--repo", str(root), "--source-sha", sha,
+                "--project-ref", REF, "--plan-path", plan_path,
+                "--plan-blob", blob,
+                "--evidence", str(target / "receipt.json"),
+                "--summary", str(target / "summary.txt"),
+                "--require-race",
+            ], capture_output=True, text=True, check=False,
+        )
+
+    prepared = attempt(True)
+    assert prepared.returncode == 0, prepared.stderr
+    assert "SOURCE_PLAN_VALIDATED_ONLY" in prepared.stdout
+    assert not (tmp_path / "withrace" / "receipt.json").exists()
+
+    incomplete = attempt(False)
+    assert incomplete.returncode == 1
+    assert "PSQL_INDEPENDENT_RACE_NOT_REGISTERED" in incomplete.stdout
+    assert not (tmp_path / "norace" / "receipt.json").exists()
