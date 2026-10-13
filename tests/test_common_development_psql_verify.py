@@ -81,6 +81,39 @@ def test_no_source_drift_or_path_escape_is_allowed(tmp_path):
         m.exact_file(root, sha, "../../private.sql", "b" * 40, plan=False)
 
 
+
+
+@pytest.mark.parametrize("unsafe_sql", [
+    r"\! echo forbidden",
+    r"\i unpinned.sql",
+    r"\setenv PGHOST attacker",
+    r"\copy test to PROGRAM 'echo bad'",
+    "COPY public.test TO PROGRAM 'echo bad';",
+    r"\gexec",
+    r"\set value `uname`",
+    r"\set ON_ERROR_STOP off",
+])
+def test_even_pinned_scripts_cannot_execute_shell_or_override_psql_safety(
+    tmp_path, unsafe_sql,
+):
+    root, _sha, plan_path, _blob = repo_plan(tmp_path, race=False)
+    manifest_path = root / plan_path
+    manifest = json.loads(manifest_path.read_text())
+    runtime = root / manifest["phases"]["runtime"]["path"]
+    text = unsafe_sql + "\n"
+    runtime.write_text(text, encoding="utf-8")
+    digest = hashlib.sha1(
+        b"blob " + str(len(text.encode())).encode() + b"\0" + text.encode()
+    ).hexdigest()
+    manifest["phases"]["runtime"]["blob"] = digest
+    manifest_path.write_text(json.dumps(manifest, sort_keys=True), encoding="utf-8")
+    git(root, "add", "supabase/tests")
+    git(root, "commit", "-qm", "attempt unsafe pinned psql script")
+    sha = git(root, "rev-parse", "HEAD")
+    blob = git(root, "rev-parse", "HEAD:" + plan_path)
+    with pytest.raises(m.VerificationBlocked, match="PSQL_.*UNSAFE"):
+        m.load_plan(root, sha, REF, plan_path, blob)
+
 def test_runtime_plan_requires_full_pinned_cleanup_even_without_race(tmp_path):
     root, sha, plan_path, blob = repo_plan(tmp_path, race=False)
     manifest_file = root / plan_path
