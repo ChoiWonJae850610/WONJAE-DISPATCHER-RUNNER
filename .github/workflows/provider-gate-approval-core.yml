@@ -983,3 +983,23 @@ jobs:
           path: ${{ runner.temp }}/classmo-provider-evidence.json
           if-no-files-found: error
           retention-days: 30
+      # No cross-provider automatic execution. Only prepare the predeclared
+      # successor as a product state-only PR for a later Owner document merge.
+      - name: Prepare predeclared next-stage Owner document PR
+        if: success() && env.PROVIDER_EXECUTOR != 'approval_only'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.product_read_token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          ruby scripts/prepare_provider_successor.rb \
+            --project "$PROJECT" \
+            --gate "$GATE" \
+            --repository "$PRODUCT_REPOSITORY" \
+            --target-branch "$TARGET_BRANCH" \
+            --source-sha "$SOURCE_SHA" \
+            --state-path "$STATE_PATH" \
+            --product-checkout "$GITHUB_WORKSPACE/.approval/product" \
+            --control-checkout "$GITHUB_WORKSPACE/.approval/control" \
+            --run-url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
