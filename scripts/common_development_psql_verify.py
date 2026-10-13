@@ -161,8 +161,24 @@ def registered_session_settings(plan: dict[str, Any]) -> dict[str, str]:
     return dict(required)
 
 
+def registered_target(project_ref: str, mode: str, pooler_host: str) -> tuple[str, str]:
+    """Build one exact reviewed Development endpoint without credentials."""
+    require(REF.fullmatch(project_ref) is not None, "PSQL_IDENTITY_INVALID")
+    if mode == "direct":
+        require(pooler_host == "", "PSQL_UNEXPECTED_POOLER_HOST")
+        return f"db.{project_ref}.supabase.co", "postgres"
+    require(mode == "session_pooler", "PSQL_CONNECTION_MODE_NOT_REGISTERED")
+    # This IPv4 endpoint was read directly from the CLASSMO Development
+    # Session Pooler connection parameters, not inferred from a region.
+    require(project_ref == CLASSMO_G1V_REF and
+            pooler_host == "aws-0-ap-northeast-2.pooler.supabase.com",
+            "PSQL_POOLER_TARGET_NOT_REGISTERED")
+    return pooler_host, f"postgres.{project_ref}"
+
+
 def connection_env(project_ref: str, settings: dict[str, str], *,
-                   session_settings: dict[str, str] | None = None) -> dict[str, str]:
+                   session_settings: dict[str, str] | None = None,
+                   expected_target: tuple[str, str] | None = None) -> dict[str, str]:
     host = settings.get("WONJAE_DEV_PGHOST", "")
     user = settings.get("WONJAE_DEV_PGUSER", "")
     port = settings.get("WONJAE_DEV_PGPORT", "")
@@ -175,6 +191,9 @@ def connection_env(project_ref: str, settings: dict[str, str], *,
         and user == f"postgres.{project_ref}"
     )
     require(direct or session_pool, "PSQL_TARGET_NOT_PROJECT_SCOPED")
+    if expected_target is not None:
+        require((host, user) == expected_target,
+                "PSQL_TARGET_NOT_REGISTERED")
     require(port == "5432" and database == "postgres" and bool(password),
             "PSQL_CONNECTION_FIELDS_INVALID")
     requested = session_settings if session_settings is not None else {}
@@ -435,8 +454,12 @@ def main() -> int:
         parser.add_argument("--" + option, required=True)
     parser.add_argument("--execute", action="store_true")
     parser.add_argument("--require-race", action="store_true")
+    parser.add_argument("--connection-mode", default="direct")
+    parser.add_argument("--pooler-host", default="")
     args = parser.parse_args()
     try:
+        target = registered_target(args.project_ref, args.connection_mode,
+                                   args.pooler_host)
         repo = Path(args.repo).resolve()
         plan = load_plan(repo, args.source_sha, args.project_ref,
                          args.plan_path, args.plan_blob)
@@ -452,6 +475,7 @@ def main() -> int:
         env = connection_env(
             args.project_ref, dict(os.environ),
             session_settings=registered_session_settings(plan),
+            expected_target=target,
         )
         result = verify(plan, repo, args.source_sha,
                         PsqlRunner(env, plan.get("variables", {})))
