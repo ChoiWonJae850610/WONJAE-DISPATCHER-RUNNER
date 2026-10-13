@@ -20,7 +20,7 @@ from urllib.request import Request, urlopen
 ROOT = "https://api.supabase.com/v1/projects"
 SHA = re.compile(r"[0-9a-f]{40}")
 PROJECT = re.compile(r"[a-z]{20}")
-MIGRATION = re.compile(r"[a-z][a-z0-9_]{0,99}")
+MIGRATION = re.compile(r"[a-z0-9][a-z0-9_]{0,99}")
 SQL_PATH = re.compile(r"supabase/migrations/[0-9a-z][0-9a-z_-]*\.sql")
 LEDGER = (
     "select version::text as version, name::text as name "
