@@ -74,7 +74,11 @@ def exact_file(repo: Path, source_sha: str, rel: str, blob: str, *, plan: bool) 
             raise VerificationBlocked("PSQL_SCRIPT_ENCODING_INVALID") from None
         allowed = {"set", "if", "elif", "else", "endif", "echo", "gset", "pset"}
         for line in sql.splitlines():
-            if re.search(r"(?i)\\(?:!|setenv|gexec|copy|i|ir|o|w|cd|c|connect|lo_export|lo_import)(?![a-z_])", line):
+            forbidden = (
+                r"(?i)\\(?:!|setenv|gexec|copy|i|ir|o|w|cd|c|connect|"
+                r"lo_export|lo_import)(?![a-z_])"
+            )
+            if re.search(forbidden, line):
                 raise VerificationBlocked("PSQL_META_COMMAND_UNSAFE")
             stripped = line.lstrip()
             if stripped.startswith("\\"):
