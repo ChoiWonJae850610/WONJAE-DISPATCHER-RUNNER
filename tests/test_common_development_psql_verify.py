@@ -315,3 +315,81 @@ def test_g1v_requires_both_real_race_phases_and_conflict_expectation(tmp_path):
     assert incomplete.returncode == 1
     assert "PSQL_INDEPENDENT_RACE_NOT_REGISTERED" in incomplete.stdout
     assert not (tmp_path / "norace" / "receipt.json").exists()
+
+
+def test_classmo_g1v_registered_session_pooler_matches_owner_parameters(tmp_path):
+    host = "aws-0-ap-northeast-2.pooler.supabase.com"
+    target = m.registered_target(m.CLASSMO_G1V_REF, "session_pooler", host)
+    assert target == (host, "postgres.hfclkbqzxiqhcckwknih")
+    cert = tmp_path / "synthetic-test-ca.pem"
+    cert.write_text("offline test certificate")
+    cfg = {
+        "WONJAE_DEV_PGHOST": host,
+        "WONJAE_DEV_PGUSER": "postgres.hfclkbqzxiqhcckwknih",
+        "WONJAE_DEV_PGPORT": "5432",
+        "WONJAE_DEV_PGDATABASE": "postgres",
+        "WONJAE_DEV_PGPASSWORD": "synthetic-local-test-value",
+        "WONJAE_DEV_PGSSLROOTCERT": str(cert),
+        "PGSERVICE": "untrusted",
+        "PGOPTIONS": "-c search_path=public",
+    }
+    env = m.connection_env(
+        m.CLASSMO_G1V_REF, cfg,
+        expected_target=target,
+        session_settings=m.CLASSMO_G1V_SETTINGS,
+    )
+    assert env["PGHOST"] == host
+    assert env["PGUSER"] == "postgres.hfclkbqzxiqhcckwknih"
+    assert env["PGPORT"] == "5432"
+    assert env["PGDATABASE"] == "postgres"
+    assert env["PGSSLMODE"] == "verify-full"
+    assert env["PGSSLROOTCERT"] == str(cert)
+    assert env["PGOPTIONS"] == (
+        "-c classmo.g1v_authorized=CLASSMO-EDITORIAL-G1V-FIXTURE-001"
+    )
+    assert "PGSERVICE" not in env
+    assert env["PGPASSWORD"] == "synthetic-local-test-value"
+    assert "WONJAE_DEV_PGPASSWORD" not in env
+
+    cfg["WONJAE_DEV_PGUSER"] = "postgres"
+    with pytest.raises(m.VerificationBlocked, match="PSQL_TARGET_NOT_PROJECT_SCOPED"):
+        m.connection_env(
+            m.CLASSMO_G1V_REF, cfg, expected_target=target,
+        )
+    cfg["WONJAE_DEV_PGUSER"] = target[1]
+    cfg["WONJAE_DEV_PGPORT"] = "6543"
+    with pytest.raises(m.VerificationBlocked, match="PSQL_CONNECTION_FIELDS_INVALID"):
+        m.connection_env(
+            m.CLASSMO_G1V_REF, cfg, expected_target=target,
+        )
+    cfg["WONJAE_DEV_PGPORT"] = "5432"
+    cfg["WONJAE_DEV_PGHOST"] = "aws-1-ap-northeast-2.pooler.supabase.com"
+    with pytest.raises(m.VerificationBlocked, match="PSQL_TARGET_NOT_REGISTERED"):
+        m.connection_env(
+            m.CLASSMO_G1V_REF, cfg, expected_target=target,
+        )
+
+
+@pytest.mark.parametrize("project,mode,host,reason", [
+    ("hfclkbqzxiqhcckwknih", "session_pooler",
+     "aws-1-ap-northeast-2.pooler.supabase.com", "PSQL_POOLER_TARGET_NOT_REGISTERED"),
+    ("hfclkbqzxiqhcckwknih", "session_pooler",
+     "aws-0-ap-northeast-1.pooler.supabase.com", "PSQL_POOLER_TARGET_NOT_REGISTERED"),
+    ("hfclkbqzxiqhcckwknih", "session_pooler",
+     "aws-0-ap-northeast-2.pooler.supabase.com:6543", "PSQL_POOLER_TARGET_NOT_REGISTERED"),
+    ("aaaaaaaaaaaaaaaaaaaa", "session_pooler",
+     "aws-0-ap-northeast-2.pooler.supabase.com", "PSQL_POOLER_TARGET_NOT_REGISTERED"),
+    ("hfclkbqzxiqhcckwknih", "transaction_pooler",
+     "aws-0-ap-northeast-2.pooler.supabase.com", "PSQL_CONNECTION_MODE_NOT_REGISTERED"),
+    ("hfclkbqzxiqhcckwknih", "direct",
+     "aws-0-ap-northeast-2.pooler.supabase.com", "PSQL_UNEXPECTED_POOLER_HOST"),
+])
+def test_unregistered_psql_routes_cannot_connect(project, mode, host, reason):
+    with pytest.raises(m.VerificationBlocked, match=reason):
+        m.registered_target(project, mode, host)
+
+
+def test_direct_mode_keeps_legacy_server_and_exact_identity():
+    assert m.registered_target("a" * 20, "direct", "") == (
+        "db." + "a" * 20 + ".supabase.co", "postgres"
+    )
