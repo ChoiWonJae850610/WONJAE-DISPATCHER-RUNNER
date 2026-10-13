@@ -226,9 +226,9 @@ def connection_env(project_ref: str, settings: dict[str, str], *,
         "PGCLIENTENCODING": "UTF8",
     })
     if requested:
-        # Fixed literal, NOT a concatenation of untrusted plan values. The
-        # server applies it to every new connection (preflight, runtime,
-        # race A/B, readback, teardown); no psql CLI or raw PGOPTIONS passthrough.
+        # Fixed literal, NOT untrusted plan values. Supavisor may not carry
+        # startup options into a backend; the verifier also issues explicit
+        # session-level SET before every preflight, race and cleanup script.
         env["PGOPTIONS"] = G1V_PGOPTIONS
     return env
 
@@ -352,6 +352,8 @@ class PsqlRunner:
 class PsqlSession:
     def __init__(self, env: dict[str, str], variables: dict[str, str],
                  initial_sql: str = ""):
+        require(initial_sql in ("", G1V_SESSION_SET),
+                "PSQL_SESSION_SETTINGS_NOT_REGISTERED")
         try:
             self.proc = subprocess.Popen(
                 psql_command(variables, interactive=True), env=env,
@@ -369,8 +371,6 @@ class PsqlSession:
         if initial_sql:
             # Explicit SET + server-side readback is required for each A/B
             # backend. Startup PGOPTIONS alone is not proof on Supavisor.
-            require(initial_sql == G1V_SESSION_SET,
-                    "PSQL_SESSION_SETTINGS_NOT_REGISTERED")
             try:
                 self.send(initial_sql + "\n" + G1V_SESSION_CHECK)
                 require(self.expect("__WONJAE_GUC_READY__", 10) == "t",
