@@ -30,8 +30,7 @@ registered runnable projects or bypass exact SHA, CI and Owner admission.
    unrelated organization/account permissions merely for this setup.
 4. Generate once, copy value locally and enter it **only in the trusted
    Runner repository GitHub Actions Secret**:
-   OWN​ER_GITHUB_TOKEN (actual name: OWNER_GITHUB_TOKEN, with no zero-width
-   characters). Repository: ChoiWonJae850610/WONJAE-DISPATCHER-RUNNER.
+   OWNER_GITHUB_TOKEN. Repository: ChoiWonJae850610/WONJAE-DISPATCHER-RUNNER.
    Never put the PAT in ChatGPT, screenshots, issue/PR comments, CI logs,
    plaintext files, browser URL parameters or source commits.
 
@@ -39,7 +38,7 @@ The new workflow aliases use one secret in all active registered product
 source next/retry/resume, product document PR integration, Provider handoff,
 reconciliation, and bounded recovery routes. Archived product-v2 source
 flows also prefer the same secret. Every caller keeps the current
-PROJECT_WRITE_TOKEN **fallback**, so a not-yet-created shared token
+<PROJECT>_WRITE_TOKEN **fallback**, so a not-yet-created shared token
 does not strand already working projects. The new secret is preferred only
 after the Owner explicitly stores it.
 
