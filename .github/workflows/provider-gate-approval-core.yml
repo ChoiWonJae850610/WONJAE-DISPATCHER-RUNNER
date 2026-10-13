@@ -31,6 +31,10 @@ on:
         required: true
       supabase_access_token:
         required: false
+      development_db_password:
+        required: false
+      development_db_ca_pem:
+        required: false
       expo_token:
         required: false
       cloudflare_token:
@@ -121,7 +125,7 @@ jobs:
           abort("provider gate is not registered") unless config.is_a?(Hash)
           abort("provider gate approval mode mismatch") unless config["approval_mode"] == "sanjinworks_owner_button"
           executor = config["executor"]
-          abort("provider gate executor is unsupported") unless ["approval_only", "classmo_supabase_migration", "classmo_eas_build", "classmo_eas_update", "wafl_supabase_hardening", "wafl_eas_update", "wafl_eas_build", "wafl_r2_preview_deploy", "wafl_supabase_g1_readonly", "wafl_supabase_g1_schema_apply", "classmo_editorial_016_readonly", "classmo_editorial_016_schema_apply", "registered_supabase_migration_v1"].include?(executor)
+          abort("provider gate executor is unsupported") unless ["approval_only", "classmo_supabase_migration", "classmo_eas_build", "classmo_eas_update", "wafl_supabase_hardening", "wafl_eas_update", "wafl_eas_build", "wafl_r2_preview_deploy", "wafl_supabase_g1_readonly", "wafl_supabase_g1_schema_apply", "classmo_editorial_016_readonly", "classmo_editorial_016_schema_apply", "registered_supabase_migration_v1", "registered_development_psql_verify_v1"].include?(executor)
           label = config["label"]
           abort("provider gate label missing") unless label.is_a?(String) && !label.strip.empty?
 
@@ -284,6 +288,34 @@ jobs:
               "PROVIDER_REGISTERED_MIGRATION_BLOB" => config["migration_blob"],
               "PROVIDER_REGISTERED_MIGRATION_NAME" => config["migration_name"],
               "PROVIDER_REGISTERED_PRIOR_NAME" => config["expected_prior_migration_name"],
+            )
+          elsif executor == "registered_development_psql_verify_v1"
+            abort("Registered Development psql gate not executable") unless
+              config["approval_mode"] == "sanjinworks_owner_button" &&
+              config["ready_for_owner"] == true &&
+              config["provider"] == "postgresql_psql" &&
+              config["environment"] == "development" &&
+              config["production"] == false &&
+              config["destructive"] == false &&
+              config["credential_mutation"] == false &&
+              config["device_mutation"] == false &&
+              config["require_independent_race"] == true
+            ref = config["project_ref"]
+            plan = config["plan_path"]
+            baseline = config["source_baseline_sha"]
+            abort("Registered Development psql source baseline invalid") unless
+              baseline.is_a?(String) && baseline.match?(/\A[0-9a-f]{40}\z/)
+            abort("Registered Development psql ref invalid") unless
+              ref.is_a?(String) && ref.match?(/\A[a-z]{20}\z/)
+            abort("Registered Development psql plan path invalid") unless
+              plan.is_a?(String) &&
+              plan.match?(/\Asupabase\/tests\/[a-z0-9][a-z0-9_-]*\.json\z/)
+            abort("Registered Development psql uses exact direct DB mode only") unless
+              config["connection_mode"] == "direct"
+            values.merge!(
+              "PROVIDER_PSQL_PROJECT_REF" => ref,
+              "PROVIDER_PSQL_PLAN_PATH" => plan,
+              "PROVIDER_PSQL_BASELINE_SHA" => baseline,
             )
           elsif executor == "classmo_eas_build"
             abort("CLASSMO EAS executor routed to another project") unless project == "CLASSMO"
@@ -1043,6 +1075,58 @@ jobs:
           retention-days: 30
       # No cross-provider automatic execution. Only prepare the predeclared
       # successor as a product state-only PR for a later Owner document merge.
+      # This step only runs following the existing exact Owner gate, branch,
+      # integrated-CI, writer-exclusion and registered Development checks.
+      - name: Registered Development psql · runtime race and synthetic cleanup
+        if: env.PROVIDER_EXECUTOR == 'registered_development_psql_verify_v1'
+        env:
+          WONJAE_DEV_PGPASSWORD: ${{ secrets.development_db_password }}
+          G1V_DEV_CA_PEM: ${{ secrets.development_db_ca_pem }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$WONJAE_DEV_PGPASSWORD" && test -n "$G1V_DEV_CA_PEM" || {
+            echo "::error::PSQL_DEV_CREDENTIAL_OR_CA_NOT_CONFIGURED"
+            exit 1
+          }
+          cert="$RUNNER_TEMP/registered-dev-psql-ca.pem"
+          (umask 077 && printf '%s' "$G1V_DEV_CA_PEM" > "$cert")
+          export WONJAE_DEV_PGSSLROOTCERT="$cert"
+          export WONJAE_DEV_PGHOST="db.$PROVIDER_PSQL_PROJECT_REF.supabase.co"
+          export WONJAE_DEV_PGPORT="5432"
+          export WONJAE_DEV_PGUSER="postgres"
+          export WONJAE_DEV_PGDATABASE="postgres"
+          export WONJAE_OWNER_PSQL_APPROVED="yes"
+          git -C .approval/product merge-base --is-ancestor \
+            "$PROVIDER_PSQL_BASELINE_SHA" "$SOURCE_SHA" || {
+              echo "::error::PSQL_SOURCE_BEFORE_REVIEWED_BASELINE"
+              exit 1
+            }
+          blob="$(git -C .approval/product rev-parse \
+            "$SOURCE_SHA:$PROVIDER_PSQL_PLAN_PATH")"
+          test "$blob" != "" || {
+            echo "::error::PSQL_EXACT_PLAN_BLOB_MISSING"
+            exit 1
+          }
+          python scripts/common_development_psql_verify.py \
+            --repo "$GITHUB_WORKSPACE/.approval/product" \
+            --source-sha "$SOURCE_SHA" \
+            --project-ref "$PROVIDER_PSQL_PROJECT_REF" \
+            --plan-path "$PROVIDER_PSQL_PLAN_PATH" \
+            --plan-blob "$blob" \
+            --evidence "$RUNNER_TEMP/registered-psql-g1v.json" \
+            --summary "$GITHUB_STEP_SUMMARY" \
+            --require-race --execute
+
+      - name: Registered Development psql · archive runtime evidence
+        if: env.PROVIDER_EXECUTOR == 'registered_development_psql_verify_v1' && always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: registered-psql-${{ inputs.project }}-${{ inputs.source_sha }}
+          path: ${{ runner.temp }}/registered-psql-g1v.json
+          if-no-files-found: warn
+          retention-days: 30
+
       - name: Prepare predeclared next-stage Owner document PR
         if: success() && env.PROVIDER_EXECUTOR != 'approval_only'
         continue-on-error: true

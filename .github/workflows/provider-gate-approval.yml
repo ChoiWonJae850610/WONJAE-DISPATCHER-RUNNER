@@ -71,6 +71,9 @@ jobs:
       product_read_token: ${{ secrets.CLASSMO_WRITE_TOKEN }}
       supabase_access_token: ${{ secrets.CLASSMO_SUPABASE_ACCESS_TOKEN }}
       expo_token: ${{ secrets.CLASSMO_EXPO_TOKEN }}
+      # Secrets may be configured by Owner later; never set/rotate here.
+      development_db_password: ${{ secrets.CLASSMO_G1V_DEV_DB_PASSWORD }}
+      development_db_ca_pem: ${{ secrets.CLASSMO_G1V_DEV_DB_CA_PEM }}
 
   esc:
     if: ${{ inputs.project == 'ESC' }}

@@ -134,3 +134,42 @@ zero-residue readback, plus dedicated Development DB connectivity. Only
 after registering a true G1-V provider executor, exact CI and separate
 SANJINWORKS Owner button can it run and unlock 026-003 saved draft source.
 This generic code PR alone does not add a CLASSMO button.
+
+
+## Registered Owner Provider G1-V wiring (2026-10-13 preparation)
+
+The separately reviewed registered_development_psql_verify_v1 executor is
+a shared Provider Gate handler in the existing trusted
+provider-gate-approval-core.yml. The registered product execution-state
+must match the gate, and the DEV-CONTROL registry must specify
+Development-only provider: postgresql_psql, exact project_ref,
+plan_path, connection_mode: direct, require_independent_race: true,
+all side-effect exclusion flags false, and ready_for_owner: true.
+Readiness does not authorize source work or let a missing test plan pass:
+the handler derives the test plan blob **from the exact current product
+source commit**, then validates all SQL blobs again in Python. Its
+mandatory --require-race gate fails closed before connecting if
+any of the real concurrency phases/conflict expectation are missing.
+
+The current CLASSMO caller binds two **optional, presently unconfigured**
+Runner-repository Actions Secrets: CLASSMO_G1V_DEV_DB_PASSWORD and
+CLASSMO_G1V_DEV_DB_CA_PEM. They are not automatically provisioned or
+reused from a Supabase Management API token. The core workflow writes
+the certificate only to a permission-limited Runner temp path; it
+constructs the direct Development DB host/user from the reviewed ref,
+sets verified TLS and passes the database password as a masked
+environment variable, never CLI or evidence. If IPv6/direct DB reachability
+is unsupported, stop and prepare a separate exact session-pooler routing
+review (no guessed hostname or 6543 transaction-pooler fallback).
+
+Missing Secrets block the actual G1-V execution with a clear fixed code
+rather than silently changing permissions or claiming PASS. Before any
+actual connection, the authenticated Owner must separately click the
+G1-V Provider button in SANJINWORKS. The guarded Runner checks registry
+and source SHA, integrated CI, current branch and absence of concurrent
+writers. This common code PR and its CI do not connect to the DB.
+
+A successful G1-V result attests only the registered synthetic DB runtime,
+distinct-session lock conflict, cleanup and zero-residue assertions. A
+separate Provider-success product document PR and authenticated Owner
+merge are still required to expose the next source task.

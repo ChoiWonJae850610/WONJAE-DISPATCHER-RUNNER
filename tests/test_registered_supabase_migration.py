@@ -184,7 +184,10 @@ def test_workflow_is_scoped_to_registered_nonproduction_gate():
         Path(__file__).resolve().parents[1] /
         ".github/workflows/provider-gate-approval-core.yml"
     ).read_text(encoding="utf-8")
-    assert '"registered_supabase_migration_v1"].include?(executor)' in workflow
+    assert (
+        '"registered_supabase_migration_v1", '
+        '"registered_development_psql_verify_v1"].include?(executor)' in workflow
+    )
     for needle in (
         'config["environment"] == "development"',
         'config["ready_for_owner"] == true',

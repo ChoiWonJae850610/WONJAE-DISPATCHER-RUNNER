@@ -66,6 +66,21 @@ def successor_state(state, registry, args)
   end
   after_source = state["after_source_success"]
   queue = state.fetch("source_success_queue", [])
+  # Source->Provider advancement consumes after_source_success, so keep the
+  # NEXT source's terminal gate independently until the Provider is verified.
+  future_source = state["after_provider_source_success"]
+  future_queue = state.fetch("after_provider_source_success_queue", [])
+  demand(future_queue.is_a?(Array) && future_queue.size <= 8,
+         "PROVIDER_SOURCE_QUEUE_INVALID")
+  if next_action["type"] == "SOURCE_READY" && !future_source.nil?
+    demand(after_source.nil? && queue.empty? &&
+           action_ok?(future_source), "PROVIDER_SOURCE_TERMINAL_INVALID")
+    after_source = future_source
+    queue = future_queue
+  else
+    demand(future_source.nil? && future_queue.empty?,
+           "PROVIDER_SOURCE_FIELDS_UNEXPECTED")
+  end
   demand(queue.is_a?(Array) && queue.size <= 8, "SUCCESSOR_QUEUE_INVALID")
   if next_action["type"] == "SOURCE_READY"
     demand(action_ok?(after_source), "SOURCE_SUCCESSOR_REQUIRES_TERMINAL")
@@ -79,7 +94,13 @@ def successor_state(state, registry, args)
   end
   copy = Marshal.load(Marshal.dump(state))
   copy["next_action"] = next_action
+  if next_action["type"] == "SOURCE_READY"
+    copy["after_source_success"] = after_source
+    copy["source_success_queue"] = queue
+  end
   copy.delete("after_provider_success")
+  copy.delete("after_provider_source_success")
+  copy.delete("after_provider_source_success_queue")
   YAML.dump(copy)
 end
 
