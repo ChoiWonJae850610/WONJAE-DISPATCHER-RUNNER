@@ -121,7 +121,7 @@ jobs:
           abort("provider gate is not registered") unless config.is_a?(Hash)
           abort("provider gate approval mode mismatch") unless config["approval_mode"] == "sanjinworks_owner_button"
           executor = config["executor"]
-          abort("provider gate executor is unsupported") unless ["approval_only", "classmo_supabase_migration", "classmo_eas_build", "classmo_eas_update", "wafl_supabase_hardening", "wafl_eas_update", "wafl_eas_build", "wafl_r2_preview_deploy", "wafl_supabase_g1_readonly", "wafl_supabase_g1_schema_apply", "classmo_editorial_016_readonly", "classmo_editorial_016_schema_apply"].include?(executor)
+          abort("provider gate executor is unsupported") unless ["approval_only", "classmo_supabase_migration", "classmo_eas_build", "classmo_eas_update", "wafl_supabase_hardening", "wafl_eas_update", "wafl_eas_build", "wafl_r2_preview_deploy", "wafl_supabase_g1_readonly", "wafl_supabase_g1_schema_apply", "classmo_editorial_016_readonly", "classmo_editorial_016_schema_apply", "registered_supabase_migration_v1"].include?(executor)
           label = config["label"]
           abort("provider gate label missing") unless label.is_a?(String) && !label.strip.empty?
 
@@ -253,6 +253,37 @@ jobs:
             values.merge!(
               "PROVIDER_C016_PROJECT_REF" => config["project_ref"],
               "PROVIDER_C016_BLOB" => config["migration_016_blob"],
+            )
+          elsif executor == "registered_supabase_migration_v1"
+            abort("Registered migration project or environment mismatch") unless
+              config["provider"] == "supabase_management_api" &&
+              config["environment"] == "development" &&
+              config["ready_for_owner"] == true &&
+              config["production"] == false &&
+              config["destructive"] == false &&
+              config["credential_mutation"] == false &&
+              config["device_mutation"] == false
+            abort("Registered migration target ref missing") unless
+              config["project_ref"].is_a?(String) &&
+              config["project_ref"].match?(/\A[a-z]{20}\z/)
+            abort("Registered migration path or blob invalid") unless
+              config["migration_path"].is_a?(String) &&
+              config["migration_path"].match?(/\Asupabase\/migrations\/[0-9a-z][0-9a-z_-]*\.sql\z/) &&
+              config["migration_blob"].is_a?(String) &&
+              config["migration_blob"].match?(/\A[0-9a-f]{40}\z/)
+            %w[migration_name expected_prior_migration_name].each do |key|
+              abort("Registered migration identity #{key} invalid") unless
+                config[key].is_a?(String) &&
+                config[key].match?(/\A[a-z0-9][a-z0-9_]{0,99}\z/)
+            end
+            abort("Registered migration cannot replay prior migration") if
+              config["migration_name"] == config["expected_prior_migration_name"]
+            values.merge!(
+              "PROVIDER_REGISTERED_PROJECT_REF" => config["project_ref"],
+              "PROVIDER_REGISTERED_MIGRATION_PATH" => config["migration_path"],
+              "PROVIDER_REGISTERED_MIGRATION_BLOB" => config["migration_blob"],
+              "PROVIDER_REGISTERED_MIGRATION_NAME" => config["migration_name"],
+              "PROVIDER_REGISTERED_PRIOR_NAME" => config["expected_prior_migration_name"],
             )
           elsif executor == "classmo_eas_build"
             abort("CLASSMO EAS executor routed to another project") unless project == "CLASSMO"
@@ -951,6 +982,33 @@ jobs:
         with:
           name: classmo-016-schema-${{ inputs.source_sha }}
           path: ${{ runner.temp }}/classmo-016-schema.json
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Registered Supabase · Development migration and ledger readback
+        if: env.PROVIDER_EXECUTOR == 'registered_supabase_migration_v1'
+        env:
+          REGISTERED_SUPABASE_ACCESS_TOKEN: ${{ secrets.supabase_access_token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python scripts/registered_supabase_migration.py \
+            --repo "$GITHUB_WORKSPACE/.approval/product" \
+            --source-sha "$SOURCE_SHA" \
+            --project-ref "$PROVIDER_REGISTERED_PROJECT_REF" \
+            --migration-path "$PROVIDER_REGISTERED_MIGRATION_PATH" \
+            --migration-blob "$PROVIDER_REGISTERED_MIGRATION_BLOB" \
+            --migration-name "$PROVIDER_REGISTERED_MIGRATION_NAME" \
+            --expected-prior-migration "$PROVIDER_REGISTERED_PRIOR_NAME" \
+            --summary "$GITHUB_STEP_SUMMARY" \
+            --evidence "$RUNNER_TEMP/registered-supabase-migration.json"
+
+      - name: Registered Supabase · archive schema-only receipt
+        if: env.PROVIDER_EXECUTOR == 'registered_supabase_migration_v1' && success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: registered-migration-${{ inputs.project }}-${{ inputs.source_sha }}
+          path: ${{ runner.temp }}/registered-supabase-migration.json
           if-no-files-found: error
           retention-days: 30
 
