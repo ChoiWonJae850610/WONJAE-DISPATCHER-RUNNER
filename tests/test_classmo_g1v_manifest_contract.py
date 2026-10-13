@@ -216,11 +216,12 @@ def test_registered_classmo_guc_reaches_every_new_backend_with_no_cli_injection(
     monkeypatch.setattr(m.PsqlRunner, "_exec", fake_exec)
 
     class FakeSession:
-        def __init__(self, given_env, variables):
-            observed.append(("independent_session", given_env, variables))
+        def __init__(self, given_env, variables, initial_sql):
+            observed.append(("independent_session", given_env, initial_sql))
 
     monkeypatch.setattr(m, "PsqlSession", FakeSession)
     runner = m.PsqlRunner(env, {})
+    assert runner.initial_sql == m.G1V_SESSION_SET
     runner.file(Path("/offline/synthetic_preflight.sql"))
     runner.file(Path("/offline/synthetic_runtime.sql"))
     runner.query("select pg_blocking_pids(99);")
@@ -230,10 +231,14 @@ def test_registered_classmo_guc_reaches_every_new_backend_with_no_cli_injection(
     runner.file(Path("/offline/synthetic_zero_residue.sql"))
     assert len(observed) == 7
     assert all(item[1] is env and item[1]["PGOPTIONS"] == expected for item in observed)
-    assert all(
-        "PGOPTIONS" not in " ".join(item[2])
-        for item in observed if item[0] == "sql_or_probe"
-    )
+    for kind, _environment, payload in observed:
+        if kind == "sql_or_probe":
+            assert "-c" in payload
+            assert m.G1V_SESSION_SET in payload
+            assert "PGPASSWORD" not in " ".join(payload)
+            assert "PGOPTIONS" not in " ".join(payload)
+        else:
+            assert payload == m.G1V_SESSION_SET
 
 
 def test_connection_env_rejects_direct_arbitrary_setting_even_with_classmo_target(
