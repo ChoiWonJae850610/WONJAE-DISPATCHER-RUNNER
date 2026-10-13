@@ -485,7 +485,8 @@ def test_recovery_workflow_is_not_a_new_source_or_merge_executor():
         assert "workflow_run.conclusion == 'failure'" in job["if"]
         assert "workflow_run.event == 'workflow_dispatch'" in job["if"]
         assert job["secrets"]["product_write_token"] == (
-            "${{ secrets." + project + "_WRITE_TOKEN }}"
+            "${{ secrets.OWNER_GITHUB_TOKEN || secrets."
+            + project + "_WRITE_TOKEN }}"
         )
         assert job["uses"] == "./.github/workflows/automatic-source-recovery-docs-core.yml"
     core = yaml.safe_load(

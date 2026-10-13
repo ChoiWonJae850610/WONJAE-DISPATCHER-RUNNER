@@ -93,7 +93,7 @@ jobs:
         env:
           CODEX_AUTH_JSON: ${{ secrets.CODEX_AUTH_JSON }}
           CONTROL_READ_TOKEN: ${{ secrets.CONTROL_READ_TOKEN }}
-          MUVEL_WRITE_TOKEN: ${{ secrets.MUVEL_WRITE_TOKEN }}
+          MUVEL_WRITE_TOKEN: ${{ secrets.OWNER_GITHUB_TOKEN || secrets.MUVEL_WRITE_TOKEN }}
           SECRET_ROTATION_TOKEN: ${{ secrets.SECRET_ROTATION_TOKEN }}
         run: |
           test -n "$CONTROL_REPOSITORY" || { echo "::error::CONTROL_REPOSITORY is missing."; exit 1; }
@@ -197,13 +197,13 @@ jobs:
           repository: ${{ env.PRODUCT_REPOSITORY }}
           ref: ${{ env.SOURCE_SHA }}
           path: .pilot/product
-          token: ${{ secrets.MUVEL_WRITE_TOKEN }}
+          token: ${{ secrets.OWNER_GITHUB_TOKEN || secrets.MUVEL_WRITE_TOKEN }}
           persist-credentials: false
 
       - name: "[03] PRODUCT · verify branch and source identity"
         env:
-          GH_TOKEN: ${{ secrets.MUVEL_WRITE_TOKEN }}
-          PRODUCT_GH_TOKEN: ${{ secrets.MUVEL_WRITE_TOKEN }}
+          GH_TOKEN: ${{ secrets.OWNER_GITHUB_TOKEN || secrets.MUVEL_WRITE_TOKEN }}
+          PRODUCT_GH_TOKEN: ${{ secrets.OWNER_GITHUB_TOKEN || secrets.MUVEL_WRITE_TOKEN }}
           RUNNER_GH_TOKEN: ${{ github.token }}
         run: |
           actual="$(git -C "$PRODUCT_CHECKOUT" rev-parse HEAD)"
@@ -266,7 +266,7 @@ jobs:
 
       - name: "[06] STARTED · publish product branch"
         env:
-          GH_TOKEN: ${{ secrets.MUVEL_WRITE_TOKEN }}
+          GH_TOKEN: ${{ secrets.OWNER_GITHUB_TOKEN || secrets.MUVEL_WRITE_TOKEN }}
         run: |
           cd "$PRODUCT_CHECKOUT"
           gh auth setup-git
@@ -274,7 +274,7 @@ jobs:
 
       - name: "[06] STARTED · create Draft product PR"
         env:
-          GH_TOKEN: ${{ secrets.MUVEL_WRITE_TOKEN }}
+          GH_TOKEN: ${{ secrets.OWNER_GITHUB_TOKEN || secrets.MUVEL_WRITE_TOKEN }}
         run: |
           cd "$PRODUCT_CHECKOUT"
           body_file="$RUNNER_TEMP/muvel-v2-pr-body.md"
@@ -301,7 +301,7 @@ jobs:
 
       - name: "[06] STARTED · read back Draft product PR"
         env:
-          GH_TOKEN: ${{ secrets.MUVEL_WRITE_TOKEN }}
+          GH_TOKEN: ${{ secrets.OWNER_GITHUB_TOKEN || secrets.MUVEL_WRITE_TOKEN }}
         run: |
           json="$(gh pr view "$PILOT_PR_URL" --repo "$PRODUCT_REPOSITORY"             --json number,url,isDraft,state,baseRefName,headRefName,headRefOid)"
           echo "$json" | jq -e --arg branch "$PRODUCT_BRANCH" --arg base "$TARGET_BRANCH" --arg sha "$PILOT_HEAD_SHA" '
@@ -318,7 +318,7 @@ jobs:
       - name: "[06] STARTED · persist exact source run checkpoint"
         env:
           GH_TOKEN: ${{ github.token }}
-          PRODUCT_GH_TOKEN: ${{ secrets.MUVEL_WRITE_TOKEN }}
+          PRODUCT_GH_TOKEN: ${{ secrets.OWNER_GITHUB_TOKEN || secrets.MUVEL_WRITE_TOKEN }}
         run: PYTHONPATH="$GITHUB_WORKSPACE/src" python scripts/source_terminal.py checkpoint
 
       - name: "[06] NOTIFY · GitHub-native STARTED"
@@ -341,7 +341,7 @@ jobs:
 
       - name: "[07] VALIDATE · exact PR-head Actions with bounded recovery"
         env:
-          GH_TOKEN: ${{ secrets.MUVEL_WRITE_TOKEN }}
+          GH_TOKEN: ${{ secrets.OWNER_GITHUB_TOKEN || secrets.MUVEL_WRITE_TOKEN }}
           CODEX_AUTH_JSON: ${{ secrets.CODEX_AUTH_JSON }}
           SECRET_ROTATION_TOKEN: ${{ secrets.SECRET_ROTATION_TOKEN }}
         run: |
@@ -419,7 +419,7 @@ jobs:
 
       - name: "[08] INTEGRATE · merge to active development branch"
         env:
-          GH_TOKEN: ${{ secrets.MUVEL_WRITE_TOKEN }}
+          GH_TOKEN: ${{ secrets.OWNER_GITHUB_TOKEN || secrets.MUVEL_WRITE_TOKEN }}
         run: |
           python scripts/actions_progress.py INTEGRATE RUNNING --sha "$PILOT_HEAD_SHA" --pr "$PILOT_PR_NUMBER"
           gh pr ready "$PILOT_PR_URL" --repo "$PRODUCT_REPOSITORY"
@@ -432,7 +432,7 @@ jobs:
 
       - name: "[09] VALIDATE · exact integrated-SHA Actions"
         env:
-          GH_TOKEN: ${{ secrets.MUVEL_WRITE_TOKEN }}
+          GH_TOKEN: ${{ secrets.OWNER_GITHUB_TOKEN || secrets.MUVEL_WRITE_TOKEN }}
         run: |
           python scripts/actions_progress.py VALIDATE RUNNING --sha "$INTEGRATED_SHA"
           run_id=""
@@ -453,7 +453,7 @@ jobs:
 
       - name: "[10] RESULT · record PASS"
         env:
-          GH_TOKEN: ${{ secrets.MUVEL_WRITE_TOKEN }}
+          GH_TOKEN: ${{ secrets.OWNER_GITHUB_TOKEN || secrets.MUVEL_WRITE_TOKEN }}
         run: |
           result_file="$RUNNER_TEMP/muvel-v2-result.md"
           {
@@ -500,7 +500,7 @@ jobs:
       - name: "[10] RESULT · close wake issue"
         env:
           GH_TOKEN: ${{ github.token }}
-          PRODUCT_GH_TOKEN: ${{ secrets.MUVEL_WRITE_TOKEN }}
+          PRODUCT_GH_TOKEN: ${{ secrets.OWNER_GITHUB_TOKEN || secrets.MUVEL_WRITE_TOKEN }}
         run: |
           set -euo pipefail
           PYTHONPATH="$GITHUB_WORKSPACE/src" python scripts/source_queue.py record-completed \
@@ -524,7 +524,7 @@ jobs:
         if: ${{ failure() }}
         env:
           GH_TOKEN: ${{ github.token }}
-          PRODUCT_GH_TOKEN: ${{ secrets.MUVEL_WRITE_TOKEN }}
+          PRODUCT_GH_TOKEN: ${{ secrets.OWNER_GITHUB_TOKEN || secrets.MUVEL_WRITE_TOKEN }}
         shell: bash
         run: |
           set -euo pipefail
