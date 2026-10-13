@@ -204,4 +204,7 @@ def test_psql_verifier_owner_workflow_uses_scoped_development_only_secrets():
     ]:
         assert check in core
     assert "if: env.PROVIDER_EXECUTOR == 'registered_development_psql_verify_v1'" in core
-    assert "if: env.PROVIDER_EXECUTOR == 'registered_development_psql_verify_v1' && always()" in core
+    assert (
+        "if: env.PROVIDER_EXECUTOR == 'registered_development_psql_verify_v1' "
+        "&& always()" in core
+    )
