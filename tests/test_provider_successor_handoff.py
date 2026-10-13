@@ -16,7 +16,9 @@ def action(kind: str, gate: str | None = None) -> dict:
         "title": "Next Owner action",
         "source_task_id": "WAFL-NEXT-001" if kind == "SOURCE_READY" else None,
         "owner_action": "Click SANJINWORKS Owner action",
-        "source_scope": ["Implement the bounded next source stage."] if kind == "SOURCE_READY" else [],
+        "source_scope": (
+            ["Implement the bounded next source stage."] if kind == "SOURCE_READY" else []
+        ),
         "gate": gate,
     }
 
