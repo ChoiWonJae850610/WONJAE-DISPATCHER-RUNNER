@@ -310,12 +310,27 @@ jobs:
             abort("Registered Development psql plan path invalid") unless
               plan.is_a?(String) &&
               plan.match?(/\Asupabase\/tests\/[a-z0-9][a-z0-9_-]*\.json\z/)
-            abort("Registered Development psql uses exact direct DB mode only") unless
-              config["connection_mode"] == "direct"
+            mode = config["connection_mode"]
+            pooler_host = config["pooler_host"]
+            case mode
+            when "direct"
+              abort("Unexpected pooler host for direct DB") if config.key?("pooler_host")
+              pooler_host = ""
+            when "session_pooler"
+              abort("Unreviewed CLASSMO G1-V session pooler target") unless
+                project == "CLASSMO" &&
+                gate == "editorial_016_runtime_verify" &&
+                ref == "hfclkbqzxiqhcckwknih" &&
+                pooler_host == "aws-0-ap-northeast-2.pooler.supabase.com"
+            else
+              abort("Unsupported Development psql connection mode")
+            end
             values.merge!(
               "PROVIDER_PSQL_PROJECT_REF" => ref,
               "PROVIDER_PSQL_PLAN_PATH" => plan,
               "PROVIDER_PSQL_BASELINE_SHA" => baseline,
+              "PROVIDER_PSQL_CONNECTION_MODE" => mode,
+              "PROVIDER_PSQL_POOLER_HOST" => pooler_host,
             )
           elsif executor == "classmo_eas_build"
             abort("CLASSMO EAS executor routed to another project") unless project == "CLASSMO"
@@ -1092,9 +1107,35 @@ jobs:
           cert="$RUNNER_TEMP/registered-dev-psql-ca.pem"
           (umask 077 && printf '%s' "$G1V_DEV_CA_PEM" > "$cert")
           export WONJAE_DEV_PGSSLROOTCERT="$cert"
-          export WONJAE_DEV_PGHOST="db.$PROVIDER_PSQL_PROJECT_REF.supabase.co"
+          # The registration pins either direct IPv6 or one reviewed free
+          # session-pooler IPv4 host, never transaction-pooler port 6543.
+          # No operator-provided URL or libpq connection options are accepted.
+          case "$PROVIDER_PSQL_CONNECTION_MODE" in
+            direct)
+              test -z "$PROVIDER_PSQL_POOLER_HOST" || {
+                echo "::error::PSQL_UNEXPECTED_POOLER_HOST"
+                exit 1
+              }
+              export WONJAE_DEV_PGHOST="db.$PROVIDER_PSQL_PROJECT_REF.supabase.co"
+              export WONJAE_DEV_PGUSER="postgres"
+              ;;
+            session_pooler)
+              test "$PROJECT" = "CLASSMO" &&
+              test "$GATE" = "editorial_016_runtime_verify" &&
+              test "$PROVIDER_PSQL_PROJECT_REF" = "hfclkbqzxiqhcckwknih" &&
+              test "$PROVIDER_PSQL_POOLER_HOST" = "aws-0-ap-northeast-2.pooler.supabase.com" || {
+                echo "::error::PSQL_UNREVIEWED_POOLER_TARGET"
+                exit 1
+              }
+              export WONJAE_DEV_PGHOST="$PROVIDER_PSQL_POOLER_HOST"
+              export WONJAE_DEV_PGUSER="postgres.$PROVIDER_PSQL_PROJECT_REF"
+              ;;
+            *)
+              echo "::error::PSQL_CONNECTION_MODE_NOT_REGISTERED"
+              exit 1
+              ;;
+          esac
           export WONJAE_DEV_PGPORT="5432"
-          export WONJAE_DEV_PGUSER="postgres"
           export WONJAE_DEV_PGDATABASE="postgres"
           export WONJAE_OWNER_PSQL_APPROVED="yes"
           git -C .approval/product merge-base --is-ancestor \
@@ -1112,6 +1153,8 @@ jobs:
             --repo "$GITHUB_WORKSPACE/.approval/product" \
             --source-sha "$SOURCE_SHA" \
             --project-ref "$PROVIDER_PSQL_PROJECT_REF" \
+            --connection-mode "$PROVIDER_PSQL_CONNECTION_MODE" \
+            --pooler-host "$PROVIDER_PSQL_POOLER_HOST" \
             --plan-path "$PROVIDER_PSQL_PLAN_PATH" \
             --plan-blob "$blob" \
             --evidence "$RUNNER_TEMP/registered-psql-g1v.json" \

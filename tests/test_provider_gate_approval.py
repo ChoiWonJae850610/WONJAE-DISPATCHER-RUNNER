@@ -197,7 +197,11 @@ def test_psql_verifier_owner_workflow_uses_scoped_development_only_secrets():
         'config["production"] == false',
         'config["destructive"] == false',
         'config["require_independent_race"] == true',
-        'config["connection_mode"] == "direct"',
+        'when "direct"',
+        'when "session_pooler"',
+        'config["pooler_host"]',
+        'PROVIDER_PSQL_CONNECTION_MODE',
+        'PROVIDER_PSQL_POOLER_HOST',
         "scripts/common_development_psql_verify.py",
         "--require-race --execute",
         'WONJAE_OWNER_PSQL_APPROVED="yes"',
@@ -208,3 +212,24 @@ def test_psql_verifier_owner_workflow_uses_scoped_development_only_secrets():
         "if: env.PROVIDER_EXECUTOR == 'registered_development_psql_verify_v1' "
         "&& always()" in core
     )
+
+
+def test_psql_g1v_session_pooler_is_exact_ipv4_development_route_only():
+    from pathlib import Path
+
+    core = Path(".github/workflows/provider-gate-approval-core.yml").read_text()
+    fixed_host = "aws-0-ap-northeast-2.pooler.supabase.com"
+    assert 'ref == "hfclkbqzxiqhcckwknih"' in core
+    assert 'project == "CLASSMO"' in core
+    assert 'gate == "editorial_016_runtime_verify"' in core
+    assert f'pooler_host == "{fixed_host}"' in core
+    assert f'test "$PROVIDER_PSQL_POOLER_HOST" = "{fixed_host}"' in core
+    assert 'export WONJAE_DEV_PGHOST="$PROVIDER_PSQL_POOLER_HOST"' in core
+    assert 'export WONJAE_DEV_PGUSER="postgres.$PROVIDER_PSQL_PROJECT_REF"' in core
+    assert 'export WONJAE_DEV_PGPORT="5432"' in core
+    assert 'export WONJAE_DEV_PGDATABASE="postgres"' in core
+    assert '--connection-mode "$PROVIDER_PSQL_CONNECTION_MODE"' in core
+    assert '--pooler-host "$PROVIDER_PSQL_POOLER_HOST"' in core
+    assert '--require-race --execute' in core
+    assert 'PSQL_UNREVIEWED_POOLER_TARGET' in core
+    assert 'export WONJAE_DEV_PGPORT="6543"' not in core

@@ -143,8 +143,9 @@ a shared Provider Gate handler in the existing trusted
 provider-gate-approval-core.yml. The registered product execution-state
 must match the gate, and the DEV-CONTROL registry must specify
 Development-only provider: postgresql_psql, exact project_ref,
-plan_path, connection_mode: direct, require_independent_race: true,
-all side-effect exclusion flags false, and ready_for_owner: true.
+plan_path, explicitly reviewed connection_mode: direct or session_pooler,
+require_independent_race: true, all side-effect exclusion flags false,
+and ready_for_owner: true.
 Readiness does not authorize source work or let a missing test plan pass:
 the handler derives the test plan blob **from the exact current product
 source commit**, then validates all SQL blobs again in Python. Its
@@ -228,3 +229,47 @@ concurrency, cleanup or device PASS. The separate G1-V Owner workflow
 still needs configured Development DB password/CA secrets and explicit
 SANJINWORKS authentication when the Runner update is actually
 integrated under independent approval.
+
+
+## CLASSMO G1-V: explicitly pinned free IPv4 Session Pooler preparation (2026-10-13)
+
+The CLASSMO Development project (ref `hfclkbqzxiqhcckwknih`) is on
+Supabase Free. The Owner displayed the **actual** connection parameters,
+not a speculative region-derived hostname:
+
+- connection_mode: `session_pooler` (Supavisor shared session mode)
+- pooler_host: `aws-0-ap-northeast-2.pooler.supabase.com`
+- port: `5432` (not transaction-pooler `6543`)
+- database: `postgres`
+- user: `postgres.hfclkbqzxiqhcckwknih`
+- TLS: `verify-full`, using the Owner-entered certificate Secret
+- backend A/B: distinct long-lived PostgreSQL sessions; preserve the
+  real `pg_blocking_pids` contention barrier, revision conflict and
+  exact-ID cleanup/zero-residue checks.
+
+The shared Session Pooler is included with Free and connects through
+IPv4; no paid static IPv4 Add-on or tier upgrade is part of this work.
+Supabase docs:
+https://supabase.com/docs/guides/database/connecting-to-postgres
+
+Two **independent common-system PRs** are needed: the trusted Runner
+accepts only this predeclared project/gate/host and constructs the
+pooler username from the exact project ref; DEV-CONTROL registers this
+exact host for `editorial_016_runtime_verify`. Both must be separately
+merged with exact integrated-SHA CI before the authenticated
+SANJINWORKS Owner may click the real Provider button.
+
+The prior Direct mode remains available for older registered gates.
+Neither the Runner nor Registry may silently switch to transaction
+pooling, arbitrary external poolers or an unreviewed hostname.
+The verifier cross-checks the registered endpoint against the
+isolated libpq environment before SQL. Secrets are never accepted as
+connection-string text or CLI arguments; the two previously
+Owner-entered Runner Secrets are preserved without reading or changing
+them. Their correctness and TLS handshake cannot be inferred from
+offline CI.
+
+**This change is PREPARED ONLY / G1-V NOT_RUN.** No database login,
+SQL execution, synthetic writes, real cleanup, credential change,
+provider dispatch, paid add-on, EAS/OTA or Production work is part of
+the preparation PR.
