@@ -33,6 +33,16 @@ STEP_TIMEOUT = 60
 CLASSMO_G1V_REF = "hfclkbqzxiqhcckwknih"
 CLASSMO_G1V_TASK = "CLASSMO-EDITORIAL-G1V-FIXTURE-001"
 CLASSMO_G1V_SETTINGS = {"classmo.g1v_authorized": CLASSMO_G1V_TASK}
+# Supavisor session mode can accept the libpq startup options while failing
+# to apply them on the PostgreSQL backend. Set the fixed GUC explicitly in
+# *each* backend session before any pinned SQL, without changing credentials.
+G1V_PGOPTIONS = "-c classmo.g1v_authorized=" + CLASSMO_G1V_TASK
+G1V_SESSION_SET = "SET classmo.g1v_authorized = '" + CLASSMO_G1V_TASK + "';"
+G1V_SESSION_CHECK = (
+    "SELECT (current_setting('classmo.g1v_authorized', true) = '"
+    + CLASSMO_G1V_TASK + "') AS wonjae_guc_ok \\gset\n"
+    "\\echo __WONJAE_GUC_READY__:wonjae_guc_ok\n"
+)
 
 
 class VerificationBlocked(Exception):
@@ -219,8 +229,29 @@ def connection_env(project_ref: str, settings: dict[str, str], *,
         # Fixed literal, NOT a concatenation of untrusted plan values. The
         # server applies it to every new connection (preflight, runtime,
         # race A/B, readback, teardown); no psql CLI or raw PGOPTIONS passthrough.
-        env["PGOPTIONS"] = "-c classmo.g1v_authorized=" + CLASSMO_G1V_TASK
+        env["PGOPTIONS"] = G1V_PGOPTIONS
     return env
+
+
+def fixed_session_initializer(env: dict[str, str]) -> str:
+    """Only the audited CLASSMO setting, never untrusted connection options."""
+    startup = env.get("PGOPTIONS", "")
+    require(startup in ("", G1V_PGOPTIONS), "PSQL_SESSION_SETTINGS_NOT_REGISTERED")
+    return G1V_SESSION_SET if startup else ""
+
+
+def psql_failure_code(stderr: str) -> str:
+    """Classify known PostgreSQL failures without printing raw stderr or secrets."""
+    for fragment, result in (
+        ("EDITORIAL_G1V_AUTHORIZATION_REQUIRED", "PSQL_G1V_AUTHORIZATION_FAILED"),
+        ("CLASSMO_NONPRODUCTION_GUARD_FAILED", "PSQL_DEVELOPMENT_GUARD_FAILED"),
+        ("password authentication failed", "PSQL_PASSWORD_AUTHENTICATION_FAILED"),
+        ("certificate verify failed", "PSQL_TLS_VERIFY_FAILED"),
+        ("could not translate host name", "PSQL_DATABASE_DNS_FAILED"),
+    ):
+        if fragment in stderr:
+            return result
+    return "PSQL_SCRIPT_FAILED"
 
 
 def psql_command(vars_: dict[str, str], *, interactive: bool = False) -> list[str]:
@@ -239,6 +270,10 @@ class PsqlRunner:
     def __init__(self, env: dict[str, str], variables: dict[str, str]):
         self.env = env
         self.variables = variables
+        self.initial_sql = fixed_session_initializer(env)
+
+    def _init_commands(self) -> list[str]:
+        return ["-c", self.initial_sql] if self.initial_sql else []
 
     def _exec(self, args: list[str], timeout: int = STEP_TIMEOUT) -> str:
         try:
@@ -248,18 +283,25 @@ class PsqlRunner:
             )
         except (OSError, subprocess.TimeoutExpired):
             raise VerificationBlocked("PSQL_EXECUTION_UNVERIFIED") from None
-        require(result.returncode == 0 and len(result.stdout) <= MAX_OUTPUT,
-                "PSQL_SCRIPT_FAILED")
+        if result.returncode != 0:
+            raise VerificationBlocked(psql_failure_code(result.stderr)) from None
+        require(len(result.stdout) <= MAX_OUTPUT, "PSQL_SCRIPT_FAILED")
         return result.stdout.strip()
 
     def file(self, path: Path) -> None:
-        self._exec(psql_command(self.variables) + ["-f", str(path)])
+        self._exec(
+            psql_command(self.variables) + self._init_commands()
+            + ["-f", str(path)]
+        )
 
     def query(self, sql: str) -> str:
-        return self._exec(psql_command({}) + ["-c", sql], timeout=15)
+        return self._exec(
+            psql_command({}) + self._init_commands() + ["-c", sql],
+            timeout=15,
+        )
 
     def new_session(self) -> "PsqlSession":
-        return PsqlSession(self.env, self.variables)
+        return PsqlSession(self.env, self.variables, self.initial_sql)
 
     def race(self, a: Path, b: Path, readback: Path,
              expected_error: str | None, probe_seconds: int = 12) -> None:
@@ -308,7 +350,8 @@ class PsqlRunner:
 
 
 class PsqlSession:
-    def __init__(self, env: dict[str, str], variables: dict[str, str]):
+    def __init__(self, env: dict[str, str], variables: dict[str, str],
+                 initial_sql: str = ""):
         try:
             self.proc = subprocess.Popen(
                 psql_command(variables, interactive=True), env=env,
@@ -323,6 +366,18 @@ class PsqlSession:
                          daemon=True).start()
         self.error_reader = threading.Thread(target=self._read_err, daemon=True)
         self.error_reader.start()
+        if initial_sql:
+            # Explicit SET + server-side readback is required for each A/B
+            # backend. Startup PGOPTIONS alone is not proof on Supavisor.
+            require(initial_sql == G1V_SESSION_SET,
+                    "PSQL_SESSION_SETTINGS_NOT_REGISTERED")
+            try:
+                self.send(initial_sql + "\n" + G1V_SESSION_CHECK)
+                require(self.expect("__WONJAE_GUC_READY__", 10) == "t",
+                        "PSQL_SESSION_GUC_UNVERIFIED")
+            except VerificationBlocked:
+                self.abort()
+                raise
 
     @staticmethod
     def _read(pipe: Any, output: queue.Queue[str]) -> None:
