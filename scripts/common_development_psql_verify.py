@@ -394,11 +394,16 @@ def main() -> int:
                    "plan-blob", "evidence", "summary"):
         parser.add_argument("--" + option, required=True)
     parser.add_argument("--execute", action="store_true")
+    parser.add_argument("--require-race", action="store_true")
     args = parser.parse_args()
     try:
         repo = Path(args.repo).resolve()
         plan = load_plan(repo, args.source_sha, args.project_ref,
                          args.plan_path, args.plan_blob)
+        if args.require_race:
+            require(RACE.issubset(plan["phases"]) and
+                    bool(plan.get("expected_b_error")),
+                    "PSQL_INDEPENDENT_RACE_NOT_REGISTERED")
         if not args.execute:
             print("PSQL_VERIFIER=SOURCE_PLAN_VALIDATED_ONLY")
             return 0
