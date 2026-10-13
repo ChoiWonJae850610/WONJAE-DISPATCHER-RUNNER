@@ -302,6 +302,9 @@ jobs:
               config["require_independent_race"] == true
             ref = config["project_ref"]
             plan = config["plan_path"]
+            baseline = config["source_baseline_sha"]
+            abort("Registered Development psql source baseline invalid") unless
+              baseline.is_a?(String) && baseline.match?(/\A[0-9a-f]{40}\z/)
             abort("Registered Development psql ref invalid") unless
               ref.is_a?(String) && ref.match?(/\A[a-z]{20}\z/)
             abort("Registered Development psql plan path invalid") unless
@@ -312,6 +315,7 @@ jobs:
             values.merge!(
               "PROVIDER_PSQL_PROJECT_REF" => ref,
               "PROVIDER_PSQL_PLAN_PATH" => plan,
+              "PROVIDER_PSQL_BASELINE_SHA" => baseline,
             )
           elsif executor == "classmo_eas_build"
             abort("CLASSMO EAS executor routed to another project") unless project == "CLASSMO"
@@ -1093,6 +1097,11 @@ jobs:
           export WONJAE_DEV_PGUSER="postgres"
           export WONJAE_DEV_PGDATABASE="postgres"
           export WONJAE_OWNER_PSQL_APPROVED="yes"
+          git -C .approval/product merge-base --is-ancestor \
+            "$PROVIDER_PSQL_BASELINE_SHA" "$SOURCE_SHA" || {
+              echo "::error::PSQL_SOURCE_BEFORE_REVIEWED_BASELINE"
+              exit 1
+            }
           blob="$(git -C .approval/product rev-parse \
             "$SOURCE_SHA:$PROVIDER_PSQL_PLAN_PATH")"
           test "$blob" != "" || {
