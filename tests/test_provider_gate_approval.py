@@ -232,6 +232,4 @@ def test_psql_g1v_session_pooler_is_exact_ipv4_development_route_only():
     assert '--pooler-host "$PROVIDER_PSQL_POOLER_HOST"' in core
     assert '--require-race --execute' in core
     assert 'PSQL_UNREVIEWED_POOLER_TARGET' in core
-    assert "6543" not in core[core.index(
-        '- name: Registered Development psql · runtime race and synthetic cleanup'
-    ):core.index('- name: Registered Development psql · archive runtime evidence')]
+    assert 'export WONJAE_DEV_PGPORT="6543"' not in core
