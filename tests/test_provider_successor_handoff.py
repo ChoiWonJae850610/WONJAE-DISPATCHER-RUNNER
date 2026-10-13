@@ -157,3 +157,38 @@ def test_identity_mismatch_blocks_even_dry_run(tmp_path: Path, source_sha):
     result = dry_run(product, control, source_sha=source_sha)
     assert result.returncode == 1
     assert "not prepared" in result.stderr
+
+
+def test_post_source_provider_pass_restores_following_source_terminal(tmp_path: Path):
+    product, control = make_state(tmp_path, action("SOURCE_READY"))
+    path = product / ".wonjae/execution-state.yaml"
+    state = yaml.safe_load(path.read_text())
+    # The prior SOURCE_READY was already integrated: after_source_success=None.
+    state["after_provider_source_success"] = action("PROVIDER_GATE", "next_gate")
+    path.write_text(yaml.safe_dump(state, sort_keys=False))
+    result = dry_run(product, control)
+    assert result.returncode == 0, result.stderr
+    payload = yaml.safe_load(result.stdout)
+    assert payload["next_action"]["type"] == "SOURCE_READY"
+    assert payload["after_source_success"]["gate"] == "next_gate"
+    assert "after_provider_source_success" not in payload
+    assert "after_provider_success" not in payload
+
+
+def test_post_source_provider_success_with_missing_terminal_is_blocked(tmp_path: Path):
+    product, control = make_state(tmp_path, action("SOURCE_READY"))
+    result = dry_run(product, control)
+    assert result.returncode == 1
+    assert "SOURCE_SUCCESSOR_REQUIRES_TERMINAL" in result.stderr
+
+
+def test_post_source_provider_rejects_conflicting_terminals(tmp_path: Path):
+    product, control = make_state(tmp_path, action("SOURCE_READY"))
+    path = product / ".wonjae/execution-state.yaml"
+    state = yaml.safe_load(path.read_text())
+    state["after_source_success"] = action("PROVIDER_GATE", "next_gate")
+    state["after_provider_source_success"] = action("PROVIDER_GATE", "next_gate")
+    path.write_text(yaml.safe_dump(state, sort_keys=False))
+    result = dry_run(product, control)
+    assert result.returncode == 1
+    assert "PROVIDER_SOURCE_TERMINAL_INVALID" in result.stderr
