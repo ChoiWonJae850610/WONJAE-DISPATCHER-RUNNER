@@ -176,8 +176,11 @@ begin
   else
     prepare_pr(args, result)
   end
-rescue HandoffError, KeyError, JSON::ParserError
-  warn "::warning::Provider execution succeeded but predeclared next-stage " \
-       "document PR was not prepared (see trusted handoff log)."
+rescue HandoffError => error
+  # Error messages are fixed non-secret admission codes only.
+  warn "::warning::Provider succeeded; next-stage document PR not prepared: #{error.message}"
+  exit 1
+rescue KeyError, JSON::ParserError
+  warn "::warning::Provider succeeded; next-stage document PR not prepared: UNVERIFIED_RESPONSE"
   exit 1
 end
