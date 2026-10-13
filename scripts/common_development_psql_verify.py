@@ -86,7 +86,7 @@ def load_plan(repo: Path, source_sha: str, project_ref: str,
             set(phases).issubset(PHASES), "PSQL_PLAN_PHASES_INVALID")
     require(not (set(phases) & RACE) or RACE.issubset(phases),
             "PSQL_RACE_PHASES_INCOMPLETE")
-    for phase, value in phases.items():
+    for value in phases.values():
         require(isinstance(value, dict) and set(value) == {"path", "blob"} and
                 isinstance(value["path"], str) and isinstance(value["blob"], str),
                 "PSQL_PHASE_PIN_INVALID")
@@ -238,7 +238,8 @@ class PsqlSession:
         self.stderr: list[str] = []
         threading.Thread(target=self._read, args=(self.proc.stdout, self.lines),
                          daemon=True).start()
-        threading.Thread(target=self._read_err, daemon=True).start()
+        self.error_reader = threading.Thread(target=self._read_err, daemon=True)
+        self.error_reader.start()
 
     @staticmethod
     def _read(pipe: Any, output: queue.Queue[str]) -> None:
@@ -300,6 +301,7 @@ class PsqlSession:
             code = self.proc.wait(timeout=15)
         except (OSError, subprocess.TimeoutExpired):
             raise VerificationBlocked("PSQL_SESSION_FINISH_TIMEOUT") from None
+        self.error_reader.join(timeout=2)
         require(code == expected, "PSQL_RACE_UNEXPECTED_SESSION_RESULT")
         if marker is not None:
             require(marker in "".join(self.stderr), "PSQL_RACE_CONFLICT_NOT_PROVED")
