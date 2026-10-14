@@ -198,7 +198,7 @@ def private_roadblock(client: Client, domain: set[str]) -> None:
     grants = client.query(GRANTS_SQL)
     ensure(all(isinstance(row.get("name"), str) for row in grants),
            "G1_006_GRANT_SHAPE_INVALID")
-    ensure(not set(row["name"] for row in grants).intersection(domain),
+    ensure(not {row["name"] for row in grants}.intersection(domain),
            "G1_006_DOMAIN_GRANT_EXPANDED")
     config = client.query(SCHEMA_SQL)
     ensure(len(config) == 1 and config[0].get("anon_usage") is False
