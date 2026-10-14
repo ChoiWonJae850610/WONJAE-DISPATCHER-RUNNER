@@ -125,7 +125,7 @@ jobs:
           abort("provider gate is not registered") unless config.is_a?(Hash)
           abort("provider gate approval mode mismatch") unless config["approval_mode"] == "sanjinworks_owner_button"
           executor = config["executor"]
-          abort("provider gate executor is unsupported") unless ["approval_only", "classmo_supabase_migration", "classmo_eas_build", "classmo_eas_update", "wafl_supabase_hardening", "wafl_eas_update", "wafl_eas_build", "wafl_r2_preview_deploy", "wafl_supabase_g1_readonly", "wafl_supabase_g1_schema_apply", "classmo_editorial_016_readonly", "classmo_editorial_016_schema_apply", "registered_supabase_migration_v1", "registered_development_psql_verify_v1"].include?(executor)
+          abort("provider gate executor is unsupported") unless ["approval_only", "classmo_supabase_migration", "classmo_eas_build", "classmo_eas_update", "wafl_supabase_hardening", "wafl_eas_update", "wafl_eas_build", "wafl_r2_preview_deploy", "wafl_supabase_g1_readonly", "wafl_supabase_g1_schema_apply", "classmo_editorial_016_readonly", "classmo_editorial_016_schema_apply", "classmo_editorial_017_storage_apply", "registered_supabase_migration_v1", "registered_development_psql_verify_v1"].include?(executor)
           label = config["label"]
           abort("provider gate label missing") unless label.is_a?(String) && !label.strip.empty?
 
@@ -257,6 +257,38 @@ jobs:
             values.merge!(
               "PROVIDER_C016_PROJECT_REF" => config["project_ref"],
               "PROVIDER_C016_BLOB" => config["migration_016_blob"],
+            )
+          elsif executor == "classmo_editorial_017_storage_apply"
+            abort("CLASSMO 017 gate mismatch") unless project == "CLASSMO" &&
+              gate == "editorial_017_storage_apply"
+            abort("CLASSMO 017 not ready") unless config["ready_for_owner"] == true
+            expected = {
+              "provider" => "supabase_management_api",
+              "environment" => "development",
+              "project_ref" => "hfclkbqzxiqhcckwknih",
+              "source_baseline_sha" => "4ea17a3d1d55298f1c86ad113b81c870a5d24363",
+              "migration_name" => "017_editorial_media",
+              "migration_path" => "supabase/migrations/20261014001700_017_editorial_media.sql",
+              "checksum_path" => "supabase/migrations/SHA256SUMS",
+              "expected_prior_migration_name" => "016_editorial_drafts",
+              "migration_017_blob" => "71c998b431986f340835437ea9a6f689bcbc1f3e",
+              "checksum_manifest_blob" => "a54512272d88105630ad3ebdade7145e1acd4a71",
+              "bucket_id" => "classmo-editorial",
+              "bucket_public" => false,
+              "file_size_limit" => 5242880,
+              "allowed_mime_types" => %w[image/jpeg image/png image/webp],
+              "production" => false,
+              "destructive" => false,
+              "credential_mutation" => false,
+              "device_mutation" => false,
+            }
+            expected.each do |key, value|
+              abort("CLASSMO 017 metadata #{key} mismatch") unless config[key] == value
+            end
+            values.merge!(
+              "PROVIDER_C017_PROJECT_REF" => config["project_ref"],
+              "PROVIDER_C017_BLOB" => config["migration_017_blob"],
+              "PROVIDER_C017_MANIFEST_BLOB" => config["checksum_manifest_blob"],
             )
           elsif executor == "registered_supabase_migration_v1"
             abort("Registered migration project or environment mismatch") unless
@@ -1029,6 +1061,35 @@ jobs:
         with:
           name: classmo-016-schema-${{ inputs.source_sha }}
           path: ${{ runner.temp }}/classmo-016-schema.json
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: CLASSMO 017 · private Storage bucket and schema with guarded readback
+        if: env.PROVIDER_EXECUTOR == 'classmo_editorial_017_storage_apply'
+        env:
+          CLASSMO_SUPABASE_ACCESS_TOKEN: ${{ secrets.supabase_access_token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CLASSMO_SUPABASE_ACCESS_TOKEN" || {
+            echo "::error::CLASSMO_017_DEV_CREDENTIAL_MISSING"
+            exit 1
+          }
+          python scripts/classmo_editorial_017_storage_apply.py \
+            --repo "$GITHUB_WORKSPACE/.approval/product" \
+            --source-sha "$SOURCE_SHA" \
+            --project-ref "$PROVIDER_C017_PROJECT_REF" \
+            --migration-blob "$PROVIDER_C017_BLOB" \
+            --manifest-blob "$PROVIDER_C017_MANIFEST_BLOB" \
+            --summary "$GITHUB_STEP_SUMMARY" \
+            --evidence "$RUNNER_TEMP/classmo-017-storage-schema.json"
+
+      - name: CLASSMO 017 · archive private Storage schema receipt
+        if: env.PROVIDER_EXECUTOR == 'classmo_editorial_017_storage_apply' && success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: classmo-017-storage-schema-${{ inputs.source_sha }}
+          path: ${{ runner.temp }}/classmo-017-storage-schema.json
           if-no-files-found: error
           retention-days: 30
 
