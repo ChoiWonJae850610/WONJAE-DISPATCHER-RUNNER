@@ -349,7 +349,7 @@ def test_owner_workflow_has_distinct_reconcile_gate_without_dispatch_of_source()
     assert "github.actor == github.repository_owner" in core
     assert "group: direct-worker-" in core
     assert "product_write_token" in core
-    assert "CONTROL_READ_TOKEN" in caller
+    assert "secrets.OWNER_GITHUB_TOKEN" in caller
     assert "attached_head:" in caller and "failed_attach_run_id:" in caller
     assert "reconcile" in caller
     assert "direct-worker.yml/dispatches" not in core

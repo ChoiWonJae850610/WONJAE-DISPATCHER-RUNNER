@@ -45,7 +45,10 @@ def test_every_git_personal_token_reference_uses_one_owner_secret() -> None:
 def test_shared_pat_still_respects_product_and_owner_gates() -> None:
     source = workflow("direct-worker.yml")
     merge = workflow("common-control-pr-merge.yml")
-    assert "github.actor == github.repository_owner" in source
+    assert "workflow_dispatch:" in source
+    assert "type: choice" in source
+    for project in PRODUCTS:
+        assert f"- {project}" in source
     assert "github.actor == github.repository_owner" in merge
     assert "secrets.OWNER_GITHUB_TOKEN" in merge
     assert "secrets.COMMON_PR_MERGE_APPROVAL_SECRET" in merge

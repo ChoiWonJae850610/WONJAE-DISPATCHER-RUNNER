@@ -104,11 +104,9 @@ def test_completed_source_path_still_merges_only_validated_head() -> None:
 def test_source_terminal_guard_closes_only_exact_product_pr() -> None:
     workflow = Path(".github/workflows/product-terminal-guard.yml").read_text(encoding="utf-8")
     core = Path("src/wonjae_dispatcher_runner/source_terminal.py").read_text(encoding="utf-8")
+    assert workflow.count("product_token: ${{ secrets.OWNER_GITHUB_TOKEN }}") == 4
     for project in ("CLASSMO", "WAFL", "ESC", "MUVEL"):
-        assert (
-            f"product_token: ${{{{ secrets.OWNER_GITHUB_TOKEN || "
-            f"secrets.{project}_WRITE_TOKEN }}}}" in workflow
-        )
+        assert f"secrets.{project}_WRITE_TOKEN" not in workflow
     assert "terminalize_exact_pr(client, identity, body, result, pr_number)" in core
     assert 'pr.get("headRefOid") not in permitted_heads' in core
     assert 'metadata.get(key) != value' in core
