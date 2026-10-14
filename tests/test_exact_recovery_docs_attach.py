@@ -150,9 +150,10 @@ def test_owner_workflows_are_project_scoped_and_non_deploying():
     core = (root / "source-pr-recovery-docs-core.yml").read_text(encoding="utf-8")
     assert "workflow_dispatch:" in caller
     assert "github.actor == github.repository_owner" in caller
-    for token in ("WAFL_WRITE_TOKEN", "CLASSMO_WRITE_TOKEN", "ESC_WRITE_TOKEN",
-                  "MUVEL_WRITE_TOKEN", "CONTROL_READ_TOKEN"):
-        assert token in caller
+    assert caller.count("secrets.OWNER_GITHUB_TOKEN") >= 8
+    for old in ("WAFL_WRITE_TOKEN", "CLASSMO_WRITE_TOKEN", "ESC_WRITE_TOKEN",
+                "MUVEL_WRITE_TOKEN", "CONTROL_READ_TOKEN"):
+        assert f"secrets.{old}" not in caller
     assert "secrets: inherit" not in caller
     assert "group: direct-worker-" in core
     assert "runs-on: [self-hosted, Linux, X64, direct-worker]" in core

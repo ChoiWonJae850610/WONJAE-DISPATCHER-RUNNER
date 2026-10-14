@@ -3,17 +3,17 @@ from pathlib import Path
 PRODUCTS = {
     "WAFL": {
         "workflow": ".github/workflows/wafl-product-v2.yml",
-        "secret": "WAFL_WRITE_TOKEN",
+        "secret": "OWNER_GITHUB_TOKEN",
         "validation": "WAFL Cloud Validation",
     },
     "ESC": {
         "workflow": ".github/workflows/esc-product-v2.yml",
-        "secret": "ESC_WRITE_TOKEN",
+        "secret": "OWNER_GITHUB_TOKEN",
         "validation": "Validate ESC",
     },
     "MUVEL": {
         "workflow": ".github/workflows/muvel-product-v2.yml",
-        "secret": "MUVEL_WRITE_TOKEN",
+        "secret": "OWNER_GITHUB_TOKEN",
         "validation": "MUVEL Cloud Development",
     },
 }
@@ -37,12 +37,14 @@ def test_product_v2_workflows_are_isolated_and_task_generic() -> None:
 
 
 def test_product_v2_workflows_do_not_cross_use_write_tokens() -> None:
-    all_tokens = {value["secret"] for value in PRODUCTS.values()} | {"CLASSMO_WRITE_TOKEN"}
     for _project, config in PRODUCTS.items():
         text = Path(config["workflow"]).read_text(encoding="utf-8")
-        assert config["secret"] in text
-        for token in all_tokens - {config["secret"]}:
-            assert token not in text
+        assert "secrets.OWNER_GITHUB_TOKEN" in text
+        for token in (
+            "WAFL_WRITE_TOKEN", "CLASSMO_WRITE_TOKEN",
+            "ESC_WRITE_TOKEN", "MUVEL_WRITE_TOKEN",
+        ):
+            assert f"secrets.{token}" not in text
 
 
 def test_product_v2_workflows_recover_validation_and_terminalize_failure() -> None:
@@ -102,11 +104,9 @@ def test_completed_source_path_still_merges_only_validated_head() -> None:
 def test_source_terminal_guard_closes_only_exact_product_pr() -> None:
     workflow = Path(".github/workflows/product-terminal-guard.yml").read_text(encoding="utf-8")
     core = Path("src/wonjae_dispatcher_runner/source_terminal.py").read_text(encoding="utf-8")
+    assert workflow.count("product_token: ${{ secrets.OWNER_GITHUB_TOKEN }}") == 4
     for project in ("CLASSMO", "WAFL", "ESC", "MUVEL"):
-        assert (
-            f"product_token: ${{{{ secrets.OWNER_GITHUB_TOKEN || "
-            f"secrets.{project}_WRITE_TOKEN }}}}" in workflow
-        )
+        assert f"secrets.{project}_WRITE_TOKEN" not in workflow
     assert "terminalize_exact_pr(client, identity, body, result, pr_number)" in core
     assert 'pr.get("headRefOid") not in permitted_heads' in core
     assert 'metadata.get(key) != value' in core

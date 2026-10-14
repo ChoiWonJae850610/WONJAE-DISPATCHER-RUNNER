@@ -57,8 +57,8 @@ jobs:
       issue_number: ${{ github.event_name == 'workflow_dispatch' && fromJSON(inputs.issue_number) || github.event.issue.number }}
       issue_body: ${{ github.event_name == 'workflow_dispatch' && inputs.issue_body || github.event.issue.body }}
     secrets:
-      product_write_token: ${{ secrets.OWNER_GITHUB_TOKEN || secrets.WAFL_WRITE_TOKEN }}
-      control_read_token: ${{ secrets.CONTROL_READ_TOKEN }}
+      product_write_token: ${{ secrets.OWNER_GITHUB_TOKEN }}
+      control_read_token: ${{ secrets.OWNER_GITHUB_TOKEN }}
 
   classmo:
     if: >-
@@ -87,8 +87,8 @@ jobs:
       issue_number: ${{ github.event_name == 'workflow_dispatch' && fromJSON(inputs.issue_number) || github.event.issue.number }}
       issue_body: ${{ github.event_name == 'workflow_dispatch' && inputs.issue_body || github.event.issue.body }}
     secrets:
-      product_write_token: ${{ secrets.OWNER_GITHUB_TOKEN || secrets.CLASSMO_WRITE_TOKEN }}
-      control_read_token: ${{ secrets.CONTROL_READ_TOKEN }}
+      product_write_token: ${{ secrets.OWNER_GITHUB_TOKEN }}
+      control_read_token: ${{ secrets.OWNER_GITHUB_TOKEN }}
 
   esc:
     if: >-
@@ -117,8 +117,8 @@ jobs:
       issue_number: ${{ github.event_name == 'workflow_dispatch' && fromJSON(inputs.issue_number) || github.event.issue.number }}
       issue_body: ${{ github.event_name == 'workflow_dispatch' && inputs.issue_body || github.event.issue.body }}
     secrets:
-      product_write_token: ${{ secrets.OWNER_GITHUB_TOKEN || secrets.ESC_WRITE_TOKEN }}
-      control_read_token: ${{ secrets.CONTROL_READ_TOKEN }}
+      product_write_token: ${{ secrets.OWNER_GITHUB_TOKEN }}
+      control_read_token: ${{ secrets.OWNER_GITHUB_TOKEN }}
 
   muvel:
     if: >-
@@ -147,5 +147,5 @@ jobs:
       issue_number: ${{ github.event_name == 'workflow_dispatch' && fromJSON(inputs.issue_number) || github.event.issue.number }}
       issue_body: ${{ github.event_name == 'workflow_dispatch' && inputs.issue_body || github.event.issue.body }}
     secrets:
-      product_write_token: ${{ secrets.OWNER_GITHUB_TOKEN || secrets.MUVEL_WRITE_TOKEN }}
-      control_read_token: ${{ secrets.CONTROL_READ_TOKEN }}
+      product_write_token: ${{ secrets.OWNER_GITHUB_TOKEN }}
+      control_read_token: ${{ secrets.OWNER_GITHUB_TOKEN }}

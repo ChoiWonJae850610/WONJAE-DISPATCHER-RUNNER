@@ -13,6 +13,6 @@ def test_control_static_validator_is_exact_owner_and_read_only():
     assert "ref: ${{ steps.claim.outputs.sha }}" in text
     assert "persist-credentials: false" in text
     assert "ruby .github/scripts/validate_control.rb" in text
-    assert "CONTROL_READ_TOKEN" in text
+    assert "secrets.OWNER_GITHUB_TOKEN" in text
     assert "WRITE_TOKEN" not in text
     assert "NOT_SUBSTITUTED" in text

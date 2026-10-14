@@ -8,7 +8,8 @@ def test_external_product_validation_is_exact_sha_and_non_substituting() -> None
     )
     for project in ("WAFL", "CLASSMO", "ESC", "MUVEL"):
         assert f"[EXTERNAL-VALIDATE][{project}]" in workflow
-        assert f"secrets.{project}_WRITE_TOKEN" in workflow
+        assert f"secrets.{project}_WRITE_TOKEN" not in workflow
+    assert workflow.count("token: ${{ secrets.OWNER_GITHUB_TOKEN }}") == 4
     assert "github.event.issue.user.login == github.repository_owner" in workflow
     assert "([0-9a-f]{40})" in workflow
     assert "canonical_product_workflow: `NOT_SUBSTITUTED`" in workflow

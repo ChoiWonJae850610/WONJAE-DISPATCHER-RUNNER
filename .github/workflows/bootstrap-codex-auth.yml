@@ -17,7 +17,7 @@ jobs:
     steps:
       - name: Require rotation credential
         env:
-          SECRET_ROTATION_TOKEN: ${{ secrets.SECRET_ROTATION_TOKEN }}
+          SECRET_ROTATION_TOKEN: ${{ secrets.OWNER_GITHUB_TOKEN }}
         run: |
           test -n "$SECRET_ROTATION_TOKEN" || {
             echo "::error::SECRET_ROTATION_TOKEN is not configured."
@@ -47,7 +47,7 @@ jobs:
 
       - name: Persist protected Codex credential
         env:
-          GH_TOKEN: ${{ secrets.SECRET_ROTATION_TOKEN }}
+          GH_TOKEN: ${{ secrets.OWNER_GITHUB_TOKEN }}
         run: |
           test -s "$CODEX_HOME/auth.json"
           gh secret set CODEX_AUTH_JSON --repo "$GITHUB_REPOSITORY" < "$CODEX_HOME/auth.json"

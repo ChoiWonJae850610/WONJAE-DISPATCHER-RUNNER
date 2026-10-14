@@ -30,7 +30,7 @@ def test_source_workflows_gate_native_gmail_until_explicit_enable() -> None:
 def test_source_terminal_guard_has_idempotent_native_gmail_fallback() -> None:
     text = Path(".github/workflows/product-terminal-guard.yml").read_text(encoding="utf-8")
     assert "WONJAE_NATIVE_GMAIL_ENABLED" in text
-    assert "CONTROL_READ_TOKEN" in text
+    assert "secrets.OWNER_GITHUB_TOKEN" in text
     assert "GMAIL_USERNAME" in text
     assert "GMAIL_APP_PASSWORD" in text
     assert "source-terminal-core.yml" in text
@@ -64,7 +64,7 @@ def test_provider_terminal_guard_can_reconcile_native_gmail() -> None:
     assert "WONJAE_NATIVE_GMAIL_ENABLED" in text
     assert "PROVIDER_TERMINAL_RESULT" in text
     assert "gmail_notify.py" in text
-    assert "CONTROL_READ_TOKEN" in text
+    assert "secrets.OWNER_GITHUB_TOKEN" in text
 
 
 def test_gmail_smoke_is_manual_and_has_no_product_mutation() -> None:

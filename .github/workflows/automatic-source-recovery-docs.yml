@@ -34,8 +34,8 @@ jobs:
       project: WAFL
       failed_run_id: ${{ inputs.failed_run_id || '' }}
     secrets:
-      product_write_token: ${{ secrets.OWNER_GITHUB_TOKEN || secrets.WAFL_WRITE_TOKEN }}
-      control_read_token: ${{ secrets.CONTROL_READ_TOKEN }}
+      product_write_token: ${{ secrets.OWNER_GITHUB_TOKEN }}
+      control_read_token: ${{ secrets.OWNER_GITHUB_TOKEN }}
 
   classmo:
     if: ${{ (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'failure' && github.event.workflow_run.event == 'workflow_dispatch' && github.event.workflow_run.display_title == 'Direct Worker CLASSMO next' && github.event.workflow_run.head_branch == 'main') || (github.event_name == 'workflow_dispatch' && github.actor == github.repository_owner && inputs.project == 'CLASSMO' && inputs.failed_run_id != '') }}
@@ -44,8 +44,8 @@ jobs:
       project: CLASSMO
       failed_run_id: ${{ inputs.failed_run_id || '' }}
     secrets:
-      product_write_token: ${{ secrets.OWNER_GITHUB_TOKEN || secrets.CLASSMO_WRITE_TOKEN }}
-      control_read_token: ${{ secrets.CONTROL_READ_TOKEN }}
+      product_write_token: ${{ secrets.OWNER_GITHUB_TOKEN }}
+      control_read_token: ${{ secrets.OWNER_GITHUB_TOKEN }}
 
   esc:
     if: ${{ (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'failure' && github.event.workflow_run.event == 'workflow_dispatch' && github.event.workflow_run.display_title == 'Direct Worker ESC next' && github.event.workflow_run.head_branch == 'main') || (github.event_name == 'workflow_dispatch' && github.actor == github.repository_owner && inputs.project == 'ESC' && inputs.failed_run_id != '') }}
@@ -54,8 +54,8 @@ jobs:
       project: ESC
       failed_run_id: ${{ inputs.failed_run_id || '' }}
     secrets:
-      product_write_token: ${{ secrets.OWNER_GITHUB_TOKEN || secrets.ESC_WRITE_TOKEN }}
-      control_read_token: ${{ secrets.CONTROL_READ_TOKEN }}
+      product_write_token: ${{ secrets.OWNER_GITHUB_TOKEN }}
+      control_read_token: ${{ secrets.OWNER_GITHUB_TOKEN }}
 
   muvel:
     if: ${{ (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'failure' && github.event.workflow_run.event == 'workflow_dispatch' && github.event.workflow_run.display_title == 'Direct Worker MUVEL next' && github.event.workflow_run.head_branch == 'main') || (github.event_name == 'workflow_dispatch' && github.actor == github.repository_owner && inputs.project == 'MUVEL' && inputs.failed_run_id != '') }}
@@ -64,5 +64,5 @@ jobs:
       project: MUVEL
       failed_run_id: ${{ inputs.failed_run_id || '' }}
     secrets:
-      product_write_token: ${{ secrets.OWNER_GITHUB_TOKEN || secrets.MUVEL_WRITE_TOKEN }}
-      control_read_token: ${{ secrets.CONTROL_READ_TOKEN }}
+      product_write_token: ${{ secrets.OWNER_GITHUB_TOKEN }}
+      control_read_token: ${{ secrets.OWNER_GITHUB_TOKEN }}

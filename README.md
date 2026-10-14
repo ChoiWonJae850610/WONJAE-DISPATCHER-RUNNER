@@ -1,5 +1,30 @@
 # WONJAE-DISPATCHER-RUNNER
 
+## Owner GitHub/Cloudflare token consolidation (2026-10-14, source preparation)
+
+All repository GitHub PAT references in Runner Actions workflows use **one**
+protected repository secret, `OWNER_GITHUB_TOKEN` (one shared fine-grained PAT).
+Legacy `CONTROL_READ_TOKEN`, `SECRET_ROTATION_TOKEN`, `COMMON_PR_MERGE_TOKEN`,
+product `*_WRITE_TOKEN` and `*_PROVIDER_GITHUB_TOKEN` secret references are
+retired from workflow callers. `github.token` is GitHub's ephemeral built-in
+workflow credential, not another personal PAT. The common PR merge remains
+disabled until its independently approved activation variable, exact target,
+and HMAC `COMMON_PR_MERGE_APPROVAL_SECRET` are configured. Owner-only
+workflow, exact SHA, validation and provider/Production gates remain intact.
+
+Cloudflare API access for Owner projects uses one **different** Cloudflare
+API token, stored as `CLOUDFLARE_API_TOKEN` in each execution environment
+that needs it. Supabase, Expo, Codex, website session, signed callbacks,
+and project database passwords are unrelated credentials and do not combine.
+
+This source PR does not create, read or replace Secret values, activate any
+workflow, run a product, merge a PR, or deploy Production. After safe PR
+integration the Owner enters their regenerated GitHub PAT once in Runner
+Actions `OWNER_GITHUB_TOKEN`, once in SANJINWORKS Worker
+`SANJINWORKS_GITHUB_TOKEN`, and the Cloudflare API token into the existing
+applicable GitHub Actions `CLOUDFLARE_API_TOKEN` secrets. Historical sections
+below describe the original v2 structure and do not override this latest rule.
+
 A small open-source runner for PC-free Codex automation using the published OpenAI Codex Python SDK and ChatGPT account authentication.
 
 ## Current status

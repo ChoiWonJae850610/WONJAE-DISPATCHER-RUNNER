@@ -63,29 +63,29 @@ jobs:
       base_sha: ${{ inputs.base_sha }}
       control_sha: ${{ inputs.control_sha }}
     secrets:
-      control_read_token: ${{ secrets.CONTROL_READ_TOKEN }}
-      product_write_token: ${{ secrets.OWNER_GITHUB_TOKEN || secrets.WAFL_WRITE_TOKEN }}
+      control_read_token: ${{ secrets.OWNER_GITHUB_TOKEN }}
+      product_write_token: ${{ secrets.OWNER_GITHUB_TOKEN }}
 
   classmo:
     if: ${{ inputs.project == 'CLASSMO' && github.actor == github.repository_owner }}
     uses: ./.github/workflows/source-pr-recovery-docs-core.yml
     with: *inputs
     secrets:
-      control_read_token: ${{ secrets.CONTROL_READ_TOKEN }}
-      product_write_token: ${{ secrets.OWNER_GITHUB_TOKEN || secrets.CLASSMO_WRITE_TOKEN }}
+      control_read_token: ${{ secrets.OWNER_GITHUB_TOKEN }}
+      product_write_token: ${{ secrets.OWNER_GITHUB_TOKEN }}
 
   esc:
     if: ${{ inputs.project == 'ESC' && github.actor == github.repository_owner }}
     uses: ./.github/workflows/source-pr-recovery-docs-core.yml
     with: *inputs
     secrets:
-      control_read_token: ${{ secrets.CONTROL_READ_TOKEN }}
-      product_write_token: ${{ secrets.OWNER_GITHUB_TOKEN || secrets.ESC_WRITE_TOKEN }}
+      control_read_token: ${{ secrets.OWNER_GITHUB_TOKEN }}
+      product_write_token: ${{ secrets.OWNER_GITHUB_TOKEN }}
 
   muvel:
     if: ${{ inputs.project == 'MUVEL' && github.actor == github.repository_owner }}
     uses: ./.github/workflows/source-pr-recovery-docs-core.yml
     with: *inputs
     secrets:
-      control_read_token: ${{ secrets.CONTROL_READ_TOKEN }}
-      product_write_token: ${{ secrets.OWNER_GITHUB_TOKEN || secrets.MUVEL_WRITE_TOKEN }}
+      control_read_token: ${{ secrets.OWNER_GITHUB_TOKEN }}
+      product_write_token: ${{ secrets.OWNER_GITHUB_TOKEN }}

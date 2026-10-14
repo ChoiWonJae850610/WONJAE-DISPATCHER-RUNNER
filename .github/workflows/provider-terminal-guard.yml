@@ -165,7 +165,7 @@ jobs:
         if: ${{ always() && vars.WONJAE_NATIVE_GMAIL_ENABLED == 'true' && env.PROVIDER_QUEUED_EXISTS != 'true' }}
         continue-on-error: true
         env:
-          CONTROL_READ_TOKEN: ${{ secrets.CONTROL_READ_TOKEN }}
+          CONTROL_READ_TOKEN: ${{ secrets.OWNER_GITHUB_TOKEN }}
           GMAIL_USERNAME: ${{ secrets.GMAIL_USERNAME }}
           GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
         shell: bash

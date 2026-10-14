@@ -64,7 +64,7 @@ jobs:
       - name: Queue · register or dispatch source wake
         env:
           GH_TOKEN: ${{ github.token }}
-          CONTROL_READ_TOKEN: ${{ secrets.CONTROL_READ_TOKEN }}
+          CONTROL_READ_TOKEN: ${{ secrets.OWNER_GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           PYTHONPATH="$GITHUB_WORKSPACE/src" python scripts/source_queue.py intake \
@@ -96,7 +96,7 @@ jobs:
       - name: Queue · advance only from exact COMPLETED predecessor
         env:
           GH_TOKEN: ${{ github.token }}
-          CONTROL_READ_TOKEN: ${{ secrets.CONTROL_READ_TOKEN }}
+          CONTROL_READ_TOKEN: ${{ secrets.OWNER_GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           PYTHONPATH="$GITHUB_WORKSPACE/src" python scripts/source_queue.py advance \
@@ -125,7 +125,7 @@ jobs:
       - name: Queue · explicit handoff or missed-event reconciliation
         env:
           GH_TOKEN: ${{ github.token }}
-          CONTROL_READ_TOKEN: ${{ secrets.CONTROL_READ_TOKEN }}
+          CONTROL_READ_TOKEN: ${{ secrets.OWNER_GITHUB_TOKEN }}
           SOURCE_RUN_ID: ${{ inputs.source_run_id }}
           QUEUE_ISSUE_NUMBER: ${{ inputs.queue_issue_number }}
         run: |

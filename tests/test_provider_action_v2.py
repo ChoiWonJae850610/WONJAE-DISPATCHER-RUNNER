@@ -308,22 +308,23 @@ def test_provider_cores_forward_production_workflow_allowlist() -> None:
 
 def test_product_provider_workflows_keep_credentials_isolated() -> None:
     mapping = {
-        "CLASSMO": ("CLASSMO_WRITE_TOKEN", "CLASSMO_EXPO_TOKEN"),
-        "WAFL": ("WAFL_WRITE_TOKEN", "WAFL_EXPO_TOKEN"),
-        "ESC": ("ESC_WRITE_TOKEN", "ESC_EXPO_TOKEN"),
-        "MUVEL": ("MUVEL_WRITE_TOKEN", "MUVEL_PROVIDER_GITHUB_TOKEN"),
+        "CLASSMO": "CLASSMO_EXPO_TOKEN",
+        "WAFL": "WAFL_EXPO_TOKEN",
+        "ESC": "ESC_EXPO_TOKEN",
+        "MUVEL": None,
     }
-    all_secrets = {secret for pair in mapping.values() for secret in pair}
+    provider_secrets = {secret for secret in mapping.values() if secret}
     for project, expected in mapping.items():
         text = Path(f".github/workflows/{project.lower()}-provider-v2.yml").read_text(
             encoding="utf-8"
         )
         assert f"name: {project} Provider v2" in text
         assert f"[PROVIDER-WAKE][DISPATCHER-V2] {project} " in text
-        for secret in expected:
-            assert secret in text
-        for secret in all_secrets - set(expected):
-            assert secret not in text
+        assert "secrets.OWNER_GITHUB_TOKEN" in text
+        if expected:
+            assert f"secrets.{expected}" in text
+        for secret in provider_secrets - ({expected} if expected else set()):
+            assert f"secrets.{secret}" not in text
 
 
 def test_provider_core_supports_common_action_families() -> None:
