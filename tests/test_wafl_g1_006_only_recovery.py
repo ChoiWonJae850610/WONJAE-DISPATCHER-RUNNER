@@ -60,9 +60,9 @@ class Fake:
         self.preflight_accepted = True
         self.schema_apply_ready = False
         self.exposed_schemas = ()
-        self.expected = set(f"foundation_{i}" for i in range(11)) | set(
+        self.expected = {f"foundation_{i}" for i in range(11)} | {
             f"domain_{i}" for i in range(51)
-        )
+        }
         self.history = list(m.MIGRATIONS)
         if ledger_drift:
             self.history[-1] = ("20261013150814", "wrong_005")
