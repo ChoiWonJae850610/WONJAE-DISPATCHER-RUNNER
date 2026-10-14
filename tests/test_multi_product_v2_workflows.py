@@ -40,7 +40,10 @@ def test_product_v2_workflows_do_not_cross_use_write_tokens() -> None:
     for _project, config in PRODUCTS.items():
         text = Path(config["workflow"]).read_text(encoding="utf-8")
         assert "secrets.OWNER_GITHUB_TOKEN" in text
-        for token in ("WAFL_WRITE_TOKEN", "CLASSMO_WRITE_TOKEN", "ESC_WRITE_TOKEN", "MUVEL_WRITE_TOKEN"):
+        for token in (
+            "WAFL_WRITE_TOKEN", "CLASSMO_WRITE_TOKEN",
+            "ESC_WRITE_TOKEN", "MUVEL_WRITE_TOKEN",
+        ):
             assert f"secrets.{token}" not in text
 
 
