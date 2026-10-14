@@ -39,7 +39,8 @@ def synthetic_source(tmp_path: Path, monkeypatch) -> tuple[Path, str]:
                               for n in range(51))
         else:
             content = ("BEGIN;\n-- 006 synthetic-only\n"
-                       "IF used_bytes + (CASE WHEN action = 'intent' THEN incoming_bytes ELSE 0 END) > quota_limit THEN\n"
+                       "IF used_bytes + (CASE WHEN action = 'intent' THEN incoming_bytes "
+                       "ELSE 0 END) > quota_limit THEN\n"
                        "COMMIT;\n")
         dest.write_text(content)
     git(repo, "add", ".")
