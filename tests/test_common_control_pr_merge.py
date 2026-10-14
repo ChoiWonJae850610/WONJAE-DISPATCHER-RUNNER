@@ -185,7 +185,8 @@ def test_workflow_secret_boundary_and_runner_prewrite_checks():
     assert "pull_request_target" not in workflow
     assert "inputs.diff_digest" in workflow
     assert "--diff-digest" in workflow
-    assert "secrets.COMMON_PR_MERGE_TOKEN" in workflow
+    assert "secrets.OWNER_GITHUB_TOKEN" in workflow
+    assert "secrets.COMMON_PR_MERGE_TOKEN" not in workflow
     assert "secrets.COMMON_PR_MERGE_APPROVAL_SECRET" in workflow
     source = SCRIPT.read_text("utf-8")
     assert "latest_files = gh_api(" in source

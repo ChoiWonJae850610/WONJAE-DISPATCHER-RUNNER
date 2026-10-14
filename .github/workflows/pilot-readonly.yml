@@ -25,8 +25,8 @@ jobs:
       - name: Require protected configuration
         env:
           CODEX_AUTH_JSON: ${{ secrets.CODEX_AUTH_JSON }}
-          CONTROL_READ_TOKEN: ${{ secrets.CONTROL_READ_TOKEN }}
-          SECRET_ROTATION_TOKEN: ${{ secrets.SECRET_ROTATION_TOKEN }}
+          CONTROL_READ_TOKEN: ${{ secrets.OWNER_GITHUB_TOKEN }}
+          SECRET_ROTATION_TOKEN: ${{ secrets.OWNER_GITHUB_TOKEN }}
         run: |
           test -n "$CONTROL_REPOSITORY" || {
             echo "::error::CONTROL_REPOSITORY variable is not configured."
@@ -62,7 +62,7 @@ jobs:
           repository: ${{ vars.CONTROL_REPOSITORY }}
           ref: ${{ inputs.expected_control_sha }}
           path: .pilot/control
-          token: ${{ secrets.CONTROL_READ_TOKEN }}
+          token: ${{ secrets.OWNER_GITHUB_TOKEN }}
           persist-credentials: false
 
       - name: Verify exact checkout before Codex
@@ -91,7 +91,7 @@ jobs:
       - name: Persist any rotated Codex credential
         if: ${{ success() }}
         env:
-          GH_TOKEN: ${{ secrets.SECRET_ROTATION_TOKEN }}
+          GH_TOKEN: ${{ secrets.OWNER_GITHUB_TOKEN }}
         run: |
           test -s "$CODEX_HOME/auth.json"
           gh secret set CODEX_AUTH_JSON --repo "$GITHUB_REPOSITORY" < "$CODEX_HOME/auth.json"

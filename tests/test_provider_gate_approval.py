@@ -7,14 +7,12 @@ def test_provider_gate_approval_caller_routes_exact_products_and_classmo_credent
         assert job in raw
     assert "Provider Gate Approval ${{ inputs.project }}" in raw
     assert "provider-gate-approval-core.yml" in raw
-    assert "CONTROL_READ_TOKEN" in raw
+    assert raw.count("secrets.OWNER_GITHUB_TOKEN") == 8
     assert "CLASSMO_SUPABASE_ACCESS_TOKEN" in raw
     assert "CLASSMO_EXPO_TOKEN" in raw
     assert "WAFL_SUPABASE_ACCESS_TOKEN" in raw
-    assert "WAFL_WRITE_TOKEN" in raw
-    assert "CLASSMO_WRITE_TOKEN" in raw
-    assert "ESC_WRITE_TOKEN" in raw
-    assert "MUVEL_WRITE_TOKEN" in raw
+    for old in ("WAFL_WRITE_TOKEN", "CLASSMO_WRITE_TOKEN", "ESC_WRITE_TOKEN", "MUVEL_WRITE_TOKEN"):
+        assert f"secrets.{old}" not in raw
 
 
 def test_provider_gate_core_rechecks_identity_validation_and_registered_executor():
@@ -162,7 +160,7 @@ def test_wafl_r2_existing_worker_gate_is_disabled_without_separate_owner_activat
     with open(".github/workflows/provider-gate-approval-core.yml", encoding="utf-8") as handle:
         core = handle.read()
     for key in (
-        "WAFL_CLOUDFLARE_API_TOKEN", "WAFL_CLOUDFLARE_ACCOUNT_ID",
+        "CLOUDFLARE_API_TOKEN", "WAFL_CLOUDFLARE_ACCOUNT_ID",
         "WAFL_R2_PREVIEW_WORKER_NAME", "WAFL_R2_PREVIEW_BUCKET_NAME",
         "WAFL_R2_PREVIEW_WORKER_URL", "WAFL_R2_IMAGES_ENTITLEMENT_APPROVED",
         "WAFL_R2_SIGNING_PARITY_APPROVED",

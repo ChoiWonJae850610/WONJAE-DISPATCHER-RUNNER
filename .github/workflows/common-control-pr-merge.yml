@@ -63,7 +63,7 @@ jobs:
           COMMON_PR_MERGE_ACTIVATED: ${{ vars.COMMON_PR_MERGE_ACTIVATED }}
           COMMON_PR_MERGE_TARGET_REPOSITORY: ${{ vars.COMMON_PR_MERGE_TARGET_REPOSITORY }}
           COMMON_PR_MERGE_APPROVAL_SECRET: ${{ secrets.COMMON_PR_MERGE_APPROVAL_SECRET }}
-          GH_TOKEN: ${{ secrets.COMMON_PR_MERGE_TOKEN }}
+          GH_TOKEN: ${{ secrets.OWNER_GITHUB_TOKEN }}
           REVIEW_REPOSITORY: ${{ inputs.repository }}
           REVIEW_PR: ${{ inputs.pr_number }}
           REVIEW_HEAD: ${{ inputs.head_sha }}

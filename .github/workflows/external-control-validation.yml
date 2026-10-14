@@ -30,7 +30,7 @@ jobs:
         with:
           repository: ChoiWonJae850610/DEV-CONTROL
           ref: ${{ steps.claim.outputs.sha }}
-          token: ${{ secrets.CONTROL_READ_TOKEN }}
+          token: ${{ secrets.OWNER_GITHUB_TOKEN }}
           persist-credentials: false
       - uses: ruby/setup-ruby@v1
         with:

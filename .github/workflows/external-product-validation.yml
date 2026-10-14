@@ -69,7 +69,7 @@ jobs:
         with:
           repository: ChoiWonJae850610/WAFL
           ref: ${{ steps.claim.outputs.sha }}
-          token: ${{ secrets.OWNER_GITHUB_TOKEN || secrets.WAFL_WRITE_TOKEN }}
+          token: ${{ secrets.OWNER_GITHUB_TOKEN }}
           path: product
           persist-credentials: false
           fetch-depth: 0
@@ -188,7 +188,7 @@ jobs:
         with:
           repository: ChoiWonJae850610/CLASSMO
           ref: ${{ steps.claim.outputs.sha }}
-          token: ${{ secrets.OWNER_GITHUB_TOKEN || secrets.CLASSMO_WRITE_TOKEN }}
+          token: ${{ secrets.OWNER_GITHUB_TOKEN }}
           path: product
           persist-credentials: false
 
@@ -258,7 +258,7 @@ jobs:
         with:
           repository: ChoiWonJae850610/ESC
           ref: ${{ steps.claim.outputs.sha }}
-          token: ${{ secrets.OWNER_GITHUB_TOKEN || secrets.ESC_WRITE_TOKEN }}
+          token: ${{ secrets.OWNER_GITHUB_TOKEN }}
           path: product
           persist-credentials: false
 
@@ -349,7 +349,7 @@ jobs:
         with:
           repository: ChoiWonJae850610/MUVEL
           ref: ${{ steps.claim.outputs.sha }}
-          token: ${{ secrets.OWNER_GITHUB_TOKEN || secrets.MUVEL_WRITE_TOKEN }}
+          token: ${{ secrets.OWNER_GITHUB_TOKEN }}
           path: product
           persist-credentials: false
 
