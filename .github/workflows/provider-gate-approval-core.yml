@@ -125,7 +125,7 @@ jobs:
           abort("provider gate is not registered") unless config.is_a?(Hash)
           abort("provider gate approval mode mismatch") unless config["approval_mode"] == "sanjinworks_owner_button"
           executor = config["executor"]
-          abort("provider gate executor is unsupported") unless ["approval_only", "classmo_supabase_migration", "classmo_eas_build", "classmo_eas_update", "wafl_supabase_hardening", "wafl_eas_update", "wafl_eas_build", "wafl_r2_preview_deploy", "wafl_supabase_g1_readonly", "wafl_supabase_g1_schema_apply", "classmo_editorial_016_readonly", "classmo_editorial_016_schema_apply", "classmo_editorial_017_storage_apply", "registered_supabase_migration_v1", "registered_development_psql_verify_v1"].include?(executor)
+          abort("provider gate executor is unsupported") unless ["approval_only", "classmo_supabase_migration", "classmo_eas_build", "classmo_eas_update", "wafl_supabase_hardening", "wafl_eas_update", "wafl_eas_build", "wafl_r2_preview_deploy", "wafl_supabase_g1_readonly", "wafl_supabase_g1_schema_apply", "wafl_supabase_g1_006_only_recovery", "classmo_editorial_016_readonly", "classmo_editorial_016_schema_apply", "classmo_editorial_017_storage_apply", "registered_supabase_migration_v1", "registered_development_psql_verify_v1"].include?(executor)
           label = config["label"]
           abort("provider gate label missing") unless label.is_a?(String) && !label.strip.empty?
 
@@ -170,6 +170,38 @@ jobs:
               "PROVIDER_G1_005_BLOB" => config["migration_005_blob"],
               "PROVIDER_G1_006_BLOB" => config["migration_006_blob"],
               "PROVIDER_G1_PREFLIGHT_ACCEPTED" => config["preflight_accepted"] == true ? "true" : "false",
+            )
+          elsif executor == "wafl_supabase_g1_006_only_recovery"
+            abort("WAFL 006-only project/gate mismatch") unless project == "WAFL" &&
+              gate == "g1_supabase_006_only_recovery"
+            abort("WAFL 006-only not Owner ready") unless config["ready_for_owner"] == true
+            expected = {
+              "provider" => "supabase_management_api",
+              "environment" => "development",
+              "project_ref" => "aqqarddfmdfyzeonfgwl",
+              "source_baseline_sha" => "edbaba54a4c2d6eb924b610a2703e87c6484db67",
+              "migration_name" => "wafl_cloud_rpc_006",
+              "migration_path" => "supabase/migrations/202610100003_wafl_cloud_rpc_006.sql",
+              "migration_004_blob" => "09b5cf566f5b38726a68877afee4fed498b56b13",
+              "migration_005_blob" => "572938ff0109a405918ee4ff20d5212ae09b55c1",
+              "migration_006_blob" => "9cd1929f2893b94c4aea38ba286cabd19c464c3b",
+              "expected_004_version" => "20261013150807",
+              "expected_005_version" => "20261013150814",
+              "production" => false,
+              "destructive" => false,
+              "credential_mutation" => false,
+              "device_mutation" => false,
+            }
+            expected.each do |key, value|
+              abort("WAFL 006-only metadata #{key} mismatch") unless config[key] == value
+            end
+            abort("WAFL 006-only cannot reuse full G1-S approval") if config.key?("preflight_accepted")
+            values.merge!(
+              "PROVIDER_W006_PROJECT_REF" => config["project_ref"],
+              "PROVIDER_W006_BASELINE_SHA" => config["source_baseline_sha"],
+              "PROVIDER_W006_004_BLOB" => config["migration_004_blob"],
+              "PROVIDER_W006_005_BLOB" => config["migration_005_blob"],
+              "PROVIDER_W006_006_BLOB" => config["migration_006_blob"],
             )
           elsif executor == "wafl_r2_preview_deploy"
             abort("WAFL R2 executor routed to another project") unless project == "WAFL"
@@ -598,6 +630,37 @@ jobs:
           name: wafl-g1-${{ inputs.gate }}-${{ inputs.source_sha }}
           path: ${{ runner.temp }}/wafl-g1-evidence.json
           retention-days: 14
+
+      - name: WAFL G1-S partial · 006-only forward apply and guarded readback
+        if: env.PROVIDER_EXECUTOR == 'wafl_supabase_g1_006_only_recovery'
+        env:
+          WAFL_SUPABASE_ACCESS_TOKEN: ${{ secrets.supabase_access_token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$WAFL_SUPABASE_ACCESS_TOKEN" || {
+            echo "::error::WAFL_006_EXISTING_CREDENTIAL_UNAVAILABLE"
+            exit 1
+          }
+          python scripts/wafl_g1_006_only_recovery.py \
+            --repo "$GITHUB_WORKSPACE/.approval/product" \
+            --source-sha "$SOURCE_SHA" \
+            --source-baseline-sha "$PROVIDER_W006_BASELINE_SHA" \
+            --project-ref "$PROVIDER_W006_PROJECT_REF" \
+            --migration-004-blob "$PROVIDER_W006_004_BLOB" \
+            --migration-005-blob "$PROVIDER_W006_005_BLOB" \
+            --migration-006-blob "$PROVIDER_W006_006_BLOB" \
+            --summary "$GITHUB_STEP_SUMMARY" \
+            --evidence "$RUNNER_TEMP/wafl-g1-006-only.json"
+
+      - name: WAFL G1-S partial · archive exact 006-only schema receipt
+        if: env.PROVIDER_EXECUTOR == 'wafl_supabase_g1_006_only_recovery' && success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: wafl-g1-006-only-${{ inputs.source_sha }}
+          path: ${{ runner.temp }}/wafl-g1-006-only.json
+          if-no-files-found: error
+          retention-days: 30
 
       - name: WAFL R2 · set up reviewed Wrangler CLI
         if: env.PROVIDER_EXECUTOR == 'wafl_r2_preview_deploy'
