@@ -9,12 +9,18 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import importlib.util
 import json
 import os
 from pathlib import Path
 from typing import Any
 
-from scripts import wafl_g1_supabase_gate as g1
+_G1_SPEC = importlib.util.spec_from_file_location(
+    "wafl_g1_supabase_gate", Path(__file__).resolve().with_name("wafl_g1_supabase_gate.py")
+)
+assert _G1_SPEC is not None and _G1_SPEC.loader is not None
+g1 = importlib.util.module_from_spec(_G1_SPEC)
+_G1_SPEC.loader.exec_module(g1)
 
 Blocked = g1.GateBlocked
 ensure = g1.ensure
