@@ -112,11 +112,9 @@ jobs:
 
       - name: Wait for exact canonical PR-head CI
         shell: bash
-        env:
-          PRODUCT_REPOSITORY: ${{ env.LEAN_REPOSITORY }}
-          VALIDATION_WORKFLOW_FILE: ${{ env.LEAN_WORKFLOW_FILE }}
         run: |
           set -euo pipefail
+          export PRODUCT_REPOSITORY="$LEAN_REPOSITORY" VALIDATION_WORKFLOW_FILE="$LEAN_WORKFLOW_FILE"
           run_id=""
           for attempt in $(seq 1 36); do
             run_id="$(gh api "repos/$PRODUCT_REPOSITORY/actions/workflows/$VALIDATION_WORKFLOW_FILE/runs?head_sha=$LEAN_PR_HEAD&event=pull_request&per_page=20" --jq '.workflow_runs | sort_by(.created_at) | last | .id // empty')"
@@ -158,11 +156,9 @@ jobs:
 
       - name: Wait for exact integrated-SHA canonical CI
         shell: bash
-        env:
-          PRODUCT_REPOSITORY: ${{ env.LEAN_REPOSITORY }}
-          VALIDATION_WORKFLOW_FILE: ${{ env.LEAN_WORKFLOW_FILE }}
         run: |
           set -euo pipefail
+          export PRODUCT_REPOSITORY="$LEAN_REPOSITORY" VALIDATION_WORKFLOW_FILE="$LEAN_WORKFLOW_FILE"
           run_id=""
           for attempt in $(seq 1 36); do
             run_id="$(gh api "repos/$PRODUCT_REPOSITORY/actions/workflows/$VALIDATION_WORKFLOW_FILE/runs?head_sha=$LEAN_INTEGRATED_SHA&event=push&per_page=20" --jq '.workflow_runs | sort_by(.created_at) | last | .id // empty')"
