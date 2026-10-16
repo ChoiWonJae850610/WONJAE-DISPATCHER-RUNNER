@@ -11,7 +11,6 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
-import os
 import re
 import time
 from dataclasses import dataclass
@@ -21,6 +20,7 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import quote
 from urllib.request import Request, urlopen
 
+from .lean_ci_maintenance import LeanCiMaintenanceError
 from .lean_ci_owner_stage import (
     LeanCiOwnerStageError,
     SignedWorkflowSelection,
@@ -188,12 +188,15 @@ def publish_lean_ci_pr(
 
     # Existing stage verifier rechecks source, control, origin, exact hashes,
     # workflow permissions, triggers, YAML and single allowed changed path.
-    stage = stage_workflow(
-        control_checkout=control_checkout, product_checkout=product_checkout,
-        selection=selection,
-        approval_mac=sign_workflow_selection(selection, approval_secret),
-        approval_secret=approval_secret, candidate=candidate, now_ms=now_ms,
-    )
+    try:
+        stage = stage_workflow(
+            control_checkout=control_checkout, product_checkout=product_checkout,
+            selection=selection,
+            approval_mac=sign_workflow_selection(selection, approval_secret),
+            approval_secret=approval_secret, candidate=candidate, now_ms=now_ms,
+        )
+    except LeanCiMaintenanceError as exc:
+        raise LeanCiPublicationError(str(exc)) from exc
     if (stage.changed_paths != (selection.workflow_path,)
             or stage.published or stage.ci_started):
         raise LeanCiPublicationError("staging result is not single-path only")
