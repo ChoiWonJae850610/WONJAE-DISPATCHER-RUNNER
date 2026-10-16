@@ -133,7 +133,9 @@ class FakeApi:
             }
         if path == root + "pulls/88/files?per_page=100":
             result = [{"filename": PATH, "status": "modified"}]
-            return result + [{"filename": "app/data.ts", "status": "modified"}] if self.has_other_files else result
+            if self.has_other_files:
+                return result + [{"filename": "app/data.ts", "status": "modified"}]
+            return result
         if path == root + "actions/runs/456":
             return {
                 "id": 456, "head_sha": self.scope.pr_head_sha,
