@@ -27,7 +27,6 @@ from .lean_ci_owner_stage import (
     _payload,
     sign_workflow_selection,
     stage_workflow,
-    verify_workflow_selection,
 )
 
 _PREFIX = b"registered-lean-ci-pr-publish-v1\n"
@@ -84,7 +83,7 @@ class GitHubRest:
             raise LeanCiPublicationError(
                 "GitHub rejected exact publishing operation"
             ) from None
-        except (URLError, TimeoutError, OSError, ValueError) as exc:
+        except (URLError, TimeoutError, OSError, ValueError):
             raise LeanCiPublicationError(
                 "GitHub exact publishing evidence unavailable"
             ) from None
