@@ -16,6 +16,11 @@ from dataclasses import asdict
 from pathlib import Path
 
 from wonjae_dispatcher_runner.lean_ci_owner_stage import SignedWorkflowSelection
+from wonjae_dispatcher_runner.lean_ci_pr_recovery import (
+    ExactCiRecovery,
+    recover_one_registered_ci_pr,
+    verify_recovery_claim,
+)
 from wonjae_dispatcher_runner.lean_ci_pr_publisher import (
     GitHubRest,
     LeanCiPublicationError,
@@ -37,12 +42,40 @@ def read_selection() -> SignedWorkflowSelection:
         raise LeanCiPublicationError("Owner exact selection shape invalid") from exc
 
 
-def check_claim(selection: SignedWorkflowSelection) -> None:
+def read_recovery() -> ExactCiRecovery | None:
+    raw = os.environ.get("LEAN_RECOVERY_JSON", "")
+    mac = os.environ.get("LEAN_RECOVERY_MAC", "")
+    if not raw and not mac:
+        return None
+    if not raw or not mac or len(raw.encode("utf-8")) > 800:
+        raise LeanCiPublicationError("incomplete exact CI recovery authorization")
+    try:
+        data = json.loads(raw)
+        if not isinstance(data, dict) or set(data) != {
+            "pr_number", "pr_head_sha", "failed_run_id", "current_workflow_sha256",
+        }:
+            raise LeanCiPublicationError("invalid CI recovery claim keys")
+        return ExactCiRecovery(**data)
+    except (TypeError, ValueError, KeyError) as exc:
+        raise LeanCiPublicationError("invalid CI recovery claim") from exc
+
+
+def check_claim(selection: SignedWorkflowSelection) -> ExactCiRecovery | None:
+    if selection.project != os.environ.get("LEAN_INPUT_PROJECT", ""):
+        raise LeanCiPublicationError("concurrency project differs from signed identity")
     verify_publish_claim(
         selection,
         os.environ.get("LEAN_CI_PUBLISH_MAC", ""),
         os.environ.get("LEAN_CI_APPROVAL_SECRET", ""),
     )
+    recovery = read_recovery()
+    if recovery is not None:
+        verify_recovery_claim(
+            selection, recovery,
+            os.environ.get("LEAN_RECOVERY_MAC", ""),
+            os.environ.get("LEAN_CI_APPROVAL_SECRET", ""),
+        )
+    return recovery
 
 
 def decode_candidate() -> str:
@@ -70,7 +103,7 @@ def main() -> int:
 
     try:
         selection = read_selection()
-        check_claim(selection)  # Before checkout or any GitHub resource request.
+        recovery = check_claim(selection)  # Before checkout or any GitHub resource request.
         if args.check_claim:
             env_file = os.environ.get("GITHUB_ENV", "")
             if env_file:
@@ -91,7 +124,7 @@ def main() -> int:
         proposal = decode_candidate()
         token = os.environ.get("OWNER_GITHUB_TOKEN", "")
         api = GitHubRest(selection.repository, token)
-        receipt = publish_lean_ci_pr(
+        shared = dict(
             control_checkout=args.control_checkout,
             product_checkout=args.product_checkout,
             selection=selection,
@@ -100,6 +133,13 @@ def main() -> int:
             candidate=proposal,
             api=api,
         )
+        if recovery is not None:
+            receipt = recover_one_registered_ci_pr(
+                **shared, recovery=recovery,
+                recovery_mac=os.environ.get("LEAN_RECOVERY_MAC", ""),
+            )
+        else:
+            receipt = publish_lean_ci_pr(**shared)
         print(json.dumps(asdict(receipt), ensure_ascii=True, sort_keys=True))
         return 0
     except (LeanCiPublicationError, OSError):
