@@ -114,9 +114,12 @@ class LeanCiPublishReceipt:
 def sign_publish_claim(selection: SignedWorkflowSelection, secret: str) -> str:
     if not isinstance(secret, str) or len(secret.encode("utf-8")) < 32:
         raise LeanCiPublicationError("dedicated Owner signing key is unavailable")
-    return hmac.new(
-        secret.encode("utf-8"), _PREFIX + _payload(selection), hashlib.sha256
-    ).hexdigest()
+    try:
+        return hmac.new(
+            secret.encode("utf-8"), _PREFIX + _payload(selection), hashlib.sha256
+        ).hexdigest()
+    except LeanCiOwnerStageError as exc:
+        raise LeanCiPublicationError("invalid signed publication scope") from exc
 
 
 def verify_publish_claim(selection: SignedWorkflowSelection, mac: str,
