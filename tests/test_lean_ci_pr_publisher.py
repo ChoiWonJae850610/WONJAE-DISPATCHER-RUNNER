@@ -6,13 +6,13 @@ from dataclasses import replace
 
 import pytest
 
+from wonjae_dispatcher_runner.lean_ci_owner_stage import SignedWorkflowSelection
 from wonjae_dispatcher_runner.lean_ci_pr_publisher import (
     LeanCiPublicationError,
     publish_lean_ci_pr,
     sign_publish_claim,
     verify_publish_claim,
 )
-from wonjae_dispatcher_runner.lean_ci_owner_stage import SignedWorkflowSelection
 
 KEY = "synthetic-owner-maintenance-signing-key-not-a-production-secret"
 REPO = "ExampleTeam/Future"
@@ -179,7 +179,6 @@ def test_exact_owner_signature_publishes_one_draft_ci_pr_not_a_merge(sandbox):
 
 
 def test_stage_signature_cannot_authorize_publish(sandbox):
-    selected = sandbox[2]
     stage_only = "0" * 64
     with pytest.raises(LeanCiPublicationError, match="attestation"):
         _publish(sandbox, signed=stage_only)
