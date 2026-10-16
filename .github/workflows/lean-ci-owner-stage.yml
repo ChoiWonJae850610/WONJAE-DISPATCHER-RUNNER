@@ -5,45 +5,16 @@ run-name: "Lean CI preview-only ${{ inputs.project }} ${{ inputs.product_sha }}"
 on:
   workflow_dispatch:
     inputs:
-      project:
-        description: Exact registered active product
-        required: true
-        type: string
-      repository:
-        description: Exact signed registered product repository
-        required: true
-        type: string
-      branch:
-        description: Exact signed registered development branch
-        required: true
-        type: string
-      workflow_path:
-        description: Exact registered canonical validation workflow path
-        required: true
-        type: string
-      control_sha:
-        required: true
-        type: string
-      product_sha:
-        required: true
-        type: string
-      previous_sha256:
-        required: true
-        type: string
-      proposed_sha256:
-        required: true
-        type: string
-      expires_ms:
-        required: true
-        type: string
-      nonce:
+      selection_json:
+        description: Exact signed registered project/workflow/SHA claim, JSON
         required: true
         type: string
       approval_mac:
+        description: Owner HMAC of the signed exact claim
         required: true
         type: string
       candidate_base64:
-        description: Owner-reviewed nonsecret replacement YAML (base64)
+        description: Reviewed nonsecret replacement YAML in base64
         required: true
         type: string
 
@@ -51,7 +22,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: lean-ci-owner-review-${{ inputs.project }}
+  group: lean-ci-owner-review-${{ github.repository }}
   cancel-in-progress: false
 
 jobs:
@@ -60,16 +31,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
-      LEAN_PROJECT: ${{ inputs.project }}
-      LEAN_REPOSITORY: ${{ inputs.repository }}
-      LEAN_BRANCH: ${{ inputs.branch }}
-      LEAN_WORKFLOW_PATH: ${{ inputs.workflow_path }}
-      LEAN_CONTROL_SHA: ${{ inputs.control_sha }}
-      LEAN_PRODUCT_SHA: ${{ inputs.product_sha }}
-      LEAN_PREVIOUS_SHA256: ${{ inputs.previous_sha256 }}
-      LEAN_PROPOSED_SHA256: ${{ inputs.proposed_sha256 }}
-      LEAN_EXPIRES_MS: ${{ inputs.expires_ms }}
-      LEAN_NONCE: ${{ inputs.nonce }}
+      LEAN_SELECTION_JSON: ${{ inputs.selection_json }}
       LEAN_CI_APPROVAL_MAC: ${{ inputs.approval_mac }}
       LEAN_CI_APPROVAL_SECRET: ${{ secrets.LEAN_CI_APPROVAL_SECRET }}
       LEAN_CI_CANDIDATE_BASE64: ${{ inputs.candidate_base64 }}
@@ -97,7 +59,7 @@ jobs:
         uses: actions/checkout@v6
         with:
           repository: ChoiWonJae850610/DEV-CONTROL
-          ref: ${{ inputs.control_sha }}
+          ref: main
           token: ${{ secrets.OWNER_GITHUB_TOKEN }}
           path: _stage/control
           persist-credentials: false
