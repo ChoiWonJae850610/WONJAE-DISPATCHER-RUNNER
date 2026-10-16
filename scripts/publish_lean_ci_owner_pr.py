@@ -16,16 +16,16 @@ from dataclasses import asdict
 from pathlib import Path
 
 from wonjae_dispatcher_runner.lean_ci_owner_stage import SignedWorkflowSelection
-from wonjae_dispatcher_runner.lean_ci_pr_recovery import (
-    ExactCiRecovery,
-    recover_one_registered_ci_pr,
-    verify_recovery_claim,
-)
 from wonjae_dispatcher_runner.lean_ci_pr_publisher import (
     GitHubRest,
     LeanCiPublicationError,
     publish_lean_ci_pr,
     verify_publish_claim,
+)
+from wonjae_dispatcher_runner.lean_ci_pr_recovery import (
+    ExactCiRecovery,
+    recover_one_registered_ci_pr,
+    verify_recovery_claim,
 )
 
 
@@ -124,15 +124,15 @@ def main() -> int:
         proposal = decode_candidate()
         token = os.environ.get("OWNER_GITHUB_TOKEN", "")
         api = GitHubRest(selection.repository, token)
-        shared = dict(
-            control_checkout=args.control_checkout,
-            product_checkout=args.product_checkout,
-            selection=selection,
-            publish_mac=os.environ.get("LEAN_CI_PUBLISH_MAC", ""),
-            approval_secret=os.environ.get("LEAN_CI_APPROVAL_SECRET", ""),
-            candidate=proposal,
-            api=api,
-        )
+        shared = {
+            "control_checkout": args.control_checkout,
+            "product_checkout": args.product_checkout,
+            "selection": selection,
+            "publish_mac": os.environ.get("LEAN_CI_PUBLISH_MAC", ""),
+            "approval_secret": os.environ.get("LEAN_CI_APPROVAL_SECRET", ""),
+            "candidate": proposal,
+            "api": api,
+        }
         if recovery is not None:
             receipt = recover_one_registered_ci_pr(
                 **shared, recovery=recovery,
