@@ -1,6 +1,6 @@
 name: Owner Signed Lean CI Stage (No Publication)
 
-run-name: "Lean CI preview-only ${{ inputs.project }} ${{ inputs.product_sha }}"
+run-name: "Lean CI staging — signed Owner review only #${{ github.run_id }}"
 
 on:
   workflow_dispatch:
