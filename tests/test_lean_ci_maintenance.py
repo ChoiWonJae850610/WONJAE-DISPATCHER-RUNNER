@@ -83,6 +83,8 @@ def workspaces(tmp_path):
     product = tmp_path / "product"
     c_sha = checkout(control, {"PROJECTS.yaml": REGISTRY})
     p_sha = checkout(product, {".github/workflows/future.yml": ORIGINAL})
+    git(control, "remote", "add", "origin", "https://github.com/ChoiWonJae850610/DEV-CONTROL.git")
+    git(product, "remote", "add", "origin", "https://github.com/ExampleTeam/Future.git")
     return control, product, c_sha, p_sha
 
 
@@ -180,3 +182,10 @@ def test_registry_rejects_escape_from_workflow_directory(tmp_path):
     path.write_text(REGISTRY.replace("future.yml", "../other.yml"))
     with pytest.raises(LeanCiMaintenanceError, match="validation path"):
         registered_ci(path)
+
+
+def test_wrong_repository_origin_is_rejected(workspaces):
+    _, product, _, _ = workspaces
+    git(product, "remote", "set-url", "origin", "https://github.com/Elsewhere/Unrelated.git")
+    with pytest.raises(LeanCiMaintenanceError, match="origin"):
+        review(workspaces)
