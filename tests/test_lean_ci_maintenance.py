@@ -90,16 +90,16 @@ def workspaces(tmp_path):
 
 def review(workspaces, content=PROPOSED, **changes):
     control, product, c_sha, p_sha = workspaces
-    args = dict(
-        control_checkout=control,
-        product_checkout=product,
-        project="FUTURE",
-        expected_control_sha=c_sha,
-        expected_product_sha=p_sha,
-        expected_previous_sha256=hashlib.sha256(ORIGINAL.encode()).hexdigest(),
-        expected_proposed_sha256=hashlib.sha256(content.encode()).hexdigest(),
-        candidate=content,
-    )
+    args = {
+        "control_checkout": control,
+        "product_checkout": product,
+        "project": "FUTURE",
+        "expected_control_sha": c_sha,
+        "expected_product_sha": p_sha,
+        "expected_previous_sha256": hashlib.sha256(ORIGINAL.encode()).hexdigest(),
+        "expected_proposed_sha256": hashlib.sha256(content.encode()).hexdigest(),
+        "candidate": content,
+    }
     args.update(changes)
     return review_candidate(**args)
 
