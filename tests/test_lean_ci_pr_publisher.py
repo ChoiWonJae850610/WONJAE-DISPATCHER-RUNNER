@@ -2,6 +2,7 @@
 
 import hashlib
 import subprocess
+from pathlib import Path
 from dataclasses import replace
 
 import pytest
@@ -231,3 +232,16 @@ def test_another_source_pr_is_not_safely_overwritten(sandbox):
     with pytest.raises(LeanCiPublicationError, match="another product PR"):
         _publish(sandbox, api)
     assert api.ref_created is False
+
+
+def test_owner_publish_reuses_existing_pat_without_new_activation_secrets():
+    workflow = (Path(__file__).resolve().parents[1]
+                / ".github/workflows/lean-ci-owner-publish.yml").read_text(
+                    encoding="utf-8"
+                )
+    assert "github.actor == github.repository_owner" in workflow
+    assert "github.ref == 'refs/heads/main'" in workflow
+    assert "LEAN_CI_APPROVAL_SECRET: ${{ secrets.OWNER_GITHUB_TOKEN }}" in workflow
+    assert "LEAN_CI_OWNER_PUBLISH_ENABLED" not in workflow
+    assert "secrets.LEAN_CI_APPROVAL_SECRET" not in workflow
+    assert "gh repo clone" in workflow
