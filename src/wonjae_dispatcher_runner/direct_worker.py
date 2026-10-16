@@ -12,6 +12,7 @@ from pathlib import Path
 import yaml
 from openai_codex import ApprovalMode, Codex, CodexConfig, Sandbox
 
+from .classmo_edge_preparation import EDGE_ROOT, edge_environment
 from .execution_state import (
     ExecutionStateError,
     ProductExecutionState,
@@ -625,8 +626,11 @@ def run_direct_worker(
         )
     safe_path = os.environ.get("PATH", "/usr/local/bin:/usr/bin:/bin")
     npm_environment = source_npm_environment(repo_path)
+    edge_runtime = edge_environment(repo_path)
     if npm_environment:
         safe_path = str(repo_path / ARTIFACT_ROOT / "tools/bin") + ":" + safe_path
+    if edge_runtime:
+        safe_path = str(repo_path / EDGE_ROOT / "bin") + ":" + safe_path
     safe_home = os.environ.get("HOME", str(Path.home()))
     safe_lang = os.environ.get("LANG", "C.UTF-8")
     safe_ssl_file = os.environ.get("SSL_CERT_FILE")
@@ -650,6 +654,7 @@ def run_direct_worker(
     if safe_ssl_dir:
         os.environ["SSL_CERT_DIR"] = safe_ssl_dir
     os.environ.update(npm_environment)
+    os.environ.update(edge_runtime)
 
     config = CodexConfig(
         cwd=str(repo_path),
@@ -691,12 +696,17 @@ def run_direct_worker(
     }
     sandbox = Sandbox.workspace_write
     config.env.update(npm_environment)
+    config.env.update(edge_runtime)
     thread_config["shell_environment_policy"]["set"].update(npm_environment)
+    thread_config["shell_environment_policy"]["set"].update(edge_runtime)
     if home_isolation:
         safe = source_environment(codex_home, Path("/nonexistent"))
         if npm_environment:
             safe["PATH"] = str(repo_path / ARTIFACT_ROOT / "tools/bin") + ":" + safe["PATH"]
             safe.update(npm_environment)
+        if edge_runtime:
+            safe["PATH"] = str(repo_path / EDGE_ROOT / "bin") + ":" + safe["PATH"]
+            safe.update(edge_runtime)
         os.environ.clear()
         os.environ.update(safe)
         config.env = safe
@@ -708,6 +718,7 @@ def run_direct_worker(
             key: safe[key] for key in ("PATH", "HOME", "LANG", "TZ")
         }
         thread_config["shell_environment_policy"]["set"].update(npm_environment)
+        thread_config["shell_environment_policy"]["set"].update(edge_runtime)
         sandbox = None
 
     # A 480-second deadline bounds the WHOLE SDK interaction, not just the first
