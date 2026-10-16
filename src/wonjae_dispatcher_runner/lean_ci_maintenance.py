@@ -151,10 +151,12 @@ def select_minimal_checks(paths: tuple[str, ...]) -> LeanSelection:
             ("automatic_full_historical_suite", "provider_dispatch"),
         )
 
-    docs = lambda p: p.startswith("docs/") or p.endswith(".md") or (
-        p == ".wonjae/execution-state.yaml"
-    )
-    if all(docs(p) for p in checked):
+    def is_document(path: str) -> bool:
+        return path.startswith("docs/") or path.endswith(".md") or (
+            path == ".wonjae/execution-state.yaml"
+        )
+
+    if all(is_document(p) for p in checked):
         return LeanSelection(
             "docs",
             ("changed_document_syntax", "registered_state_shape", "git_identity"),
@@ -183,7 +185,8 @@ def select_minimal_checks(paths: tuple[str, ...]) -> LeanSelection:
 
 
 def _git_head(repo: Path) -> str:
-    if repo.is_symlink() or not repo.is_dir() or not (repo / ".git").exists():
+    if (repo.is_symlink() or not repo.is_dir() or
+            not (repo / ".git").is_dir() or (repo / ".git").is_symlink()):
         raise LeanCiMaintenanceError("must use a normal exact Git checkout")
     try:
         p = subprocess.run(
@@ -193,6 +196,25 @@ def _git_head(repo: Path) -> str:
     except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
         raise LeanCiMaintenanceError("cannot read checkout HEAD") from exc
     return _sha(p.stdout.strip(), "Git checkout HEAD")
+
+
+def _verify_origin(repo: Path, expected_repository: str) -> None:
+    """Bind local checkout to the registered GitHub repository, without network."""
+    try:
+        p = subprocess.run(
+            ["git", "-C", str(repo), "remote", "get-url", "origin"],
+            check=True, capture_output=True, text=True, timeout=20,
+        )
+    except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
+        raise LeanCiMaintenanceError("checkout has no verifiable origin") from exc
+    value = p.stdout.strip()
+    prefixes = ("https://github.com/", "git@github.com:")
+    for prefix in prefixes:
+        if value.startswith(prefix):
+            actual = value.removeprefix(prefix).removesuffix(".git")
+            if actual == expected_repository:
+                return
+    raise LeanCiMaintenanceError("checkout origin is not the registered repository")
 
 
 def _require_clean(repo: Path) -> None:
@@ -276,14 +298,16 @@ def review_candidate(
     if project not in registered:
         raise LeanCiMaintenanceError("product is not active in the current registry")
     target = registered[project]
+    _verify_origin(control_checkout, "ChoiWonJae850610/DEV-CONTROL")
+    _verify_origin(product_checkout, target.repository)
     _require_clean(product_checkout)
     relative = _relative(target.validation_path)
     original_path = product_checkout / relative
     if original_path.is_symlink() or not original_path.is_file():
         raise LeanCiMaintenanceError("registered workflow must be an existing regular file")
     root = product_checkout.resolve()
-    if not original_path.resolve().is_relative_to(root):
-        raise LeanCiMaintenanceError("registered workflow escapes product checkout")
+    if original_path.resolve() != root / relative:
+        raise LeanCiMaintenanceError("registered workflow is aliased or escapes checkout")
     try:
         original = original_path.read_text(encoding="utf-8")
     except (OSError, UnicodeError) as exc:
