@@ -1,0 +1,110 @@
+name: Owner Lean CI Draft PR (Disabled by Default)
+
+run-name: "Registered CI draft PR · signed Owner request"
+
+on:
+  workflow_dispatch:
+    inputs:
+      selection_json:
+        description: Exact Owner-signed registered product/workflow/source claim
+        required: true
+        type: string
+      publish_mac:
+        description: Separate purpose-bound HMAC approving PR publication, not staging
+        required: true
+        type: string
+      candidate_base64:
+        description: Previously reviewed nonsecret canonical CI YAML
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+# Only one product CI PR publisher can run at a time, regardless of product.
+concurrency:
+  group: lean-ci-owner-publish-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  publish-one-registered-workflow:
+    if: ${{ github.ref == 'refs/heads/main' && github.actor == github.repository_owner && vars.LEAN_CI_OWNER_PUBLISH_ENABLED == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      LEAN_SELECTION_JSON: ${{ inputs.selection_json }}
+      LEAN_CI_PUBLISH_MAC: ${{ inputs.publish_mac }}
+      LEAN_CI_CANDIDATE_BASE64: ${{ inputs.candidate_base64 }}
+      LEAN_CI_APPROVAL_SECRET: ${{ secrets.LEAN_CI_APPROVAL_SECRET }}
+      OWNER_GITHUB_TOKEN: ${{ secrets.OWNER_GITHUB_TOKEN }}
+      GH_TOKEN: ${{ secrets.OWNER_GITHUB_TOKEN }}
+      PYTHONPATH: src
+
+    steps:
+      - name: Checkout only trusted Runner main
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Python for narrow deterministic CI source preparation
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Parse workflow YAML locally
+        run: python -m pip install --disable-pip-version-check "PyYAML==6.0.3"
+
+      - name: Reject unsigned, expired, or staging-only Owner claims
+        run: python scripts/publish_lean_ci_owner_pr.py --check-claim
+
+      - name: Clone current control registry, read only
+        uses: actions/checkout@v6
+        with:
+          repository: ChoiWonJae850610/DEV-CONTROL
+          ref: main
+          token: ${{ secrets.OWNER_GITHUB_TOKEN }}
+          path: _ci/control
+          persist-credentials: false
+
+      - name: Independently verify exact current control and product HEAD
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$OWNER_GITHUB_TOKEN" || { echo "Owner token missing"; exit 1; }
+          test "$(git -C _ci/control rev-parse HEAD)" = "$LEAN_CONTROL_SHA"
+          test "$(gh api repos/ChoiWonJae850610/DEV-CONTROL/branches/main --jq .commit.sha)" = "$LEAN_CONTROL_SHA"
+          test "$(gh api "repos/$LEAN_REPOSITORY/branches/$LEAN_BRANCH" --jq .commit.sha)" = "$LEAN_PRODUCT_SHA"
+
+      - name: Isolated checkout of the registered product source (no source scripts)
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh repo clone "$LEAN_REPOSITORY" "_ci/product" -- --branch "$LEAN_BRANCH" --single-branch
+          test "$(git -C _ci/product rev-parse HEAD)" = "$LEAN_PRODUCT_SHA"
+          test -z "$(git -C _ci/product status --porcelain --untracked-files=all)"
+
+      - name: Publish only a draft PR for the one registered validation YAML
+        shell: bash
+        run: |
+          set -euo pipefail
+          python scripts/publish_lean_ci_owner_pr.py --publish \
+            --control-checkout _ci/control \
+            --product-checkout _ci/product
+          echo "DRAFT_PR_CREATED: canonical PR-head CI is pending external validation"
+          echo "NO_MERGE: no product source, Provider, DB, credential or Production authority"
+
+      - name: Do not infer product CI success or a merged release
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "## Product CI publication boundary"
+            echo "- Registered canonical CI workflow: ONE YAML file only"
+            echo "- Ordinary Direct Worker .github/** guard: unchanged"
+            echo "- Exact product source validation: independent GitHub evidence required"
+            echo "- Draft PR created only after exact signed Owner claim (if succeeded)"
+            echo "- PR-head canonical CI: NOT_VERIFIED_BY_PUBLISHER"
+            echo "- Product PR merge and integrated-SHA CI: NOT_RUN"
+            echo "- Cloudflare/EAS/DB/Provider/Production/credential: NOT_RUN"
+          } >> "$GITHUB_STEP_SUMMARY"
