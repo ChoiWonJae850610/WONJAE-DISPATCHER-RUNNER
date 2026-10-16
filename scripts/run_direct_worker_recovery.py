@@ -9,6 +9,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+from wonjae_dispatcher_runner.classmo_edge_preparation import prepare_classmo_edge
 from wonjae_dispatcher_runner.direct_worker import (
     DirectWorkerError,
     git_head,
@@ -84,7 +85,18 @@ def main() -> int:
                  if route.state_path else None)
         preparation = state.next_action.npm_preparation if state else None
         prepared = prepare_npm(repo, preparation)
+        # Only a registered CLASSMO #141 Owner resume can fetch a pinned,
+        # credential-free Deno/WASM cache before the network-disabled Codex turn.
+        image_ready = prepare_classmo_edge(
+            repo, project=route.project, command=args.command,
+            task=state.next_action.source_task_id if state else None,
+            source_sha=original_sha,
+        )
         print(f"SOURCE_DEPENDENCIES prepared={str(prepared).lower()} offline=true", flush=True)
+        print(
+            "CLASSMO_EDGE_TOOLS_LOCAL_ONLY prepared="
+            + str(image_ready).lower(), flush=True,
+        )
         child_env = {key: value for key, value in os.environ.items()
                      if key not in {"GH_TOKEN", "PRODUCT_TOKEN", "RUNNER_TOKEN"}}
         return subprocess.run(
