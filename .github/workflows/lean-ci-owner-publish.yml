@@ -5,6 +5,18 @@ run-name: "Registered CI integration · single signed Owner action"
 on:
   workflow_dispatch:
     inputs:
+      project:
+        description: Registered product identity, independently checked against signed claim
+        required: true
+        type: string
+      recovery_json:
+        description: Optional exact existing one-file WAFL CI PR recovery scope
+        required: false
+        type: string
+      recovery_mac:
+        description: Purpose-separated Owner signature for exact PR recovery
+        required: false
+        type: string
       selection_json:
         description: Exact Owner-signed registered product/workflow/source claim
         required: true
@@ -21,9 +33,10 @@ on:
 permissions:
   contents: read
 
-# Only one product CI PR publisher can run at a time, regardless of product.
+# Different registered products never replace each other's pending Owner requests.
+# Same-project duplicate submissions remain serial and fail closed on stale PR/HEAD.
 concurrency:
-  group: lean-ci-owner-publish-${{ github.repository }}
+  group: lean-ci-owner-publish-${{ github.repository }}-${{ inputs.project }}
   cancel-in-progress: false
 
 jobs:
@@ -33,10 +46,13 @@ jobs:
     timeout-minutes: 50
     env:
       LEAN_SELECTION_JSON: ${{ inputs.selection_json }}
+      LEAN_INPUT_PROJECT: ${{ inputs.project }}
+      LEAN_RECOVERY_JSON: ${{ inputs.recovery_json }}
+      LEAN_RECOVERY_MAC: ${{ inputs.recovery_mac }}
       LEAN_CI_PUBLISH_MAC: ${{ inputs.publish_mac }}
       LEAN_CI_CANDIDATE_BASE64: ${{ inputs.candidate_base64 }}
       # Existing shared Owner PAT authenticates the SANJINWORKS-signed request.
-      # Domain separation remains enforced by registered-lean-ci-pr-publish-v1.
+      # Publication and exact existing-PR recovery have separate signed domains.
       # Do not introduce another Secret, flag or approval step.
       LEAN_CI_APPROVAL_SECRET: ${{ secrets.OWNER_GITHUB_TOKEN }}
       OWNER_GITHUB_TOKEN: ${{ secrets.OWNER_GITHUB_TOKEN }}
@@ -87,7 +103,7 @@ jobs:
           test "$(git -C _ci/product rev-parse HEAD)" = "$LEAN_PRODUCT_SHA"
           test -z "$(git -C _ci/product status --porcelain --untracked-files=all)"
 
-      - name: Publish one signed registered CI-only PR and capture exact IDs
+      - name: Publish or safely update one signed registered CI-only PR and capture exact IDs
         shell: bash
         run: |
           set -euo pipefail
@@ -189,7 +205,7 @@ jobs:
             echo "- Registered canonical CI workflow: ONE YAML file only"
             echo "- Ordinary Direct Worker .github/** guard: unchanged"
             echo "- Exact product source validation: independent GitHub evidence required"
-            echo "- CI PR created only after exact signed Owner claim (if succeeded)"
+            echo "- New CI PR or exact single-file PR recovery only after separate signed Owner scope"
             echo "- Exact PR-head and integrated-SHA canonical CI: required for success"
             echo "- A failed/pending step never means full rollout PASS"
             echo "- Cloudflare/EAS/DB/Provider/Production/credential: NOT_RUN"

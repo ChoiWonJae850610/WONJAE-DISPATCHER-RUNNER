@@ -251,7 +251,7 @@ def test_signed_owner_rollout_auto_integrates_only_after_exact_pr_ci_pass():
                 / ".github/workflows/lean-ci-owner-publish.yml").read_text(
                     encoding="utf-8"
                 )
-    pr = workflow.index("Publish one signed registered CI-only PR")
+    pr = workflow.index("Publish or safely update one signed registered CI-only PR")
     validated = workflow.index("Wait for exact canonical PR-head CI")
     merge = workflow.index("Merge ONLY the exact one-file CI PR")
     integrated = workflow.index("Wait for exact integrated-SHA canonical CI")
@@ -268,3 +268,13 @@ def test_signed_owner_rollout_auto_integrates_only_after_exact_pr_ci_pass():
     assert "secrets.OWNER_GITHUB_TOKEN" in workflow
     assert "secrets.LEAN_CI_APPROVAL_SECRET" not in workflow
     assert "LEAN_CI_OWNER_PUBLISH_ENABLED" not in workflow
+
+
+def test_existing_owner_dispatch_inputs_keep_distinct_recovery_signature():
+    workflow = (Path(__file__).resolve().parents[1]
+                / ".github/workflows/lean-ci-owner-publish.yml").read_text()
+    assert "inputs.project" in workflow
+    assert "LEAN_RECOVERY_MAC" in workflow
+    assert "LEAN_INPUT_PROJECT" in workflow
+    assert "secrets.OWNER_GITHUB_TOKEN" in workflow
+    assert "secrets.LEAN_CI_APPROVAL_SECRET" not in workflow
