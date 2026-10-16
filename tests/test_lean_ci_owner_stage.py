@@ -165,7 +165,7 @@ def test_bad_signature_or_missing_key_cannot_write(handoff):
 
 def test_wrong_project_registry_does_not_grant_a_workflow_path(handoff):
     selected = replace(handoff[2], project="OTHER")
-    with pytest.raises(LeanCiOwnerStageError, match="registered"):
+    with pytest.raises(LeanCiOwnerStageError, match="active Git registry"):
         _stage(handoff, selection=selected)
 
 
