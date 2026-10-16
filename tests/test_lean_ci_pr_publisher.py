@@ -168,7 +168,7 @@ def test_exact_owner_signature_publishes_one_draft_ci_pr_not_a_merge(sandbox):
     assert receipt.workflow_path == WORKFLOW
     assert receipt.merged is False and receipt.canonical_ci_verified is False
     assert _git(product, "rev-parse", "HEAD") == head
-    assert _git(product, "status", "--porcelain") == " M " + WORKFLOW
+    assert _git(product, "status", "--porcelain") == "M " + WORKFLOW
     assert [path for op, path in api.operations if op == "POST"] == [
         "repos/" + REPO + "/git/blobs",
         "repos/" + REPO + "/git/trees",
@@ -219,7 +219,7 @@ def test_changed_candidate_digest_prevents_remote_writes(sandbox):
 
 def test_rejects_noncanonical_changes_and_origin_mismatch(sandbox):
     choice = replace(sandbox[2], workflow_path=".github/workflows/other.yml")
-    with pytest.raises(LeanCiPublicationError, match="registered"):
+    with pytest.raises(LeanCiPublicationError, match="active Git registry"):
         _publish(sandbox, selection=choice)
     _git(sandbox[1], "remote", "set-url", "origin", "https://github.com/Wrong/Repo")
     with pytest.raises(LeanCiPublicationError, match="origin"):
