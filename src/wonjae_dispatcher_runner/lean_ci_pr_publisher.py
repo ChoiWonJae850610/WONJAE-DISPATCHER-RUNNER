@@ -43,6 +43,7 @@ class LeanCiPublicationError(LeanCiOwnerStageError):
 class GithubApi(Protocol):
     def get(self, path: str, *, missing_ok: bool = False) -> object: ...
     def post(self, path: str, payload: dict) -> object: ...
+    def patch(self, path: str, payload: dict) -> object: ...
 
 
 class GitHubRest:
@@ -94,6 +95,18 @@ class GitHubRest:
 
     def post(self, path: str, payload: dict) -> object:
         return self._request("POST", path, data=payload)
+
+    def patch(self, path: str, payload: dict) -> object:
+        # Recovery only: the trusted caller must pass an exact Git ref and
+        # {"sha": direct_child, "force": False}. Never expose generic force writes.
+        root = "repos/" + self.repo + "/git/refs/heads/lean-ci/"
+        if not path.startswith(root) or payload.get("force") is not False or (
+            set(payload) != {"sha", "force"}
+            or not isinstance(payload.get("sha"), str)
+            or not _SHA.fullmatch(payload["sha"])
+        ):
+            raise LeanCiPublicationError("force or non-CI Git ref mutation prohibited")
+        return self._request("PATCH", path, data=payload)
 
 
 @dataclass(frozen=True)
