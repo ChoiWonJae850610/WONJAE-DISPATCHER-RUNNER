@@ -20,6 +20,7 @@ from pathlib import Path
 from .lean_ci_maintenance import (
     LeanCiMaintenanceError,
     WorkflowPreview,
+    _require_clean,
     registered_ci,
     review_candidate,
 )
@@ -162,6 +163,7 @@ def stage_workflow(
 ) -> StagingReceipt:
     """Locally stage only the registry-owned validation YAML, never publish it."""
     verify_workflow_selection(selection, approval_mac, approval_secret, now_ms=now_ms)
+    _require_clean(control_checkout)
     routes = registered_ci(control_checkout / "PROJECTS.yaml")
     route = routes.get(selection.project)
     if route is None or (
