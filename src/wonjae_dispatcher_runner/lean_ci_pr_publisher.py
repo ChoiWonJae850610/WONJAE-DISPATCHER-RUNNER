@@ -30,7 +30,7 @@ from .lean_ci_owner_stage import (
     stage_workflow,
 )
 
-_PREFIX = b"registered-lean-ci-pr-publish-v1\n"
+_PREFIX = b"registered-lean-ci-one-click-integrate-v1\n"
 _SHA = re.compile(r"[0-9a-f]{40}\Z")
 _EXPIRE_WINDOW_MS = 10 * 60 * 1000
 _MAX_REPO_DATA = 500_000
