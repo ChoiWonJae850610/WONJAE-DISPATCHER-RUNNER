@@ -1,7 +1,7 @@
 """One-shot Owner-signed recovery of an existing registered CI-only PR.
 
-Never edits product source/test files, creates a second PR, or merges. Only the
-original registered YAML in the exact already-open WAFL #88 may be replaced.
+Never edits product source/test files, creates a second PR, or merges.
+Only the exact known already-open single-YAML recovery incident is admitted.
 The trusted workflow independently waits for new PR-head CI before merge.
 """
 
@@ -33,12 +33,25 @@ from .lean_ci_pr_publisher import (
     verify_publish_claim,
 )
 
-_DOMAIN = b"registered-lean-ci-wafl-88-recovery-v1\n"
 _SHA = re.compile(r"[0-9a-f]{40}\Z")
 _DIGEST = re.compile(r"[0-9a-f]{64}\Z")
-_TARGET_REPO = "ChoiWonJae850610/WAFL"
-_TARGET_WORKFLOW = ".github/workflows/wafl-cloud-validation.yml"
-_TARGET_PR = 88
+# No generic product PR editing. These are two separately signed, fixed
+# historical incident identities; WAFL #88 is already closed and will fail
+# the existing-open-PR gate without attempting a write.
+_TARGETS = {
+    "WAFL": (
+        "ChoiWonJae850610/WAFL",
+        ".github/workflows/wafl-cloud-validation.yml",
+        88,
+        b"registered-lean-ci-wafl-88-recovery-v1\n",
+    ),
+    "MUVEL": (
+        "ChoiWonJae850610/MUVEL",
+        ".github/workflows/cloud-dev.yml",
+        12,
+        b"registered-lean-ci-muvel-12-recovery-v1\n",
+    ),
+}
 
 
 @dataclass(frozen=True)
@@ -50,12 +63,13 @@ class ExactCiRecovery:
 
 
 def _scope(scope: ExactCiRecovery, selection: SignedWorkflowSelection) -> bytes:
+    target = _TARGETS.get(selection.project)
     if (
-        selection.project != "WAFL"
-        or selection.repository != _TARGET_REPO
+        target is None
+        or selection.repository != target[0]
         or selection.branch != "cloud-dev-v1"
-        or selection.workflow_path != _TARGET_WORKFLOW
-        or type(scope.pr_number) is not int or scope.pr_number != _TARGET_PR
+        or selection.workflow_path != target[1]
+        or type(scope.pr_number) is not int or scope.pr_number != target[2]
         or not isinstance(scope.pr_head_sha, str)
         or not _SHA.fullmatch(scope.pr_head_sha)
         or type(scope.failed_run_id) is not int or scope.failed_run_id <= 0
@@ -66,7 +80,7 @@ def _scope(scope: ExactCiRecovery, selection: SignedWorkflowSelection) -> bytes:
         )
     ):
         raise LeanCiPublicationError("unsupported or ambiguous exact CI recovery scope")
-    return _DOMAIN + _payload(selection) + b"\n" + "\n".join((
+    return target[3] + _payload(selection) + b"\n" + "\n".join((
         str(scope.pr_number), scope.pr_head_sha,
         str(scope.failed_run_id), scope.current_workflow_sha256,
     )).encode("ascii")
@@ -112,7 +126,11 @@ def _verified_existing(
     pr = _obj(api.get(root + "pulls/" + str(scope.pr_number)), "existing CI PR")
     head = _obj(pr.get("head"), "CI PR head")
     base = _obj(pr.get("base"), "CI PR base")
-    expected_branch_prefix = "lean-ci/wafl-" + selection.product_sha[:12] + "-"
+    expected_branch = (
+        "lean-ci/" + selection.project.lower() + "-"
+        + selection.product_sha[:12] + "-"
+        + scope.current_workflow_sha256[:12]
+    )
     branch = head.get("ref")
     if not (
         pr.get("number") == scope.pr_number
@@ -124,8 +142,7 @@ def _verified_existing(
         and head.get("sha") == scope.pr_head_sha
         and head.get("repo", {}).get("full_name") == selection.repository
         and isinstance(branch, str)
-        and branch.startswith(expected_branch_prefix)
-        and re.fullmatch(r"lean-ci/wafl-[a-f0-9]{12}-[a-f0-9]{12}", branch)
+        and branch == expected_branch
         and base.get("ref") == selection.branch
         and base.get("sha") == selection.product_sha
         and base.get("repo", {}).get("full_name") == selection.repository
@@ -189,7 +206,7 @@ def recover_one_registered_ci_pr(
     api: GithubApi,
     now_ms: int | None = None,
 ) -> LeanCiPublishReceipt:
-    """Update a single exact CI YAML within WAFL #88; no merge or PASS."""
+    """Fast-forward the exact known CI-only PR after independent evidence."""
     verify_publish_claim(selection, publish_mac, approval_secret, now_ms=now_ms)
     verify_recovery_claim(
         selection, recovery, recovery_mac, approval_secret, now_ms=now_ms,
@@ -239,7 +256,7 @@ def recover_one_registered_ci_pr(
     if not isinstance(tree, str) or not _SHA.fullmatch(tree):
         raise LeanCiPublicationError("recovery tree SHA invalid")
     commit = _obj(api.post(root + "git/commits", {
-        "message": "ci: avoid obsolete full-suite assertion in WAFL CI maintenance",
+        "message": "ci: recover " + selection.project + " focused CI validation",
         "tree": tree, "parents": [recovery.pr_head_sha],
     }), "recovery commit").get("sha")
     if not isinstance(commit, str) or not _SHA.fullmatch(commit):

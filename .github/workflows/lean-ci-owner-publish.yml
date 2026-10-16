@@ -10,7 +10,7 @@ on:
         required: true
         type: string
       recovery_json:
-        description: Optional exact existing one-file WAFL CI PR recovery scope
+        description: Optional exact signed WAFL #88 or MUVEL #12 CI PR recovery
         required: false
         type: string
       recovery_mac:
