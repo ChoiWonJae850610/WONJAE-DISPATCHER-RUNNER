@@ -76,7 +76,10 @@ def main() -> int:
             candidate=candidate,
         )
     except (LeanCiOwnerStageError, OSError, ValueError):
-        print("OWNER_LEAN_CI_STAGE_REJECTED: exact authorization or source guard failed", file=sys.stderr)
+        print(
+            "OWNER_LEAN_CI_STAGE_REJECTED: exact authorization or source guard failed",
+            file=sys.stderr,
+        )
         return 2
     # Do not echo candidate, raw secrets or a false merged/validated status.
     print(json.dumps(asdict(result), ensure_ascii=True, sort_keys=True))
