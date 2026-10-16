@@ -31,12 +31,14 @@ def main(argv=None):
     parser.add_argument("--run-id", type=int, required=True)
     parser.add_argument("--head-sha", required=True)
     parser.add_argument("--event", choices=("pull_request", "push"), required=True)
+    parser.add_argument("--seconds", type=int, default=3600)
     args = parser.parse_args(argv)
     try:
         conclusion = wait_exact_validation(
             read_run, repository=os.environ["PRODUCT_REPOSITORY"],
             workflow_path=f".github/workflows/{os.environ['VALIDATION_WORKFLOW_FILE']}",
             run_id=args.run_id, head_sha=args.head_sha, event=args.event,
+            seconds=args.seconds,
         )
     except SourceValidationError as exc:
         evidence = str(exc)

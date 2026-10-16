@@ -1,6 +1,6 @@
-name: Owner Lean CI Draft PR (Disabled by Default)
+name: Owner Lean CI Rollout
 
-run-name: "Registered CI draft PR · signed Owner request"
+run-name: "Registered CI integration · single signed Owner action"
 
 on:
   workflow_dispatch:
@@ -10,7 +10,7 @@ on:
         required: true
         type: string
       publish_mac:
-        description: Separate purpose-bound HMAC approving PR publication, not staging
+        description: Purpose-bound HMAC for exact product CI PR, validation and safe integration
         required: true
         type: string
       candidate_base64:
@@ -28,14 +28,17 @@ concurrency:
 
 jobs:
   publish-one-registered-workflow:
-    if: ${{ github.ref == 'refs/heads/main' && github.actor == github.repository_owner && vars.LEAN_CI_OWNER_PUBLISH_ENABLED == 'true' }}
+    if: ${{ github.ref == 'refs/heads/main' && github.actor == github.repository_owner }}
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 50
     env:
       LEAN_SELECTION_JSON: ${{ inputs.selection_json }}
       LEAN_CI_PUBLISH_MAC: ${{ inputs.publish_mac }}
       LEAN_CI_CANDIDATE_BASE64: ${{ inputs.candidate_base64 }}
-      LEAN_CI_APPROVAL_SECRET: ${{ secrets.LEAN_CI_APPROVAL_SECRET }}
+      # Existing shared Owner PAT authenticates the SANJINWORKS-signed request.
+      # Domain separation remains enforced by registered-lean-ci-pr-publish-v1.
+      # Do not introduce another Secret, flag or approval step.
+      LEAN_CI_APPROVAL_SECRET: ${{ secrets.OWNER_GITHUB_TOKEN }}
       OWNER_GITHUB_TOKEN: ${{ secrets.OWNER_GITHUB_TOKEN }}
       GH_TOKEN: ${{ secrets.OWNER_GITHUB_TOKEN }}
       PYTHONPATH: src
@@ -84,27 +87,110 @@ jobs:
           test "$(git -C _ci/product rev-parse HEAD)" = "$LEAN_PRODUCT_SHA"
           test -z "$(git -C _ci/product status --porcelain --untracked-files=all)"
 
-      - name: Publish only a draft PR for the one registered validation YAML
+      - name: Publish one signed registered CI-only PR and capture exact IDs
         shell: bash
         run: |
           set -euo pipefail
-          python scripts/publish_lean_ci_owner_pr.py --publish \
+          receipt="$(python scripts/publish_lean_ci_owner_pr.py --publish \
             --control-checkout _ci/control \
-            --product-checkout _ci/product
-          echo "DRAFT_PR_CREATED: canonical PR-head CI is pending external validation"
-          echo "NO_MERGE: no product source, Provider, DB, credential or Production authority"
+            --product-checkout _ci/product)"
+          project="$(jq -er '.project' <<< "$receipt")"
+          repository="$(jq -er '.repository' <<< "$receipt")"
+          head="$(jq -er '.pr_head_sha' <<< "$receipt")"
+          base="$(jq -er '.source_sha' <<< "$receipt")"
+          path="$(jq -er '.workflow_path' <<< "$receipt")"
+          pr="$(jq -er '.pr_number' <<< "$receipt")"
+          test "$project" = "$LEAN_PROJECT"
+          test "$repository" = "$LEAN_REPOSITORY"
+          test "$base" = "$LEAN_PRODUCT_SHA"
+          test "$path" = "$LEAN_WORKFLOW_PATH"
+          [[ "$head" =~ ^[a-f0-9]{40}$ && "$pr" =~ ^[0-9]{1,12}$ ]]
+          echo "LEAN_PR_HEAD=$head" >> "$GITHUB_ENV"
+          echo "LEAN_PR_NUMBER=$pr" >> "$GITHUB_ENV"
+          echo "LEAN_WORKFLOW_FILE=${LEAN_WORKFLOW_PATH##*/}" >> "$GITHUB_ENV"
+          echo "EXACT_CI_PR_CREATED: $repository #$pr head $head"
 
-      - name: Do not infer product CI success or a merged release
+      - name: Wait for exact canonical PR-head CI
+        shell: bash
+        run: |
+          set -euo pipefail
+          export PRODUCT_REPOSITORY="$LEAN_REPOSITORY" VALIDATION_WORKFLOW_FILE="$LEAN_WORKFLOW_FILE"
+          run_id=""
+          for attempt in $(seq 1 36); do
+            run_id="$(gh api "repos/$PRODUCT_REPOSITORY/actions/workflows/$VALIDATION_WORKFLOW_FILE/runs?head_sha=$LEAN_PR_HEAD&event=pull_request&per_page=20" --jq '.workflow_runs | sort_by(.created_at) | last | .id // empty')"
+            if [ -n "$run_id" ]; then break; fi
+            sleep 5
+          done
+          test -n "$run_id" || { echo "::error::Exact CI PR-head run not found"; exit 1; }
+          conclusion="$(python scripts/source_validation.py \
+            --run-id "$run_id" --head-sha "$LEAN_PR_HEAD" --event pull_request --seconds 900)"
+          test "$conclusion" = "success $LEAN_PR_HEAD"
+          echo "LEAN_PR_HEAD_CI_RUN=$run_id" >> "$GITHUB_ENV"
+
+      - name: Merge ONLY the exact one-file CI PR after canonical PASS
+        shell: bash
+        run: |
+          set -euo pipefail
+          live_base="$(gh api "repos/$LEAN_REPOSITORY/branches/$LEAN_BRANCH" --jq '.commit.sha')"
+          test "$live_base" = "$LEAN_PRODUCT_SHA"
+          gh api "repos/$LEAN_REPOSITORY/pulls/$LEAN_PR_NUMBER" | jq -e \
+            --arg repo "$LEAN_REPOSITORY" --arg head "$LEAN_PR_HEAD" \
+            --arg base "$LEAN_PRODUCT_SHA" --arg branch "$LEAN_BRANCH" \
+            '.state == "open" and .merged == false and .draft == false
+             and .head.sha == $head and .head.repo.full_name == $repo
+             and .base.sha == $base and .base.ref == $branch
+             and .base.repo.full_name == $repo' >/dev/null
+          gh api "repos/$LEAN_REPOSITORY/pulls/$LEAN_PR_NUMBER/files?per_page=100" | jq -e \
+            --arg path "$LEAN_WORKFLOW_PATH" \
+            'length == 1 and .[0].filename == $path and .[0].status == "modified"' >/dev/null
+          merge="$(gh api --method PUT "repos/$LEAN_REPOSITORY/pulls/$LEAN_PR_NUMBER/merge" \
+            -f merge_method=merge -f sha="$LEAN_PR_HEAD")"
+          jq -e '.merged == true and (.sha | type == "string")' <<< "$merge" >/dev/null
+          integrated="$(jq -er '.sha' <<< "$merge")"
+          [[ "$integrated" =~ ^[0-9a-f]{40}$ ]]
+          test "$(gh api "repos/$LEAN_REPOSITORY/branches/$LEAN_BRANCH" --jq '.commit.sha')" = "$integrated"
+          gh api "repos/$LEAN_REPOSITORY/pulls/$LEAN_PR_NUMBER" | jq -e \
+            --arg sha "$integrated" '.state == "closed" and .merged == true and .merge_commit_sha == $sha' >/dev/null
+          echo "LEAN_INTEGRATED_SHA=$integrated" >> "$GITHUB_ENV"
+          echo "EXACT_CI_PR_MERGED: $LEAN_REPOSITORY #$LEAN_PR_NUMBER integrated $integrated"
+
+      - name: Wait for exact integrated-SHA canonical CI
+        shell: bash
+        run: |
+          set -euo pipefail
+          export PRODUCT_REPOSITORY="$LEAN_REPOSITORY" VALIDATION_WORKFLOW_FILE="$LEAN_WORKFLOW_FILE"
+          run_id=""
+          for attempt in $(seq 1 36); do
+            run_id="$(gh api "repos/$PRODUCT_REPOSITORY/actions/workflows/$VALIDATION_WORKFLOW_FILE/runs?head_sha=$LEAN_INTEGRATED_SHA&event=push&per_page=20" --jq '.workflow_runs | sort_by(.created_at) | last | .id // empty')"
+            if [ -n "$run_id" ]; then break; fi
+            sleep 5
+          done
+          test -n "$run_id" || { echo "::error::Exact integrated CI run not found"; exit 1; }
+          conclusion="$(python scripts/source_validation.py \
+            --run-id "$run_id" --head-sha "$LEAN_INTEGRATED_SHA" --event push --seconds 900)"
+          test "$conclusion" = "success $LEAN_INTEGRATED_SHA"
+          echo "LEAN_INTEGRATED_CI_RUN=$run_id" >> "$GITHUB_ENV"
+          {
+            echo "## Registered CI integrated and validated"
+            echo "- Product: $LEAN_PROJECT"
+            echo "- One protected canonical CI YAML: $LEAN_WORKFLOW_PATH"
+            echo "- PR: #$LEAN_PR_NUMBER"
+            echo "- Exact PR head: $LEAN_PR_HEAD / CI run $LEAN_PR_HEAD_CI_RUN SUCCESS"
+            echo "- Integrated SHA: $LEAN_INTEGRATED_SHA / CI run $run_id SUCCESS"
+            echo "- App runtime, Provider, DB, Production, devices: NOT_RUN"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Record any incomplete or failed CI rollout without false PASS
         if: always()
         shell: bash
         run: |
           {
-            echo "## Product CI publication boundary"
+            echo "## Product CI rollout boundary"
             echo "- Registered canonical CI workflow: ONE YAML file only"
             echo "- Ordinary Direct Worker .github/** guard: unchanged"
             echo "- Exact product source validation: independent GitHub evidence required"
-            echo "- Draft PR created only after exact signed Owner claim (if succeeded)"
-            echo "- PR-head canonical CI: NOT_VERIFIED_BY_PUBLISHER"
-            echo "- Product PR merge and integrated-SHA CI: NOT_RUN"
+            echo "- CI PR created only after exact signed Owner claim (if succeeded)"
+            echo "- Exact PR-head and integrated-SHA canonical CI: required for success"
+            echo "- A failed/pending step never means full rollout PASS"
             echo "- Cloudflare/EAS/DB/Provider/Production/credential: NOT_RUN"
           } >> "$GITHUB_STEP_SUMMARY"

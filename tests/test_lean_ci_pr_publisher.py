@@ -3,6 +3,7 @@
 import hashlib
 import subprocess
 from dataclasses import replace
+from pathlib import Path
 
 import pytest
 
@@ -133,11 +134,11 @@ class FakeApi:
             assert payload["ref"].startswith("refs/heads/lean-ci/future-")
             return {"ref": payload["ref"]}
         if path.endswith("/pulls"):
-            assert payload["draft"] is True
+            assert payload["draft"] is False
             assert payload["base"] == "dev-next"
             assert payload["head"].startswith("lean-ci/future-")
             return {
-                "number": 101, "state": "open", "draft": True,
+                "number": 101, "state": "open", "draft": False,
                 "head": {"sha": self.created_commit},
                 "base": {"sha": self.request.product_sha, "ref": "dev-next"},
                 "html_url": "https://github.com/" + REPO + "/pull/101",
@@ -163,7 +164,7 @@ def test_exact_owner_signature_publishes_one_draft_ci_pr_not_a_merge(sandbox):
     head = _git(product, "rev-parse", "HEAD")
     api = FakeApi(sandbox[2])
     receipt = _publish(sandbox, api)
-    assert receipt.status == "DRAFT_PR_CREATED_CI_NOT_VERIFIED"
+    assert receipt.status == "PRODUCT_CI_PR_CREATED_VALIDATION_PENDING"
     assert receipt.pr_number == 101
     assert receipt.workflow_path == WORKFLOW
     assert receipt.merged is False and receipt.canonical_ci_verified is False
@@ -231,3 +232,39 @@ def test_another_source_pr_is_not_safely_overwritten(sandbox):
     with pytest.raises(LeanCiPublicationError, match="another product PR"):
         _publish(sandbox, api)
     assert api.ref_created is False
+
+
+def test_owner_publish_reuses_existing_pat_without_new_activation_secrets():
+    workflow = (Path(__file__).resolve().parents[1]
+                / ".github/workflows/lean-ci-owner-publish.yml").read_text(
+                    encoding="utf-8"
+                )
+    assert "github.actor == github.repository_owner" in workflow
+    assert "github.ref == 'refs/heads/main'" in workflow
+    assert "LEAN_CI_APPROVAL_SECRET: ${{ secrets.OWNER_GITHUB_TOKEN }}" in workflow
+    assert "LEAN_CI_OWNER_PUBLISH_ENABLED" not in workflow
+    assert "secrets.LEAN_CI_APPROVAL_SECRET" not in workflow
+    assert "gh repo clone" in workflow
+
+def test_signed_owner_rollout_auto_integrates_only_after_exact_pr_ci_pass():
+    workflow = (Path(__file__).resolve().parents[1]
+                / ".github/workflows/lean-ci-owner-publish.yml").read_text(
+                    encoding="utf-8"
+                )
+    pr = workflow.index("Publish one signed registered CI-only PR")
+    validated = workflow.index("Wait for exact canonical PR-head CI")
+    merge = workflow.index("Merge ONLY the exact one-file CI PR")
+    integrated = workflow.index("Wait for exact integrated-SHA canonical CI")
+    assert 0 <= pr < validated < merge < integrated
+    assert "--event pull_request --seconds 900" in workflow
+    assert "--event push --seconds 900" in workflow
+    assert 'test "$conclusion" = "success $LEAN_PR_HEAD"' in workflow
+    assert 'test "$conclusion" = "success $LEAN_INTEGRATED_SHA"' in workflow
+    assert 'length == 1 and .[0].filename == $path' in workflow
+    assert '.head.sha == $head' in workflow
+    assert '.base.sha == $base' in workflow
+    assert 'test "$live_base" = "$LEAN_PRODUCT_SHA"' in workflow
+    assert '-f sha="$LEAN_PR_HEAD"' in workflow
+    assert "secrets.OWNER_GITHUB_TOKEN" in workflow
+    assert "secrets.LEAN_CI_APPROVAL_SECRET" not in workflow
+    assert "LEAN_CI_OWNER_PUBLISH_ENABLED" not in workflow
