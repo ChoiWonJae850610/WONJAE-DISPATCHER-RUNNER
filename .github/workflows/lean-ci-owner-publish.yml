@@ -1,4 +1,4 @@
-name: Owner Lean CI Draft PR (Disabled by Default)
+name: Owner Lean CI Draft PR
 
 run-name: "Registered CI draft PR · signed Owner request"
 
@@ -28,14 +28,17 @@ concurrency:
 
 jobs:
   publish-one-registered-workflow:
-    if: ${{ github.ref == 'refs/heads/main' && github.actor == github.repository_owner && vars.LEAN_CI_OWNER_PUBLISH_ENABLED == 'true' }}
+    if: ${{ github.ref == 'refs/heads/main' && github.actor == github.repository_owner }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
       LEAN_SELECTION_JSON: ${{ inputs.selection_json }}
       LEAN_CI_PUBLISH_MAC: ${{ inputs.publish_mac }}
       LEAN_CI_CANDIDATE_BASE64: ${{ inputs.candidate_base64 }}
-      LEAN_CI_APPROVAL_SECRET: ${{ secrets.LEAN_CI_APPROVAL_SECRET }}
+      # Existing shared Owner PAT authenticates the SANJINWORKS-signed request.
+      # Domain separation remains enforced by registered-lean-ci-pr-publish-v1.
+      # Do not introduce another Secret, flag or approval step.
+      LEAN_CI_APPROVAL_SECRET: ${{ secrets.OWNER_GITHUB_TOKEN }}
       OWNER_GITHUB_TOKEN: ${{ secrets.OWNER_GITHUB_TOKEN }}
       GH_TOKEN: ${{ secrets.OWNER_GITHUB_TOKEN }}
       PYTHONPATH: src
