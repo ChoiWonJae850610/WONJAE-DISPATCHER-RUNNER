@@ -1,0 +1,115 @@
+name: Owner Signed Lean CI Stage (No Publication)
+
+run-name: "Lean CI staging — signed Owner review only #${{ github.run_id }}"
+
+on:
+  workflow_dispatch:
+    inputs:
+      selection_json:
+        description: Exact signed registered project/workflow/SHA claim, JSON
+        required: true
+        type: string
+      approval_mac:
+        description: Owner HMAC of the signed exact claim
+        required: true
+        type: string
+      candidate_base64:
+        description: Reviewed nonsecret replacement YAML in base64
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: lean-ci-owner-review-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  owner-review-only:
+    if: ${{ github.ref == 'refs/heads/main' && vars.LEAN_CI_OWNER_STAGE_ENABLED == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      LEAN_SELECTION_JSON: ${{ inputs.selection_json }}
+      LEAN_CI_APPROVAL_MAC: ${{ inputs.approval_mac }}
+      LEAN_CI_APPROVAL_SECRET: ${{ secrets.LEAN_CI_APPROVAL_SECRET }}
+      LEAN_CI_CANDIDATE_BASE64: ${{ inputs.candidate_base64 }}
+      GH_TOKEN: ${{ secrets.OWNER_GITHUB_TOKEN }}
+      PYTHONPATH: src
+    steps:
+      - name: Checkout trusted Runner main
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Minimal YAML parser for offline review
+        run: python -m pip install --disable-pip-version-check "PyYAML==6.0.3"
+
+      - name: Reject unsigned, expired or replayed-scope input before private clone
+        run: python scripts/check_lean_ci_owner_claim.py
+
+      - name: Checkout exact registered DEV-CONTROL source (read only)
+        uses: actions/checkout@v6
+        with:
+          repository: ChoiWonJae850610/DEV-CONTROL
+          ref: main
+          token: ${{ secrets.OWNER_GITHUB_TOKEN }}
+          path: _stage/control
+          persist-credentials: false
+
+      - name: Verify current GitHub branches still equal signed exact SHAs
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$GH_TOKEN" || { echo "Missing registered GitHub access"; exit 1; }
+          test "$(gh api repos/ChoiWonJae850610/DEV-CONTROL/branches/main --jq '.commit.sha')" = "$LEAN_CONTROL_SHA"
+          test "$(gh api "repos/$LEAN_REPOSITORY/branches/$LEAN_BRANCH" --jq '.commit.sha')" = "$LEAN_PRODUCT_SHA"
+          test "$(git -C _stage/control rev-parse HEAD)" = "$LEAN_CONTROL_SHA"
+
+      - name: Clone exact registered product into ephemeral isolated checkout
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh repo clone "$LEAN_REPOSITORY" "_stage/product" -- --branch "$LEAN_BRANCH" --single-branch
+          test "$(git -C _stage/product rev-parse HEAD)" = "$LEAN_PRODUCT_SHA"
+          test -z "$(git -C _stage/product status --porcelain --untracked-files=all)"
+
+      - name: Stage exact reviewed workflow in ephemeral checkout only
+        shell: bash
+        run: |
+          set -euo pipefail
+          python scripts/stage_lean_ci_owner_workflow.py \
+            --control-checkout _stage/control \
+            --product-checkout _stage/product \
+            --project "$LEAN_PROJECT" \
+            --repository "$LEAN_REPOSITORY" \
+            --branch "$LEAN_BRANCH" \
+            --workflow-path "$LEAN_WORKFLOW_PATH" \
+            --control-sha "$LEAN_CONTROL_SHA" \
+            --product-sha "$LEAN_PRODUCT_SHA" \
+            --previous-sha256 "$LEAN_PREVIOUS_SHA256" \
+            --proposed-sha256 "$LEAN_PROPOSED_SHA256" \
+            --expires-ms "$LEAN_EXPIRES_MS" \
+            --nonce "$LEAN_NONCE"
+          echo "PREVIEW_ONLY: no git commit, push, pull request, merge, product CI or deployment"
+
+      - name: Record truthful nonpublication boundary
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "## Registered lean CI owner stage"
+            echo "- Scope: exact registered validation workflow only"
+            echo "- Direct Worker .github/** guard: UNCHANGED"
+            echo "- Product Git write/push/PR/merge: NOT_RUN"
+            echo "- Provider/credential/Production: NOT_RUN"
+            echo "- Product canonical CI: NOT_RUN"
+            echo "- Stage receipt is NOT product CI success"
+          } >> "$GITHUB_STEP_SUMMARY"
