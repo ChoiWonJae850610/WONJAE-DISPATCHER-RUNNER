@@ -1,9 +1,10 @@
-"""One-workflow product PR publisher, exclusively for future signed Owner runs.
+"""One-workflow CI-only PR publisher, exclusively for signed Owner runs.
 
 This is NOT reachable from the ordinary Direct Worker. Never execute in PR
-validation or from untrusted GitHub content. Publication is separately gated
-by a default-off trusted GitHub Actions workflow and a purpose-bound HMAC.
-No code in this module merges a product PR or reports canonical CI PASS.
+validation or from untrusted GitHub content. Publication is gated by an
+authenticated trusted workflow and purpose-bound HMAC. This module itself
+never merges or declares CI PASS; the signed trusted Runner may then complete
+exact PR-head and integrated-SHA checks before acknowledging the rollout.
 """
 
 from __future__ import annotations
@@ -106,7 +107,7 @@ class LeanCiPublishReceipt:
     pr_number: int
     pr_head_sha: str
     pr_url: str
-    status: str = "DRAFT_PR_CREATED_CI_NOT_VERIFIED"
+    status: str = "PRODUCT_CI_PR_CREATED_VALIDATION_PENDING"
     merged: bool = False
     canonical_ci_verified: bool = False
 
@@ -171,7 +172,7 @@ def publish_lean_ci_pr(
     api: GithubApi,
     now_ms: int | None = None,
 ) -> LeanCiPublishReceipt:
-    """Publish exactly one draft product PR, never merge or claim any CI result."""
+    """Publish one registered CI-only PR; never merge or claim CI result here."""
     verify_publish_claim(selection, publish_mac, approval_secret, now_ms=now_ms)
     repository = selection.repository
     root = "repos/" + repository + "/"
@@ -237,7 +238,8 @@ def publish_lean_ci_pr(
     api.post(root + "git/refs", {
         "ref": "refs/heads/" + branch, "sha": new_commit,
     })
-    # No automatic cleanup, merge, dispatch or retries on ambiguous API errors.
+    # Do not auto-clean or retry ambiguous writes. CI and integration belong to
+    # separate bounded checks in the same authenticated trusted Runner job.
     result = _obj(api.post(root + "pulls", {
         "title": "ci: lean Development validation for " + selection.project,
         "body": (
@@ -248,15 +250,16 @@ def publish_lean_ci_pr(
             "- Old SHA256: " + selection.previous_sha256 + "\n"
             "- New SHA256: " + selection.proposed_sha256 + "\n"
             "- Product canonical PR-head CI: **NOT VERIFIED**\n"
-            "- Merge/integrated CI/Provider/Production: **NOT AUTHORIZED**\n"
+            "- Merge only after exact PR-head CI PASS in this Owner-signed run.\n"
+            "- Integrated-SHA CI, Provider, Production: independently verified/not run.\n"
         ),
-        "base": selection.branch, "head": branch, "draft": True,
+        "base": selection.branch, "head": branch, "draft": False,
         "maintainer_can_modify": False,
-    }), "draft CI PR")
+    }), "CI-only PR")
     number = result.get("number")
     if not isinstance(number, int) or isinstance(number, bool) or number <= 0:
-        raise LeanCiPublicationError("GitHub did not return a draft PR number")
-    if (result.get("state") != "open" or result.get("draft") is not True
+        raise LeanCiPublicationError("GitHub did not return a CI PR number")
+    if (result.get("state") != "open" or result.get("draft") is not False
             or _obj(result.get("head"), "PR head").get("sha") != new_commit
             or _obj(result.get("base"), "PR base").get("sha") != selection.product_sha
             or _obj(result.get("base"), "PR base").get("ref") != selection.branch
@@ -266,11 +269,11 @@ def publish_lean_ci_pr(
     # The PR file inventory must independently contain exactly the one path.
     inventory = api.get(root + "pulls/" + str(number) + "/files?per_page=100")
     if not isinstance(inventory, list) or len(inventory) != 1:
-        raise LeanCiPublicationError("draft PR contains unexpected files")
+        raise LeanCiPublicationError("CI PR contains unexpected files")
     changed = _obj(inventory[0], "PR file")
     if (changed.get("filename") != selection.workflow_path
             or changed.get("status") != "modified"):
-        raise LeanCiPublicationError("draft PR modified a nonregistered path")
+        raise LeanCiPublicationError("CI PR modified a nonregistered path")
     return LeanCiPublishReceipt(
         project=selection.project,
         repository=repository,
