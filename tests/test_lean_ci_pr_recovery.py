@@ -257,3 +257,72 @@ def test_force_push_and_unregistered_ref_rejected_before_transport(monkeypatch):
     with pytest.raises(LeanCiPublicationError):
         api.patch("repos/" + REPO + "/git/refs/heads/main",
                   {"sha": "a" * 40, "force": False})
+
+
+def test_signed_muvel_12_scope_is_distinct_and_rejects_any_other_writer(fixture):
+    _, _, original, _ = fixture
+    selection = replace(
+        original,
+        project="MUVEL",
+        repository="ChoiWonJae850610/MUVEL",
+        workflow_path=".github/workflows/cloud-dev.yml",
+    )
+    scope = ExactCiRecovery(
+        pr_number=12,
+        pr_head_sha="556d2fd73f1fe546c67c87bdd114853ae3d9b859",
+        failed_run_id=38978061443,
+        current_workflow_sha256=(
+            "5e119c74fb950b1c14c009163bc201fb4967d46b4158b63131a3a55e33a0a9a9"
+        ),
+    )
+    mac = sign_recovery_claim(selection, scope, KEY)
+    verify_recovery_claim(selection, scope, mac, KEY, now_ms=1_800_000_000_000)
+    assert mac != sign_recovery_claim(
+        original,
+        replace(scope, pr_number=88), KEY,
+    )
+    for changed in (
+        replace(scope, pr_number=13),
+        replace(scope, failed_run_id=38978061444),
+        replace(scope, pr_head_sha="c" * 40),
+        replace(scope, current_workflow_sha256="f" * 64),
+    ):
+        with pytest.raises(LeanCiPublicationError):
+            verify_recovery_claim(
+                selection, changed, mac, KEY, now_ms=1_800_000_000_000,
+            )
+    for other in (
+        replace(selection, repository="ChoiWonJae850610/CLASSMO"),
+        replace(selection, project="ESC"),
+        replace(selection, workflow_path=".github/workflows/other.yml"),
+    ):
+        with pytest.raises(LeanCiPublicationError):
+            sign_recovery_claim(other, scope, KEY)
+
+
+def test_exact_muvel_resume_scope_stays_one_ci_file_and_never_force_push(fixture):
+    _, _, original, scope = fixture
+    selection = replace(
+        original,
+        project="MUVEL",
+        repository="ChoiWonJae850610/MUVEL",
+        workflow_path=".github/workflows/cloud-dev.yml",
+    )
+    muvel = replace(scope, pr_number=12)
+    api = FakeApi(original, scope)
+    # A product mismatch must reject before any Git write; historical WAFL
+    # fixture and its PR may not become authorization for MUVEL.
+    with pytest.raises(LeanCiPublicationError):
+        recover_one_registered_ci_pr(
+            control_checkout=fixture[0],
+            product_checkout=fixture[1],
+            selection=selection,
+            publish_mac=sign_publish_claim(selection, KEY),
+            recovery=muvel,
+            recovery_mac=sign_recovery_claim(selection, muvel, KEY),
+            approval_secret=KEY,
+            candidate=FIXED,
+            api=api,
+            now_ms=1_800_000_000_000,
+        )
+    assert not [method for method, _ in api.operations if method in {"POST", "PATCH"}]
