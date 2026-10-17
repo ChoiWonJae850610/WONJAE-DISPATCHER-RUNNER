@@ -90,7 +90,8 @@ def main() -> int:
         preparation = state.next_action.npm_preparation if state else None
         task = (state.next_action.source_task_id
                 if state and state.next_action.type == "SOURCE_READY" else None)
-        reader = lambda endpoint: read(endpoint, token)
+        def reader(endpoint):
+            return read(endpoint, token)
         # Verify the single authorized CLASSMO #141 PR BEFORE public downloads.
         # npm owns creation of the root node_modules directory; ImageMagick/Deno
         # assets are added inside it only AFTER npm preparation completes.
