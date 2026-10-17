@@ -45,10 +45,14 @@ _SMOKE = """
 import { ImageMagick, initializeImageMagick, MagickFormat } from
   "npm:@imagemagick/magick-wasm@0.0.44";
 console.log("CLASSMO_EDGE_STAGE_JS_MODULE_IMPORTED");
-const wasm = await Deno.readFile(
-  new URL("magick.wasm",
-    import.meta.resolve("npm:@imagemagick/magick-wasm@0.0.44"))
+// Package 0.0.44 exports "./magick.wasm" as "./dist/x86/magick.wasm".
+// Resolving relative to the JS package entry instead points to the nonexistent
+// "./dist/magick.wasm". Use the exact published, pinned asset subpath.
+const wasmFile = new URL(
+  import.meta.resolve("npm:@imagemagick/magick-wasm@0.0.44/magick.wasm")
 );
+const wasm = await Deno.readFile(wasmFile);
+console.log("CLASSMO_EDGE_STAGE_WASM_RESOURCE_LOADED");
 await initializeImageMagick(wasm);
 console.log("CLASSMO_EDGE_STAGE_WASM_INITIALIZED");
 const png = Uint8Array.from(atob("__PNG__"), ch => ch.charCodeAt(0));
@@ -85,8 +89,10 @@ def safe_deno_failure_code(command: str, stdout: str, stderr: str) -> str:
         )):
             return "CLASSMO_EDGE_NPM_TRANSPORT_OR_TRUST_FAILED"
         return "CLASSMO_EDGE_DENO_MODULE_OR_NPM_RESOLUTION_FAILED"
+    if "CLASSMO_EDGE_STAGE_WASM_RESOURCE_LOADED" not in stdout:
+        return "CLASSMO_EDGE_WASM_ASSET_RESOLUTION_OR_READ_FAILED"
     if "CLASSMO_EDGE_STAGE_WASM_INITIALIZED" not in stdout:
-        return "CLASSMO_EDGE_WASM_RESOURCE_OR_INIT_FAILED"
+        return "CLASSMO_EDGE_WASM_INITIALIZATION_FAILED"
     return "CLASSMO_EDGE_IMAGE_CODEC_SMOKE_FAILED"
 
 
