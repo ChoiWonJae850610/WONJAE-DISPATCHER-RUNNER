@@ -1,5 +1,6 @@
 """Synthetic-only safety checks; do not download Deno or run any product source."""
 
+import copy
 import hashlib
 import io
 import os
@@ -177,3 +178,189 @@ def test_deno_package_pin_and_host_ca_do_not_expand_codex_network_scope():
     assert 'safe_deno_failure_code(args[1], result.stdout, result.stderr)' in script
     assert 'print(result.stderr)' not in script
     assert 'print(result.stdout)' not in script
+
+
+def _real_git(repo: Path, *args: str) -> str:
+    return subprocess.run(
+        ["git", "-C", str(repo), *args],
+        text=True, capture_output=True, check=True,
+    ).stdout.strip()
+
+
+def _registered_pr_fixture(tmp_path, monkeypatch):
+    """Synthetic Git ancestry, GitHub PR GETs and one document-only diff."""
+    repo = tmp_path / "source"
+    _fixture(repo)
+    _real_git(
+        repo, "remote", "add", "origin",
+        "https://github.com/" + edge.SOURCE_REPO + ".git",
+    )
+    base = _real_git(repo, "rev-parse", "HEAD")
+    monkeypatch.setattr(edge, "SOURCE_BASE", base)
+    document = repo / edge.PR_DOC
+    document.parent.mkdir(parents=True)
+    document.write_text("Prepared scope, no product source implementation.\n")
+    _real_git(repo, "add", ".")
+    _real_git(repo, "commit", "-qm", "Synthetic owner document")
+    head = _real_git(repo, "rev-parse", "HEAD")
+    tick = chr(96)
+    root = "repos/" + edge.SOURCE_REPO + "/"
+    api = {
+        root + "branches/cloud-dev-v1": {"commit": {"sha": base}},
+        root + "pulls?state=open&base=cloud-dev-v1&per_page=100": [
+            {"number": 141},
+        ],
+        root + "pulls/141": {
+            "number": 141,
+            "state": "open",
+            "merged": False,
+            "draft": False,
+            "html_url": "https://github.com/" + edge.SOURCE_REPO + "/pull/141",
+            "changed_files": 1,
+            "head": {
+                "sha": head,
+                "ref": edge.PR_BRANCH,
+                "repo": {"full_name": edge.SOURCE_REPO},
+            },
+            "base": {
+                "sha": base,
+                "ref": edge.SOURCE_BRANCH,
+                "repo": {"full_name": edge.SOURCE_REPO},
+            },
+            "body": "\n".join((
+                "- project: " + tick + "CLASSMO" + tick,
+                "- command: " + tick + "next" + tick,
+                "- source_base_sha: " + tick + base + tick,
+                "- runner_run_id: " + tick + str(edge.PR_RUN_ID) + tick,
+            )),
+        },
+        root + "pulls/141/files?per_page=100": [
+            {"filename": edge.PR_DOC, "status": "modified"},
+        ],
+        root + "git/ref/heads/" + edge.PR_BRANCH: {
+            "object": {"sha": head},
+        },
+    }
+
+    def read(endpoint):
+        return copy.deepcopy(api[endpoint])
+
+    return repo, head, api, read
+
+
+def _verify_pr(repo, head, read, repository=None, branch=None):
+    return edge.verify_classmo_pr_identity(
+        repo,
+        repository=repository or edge.SOURCE_REPO,
+        branch=branch or edge.SOURCE_BRANCH,
+        source_sha=head,
+        reader=read,
+    )
+
+
+def test_exact_open_classmo_pr_accepts_new_verified_head_not_initial_fixed_sha(
+    tmp_path, monkeypatch,
+):
+    repo, head, api, read = _registered_pr_fixture(tmp_path, monkeypatch)
+    _verify_pr(repo, head, read)
+    # Simulates a legitimate trusted Direct Worker document-only fast-forward.
+    doc = repo / edge.PR_DOC
+    doc.write_text(doc.read_text() + "Only source notes were updated.\n")
+    _real_git(repo, "add", ".")
+    _real_git(repo, "commit", "-qm", "New owner document revision")
+    updated = _real_git(repo, "rev-parse", "HEAD")
+    assert updated != head
+    assert updated != "80760bfaf9d62ab3c1697a66b9f9879833bb0a41"
+    root = "repos/" + edge.SOURCE_REPO + "/"
+    api[root + "pulls/141"]["head"]["sha"] = updated
+    api[root + "git/ref/heads/" + edge.PR_BRANCH]["object"]["sha"] = updated
+    _verify_pr(repo, updated, read)
+    assert not _real_git(repo, "status", "--porcelain")
+
+
+def test_stale_head_other_writer_wrong_paths_or_changed_base_fail_closed(
+    tmp_path, monkeypatch,
+):
+    repo, head, api, read = _registered_pr_fixture(tmp_path, monkeypatch)
+    root = "repos/" + edge.SOURCE_REPO + "/"
+    mutations = (
+        lambda x: x[root + "pulls/141"]["head"].update(sha="a" * 40),
+        lambda x: x[root + "pulls/141"]["head"].update(ref="direct/CLASSMO-999"),
+        lambda x: x[root + "pulls/141"]["head"]["repo"].update(full_name="wrong/repo"),
+        lambda x: x[root + "pulls/141"]["base"].update(sha="b" * 40),
+        lambda x: x[root + "pulls/141"].update(number=142),
+        lambda x: x[root + "pulls/141"].update(draft=True),
+        lambda x: x[root + "pulls/141"].update(body="wrong original runner"),
+        lambda x: x[root + "pulls/141"].update(changed_files=2),
+        lambda x: x[root + "pulls?state=open&base=cloud-dev-v1&per_page=100"].append(
+            {"number": 142},
+        ),
+        lambda x: x[root + "pulls/141/files?per_page=100"][0].update(
+            filename="packages/private-other/source.ts",
+        ),
+        lambda x: x[root + "pulls/141/files?per_page=100"][0].update(
+            filename="supabase/functions/editorial-media-prepare/../../.github/other.yml",
+        ),
+        lambda x: x[root + "git/ref/heads/" + edge.PR_BRANCH]["object"].update(
+            sha="c" * 40,
+        ),
+        lambda x: x[root + "branches/cloud-dev-v1"]["commit"].update(
+            sha="d" * 40,
+        ),
+    )
+    for mutate in mutations:
+        changed = copy.deepcopy(api)
+        mutate(changed)
+        with pytest.raises(EdgePrerequisiteError):
+            _verify_pr(repo, head, lambda endpoint: changed[endpoint])
+    _verify_pr(repo, head, read)
+
+
+def test_unrelated_classmo_route_git_origin_or_checkout_head_cannot_admit(
+    tmp_path, monkeypatch,
+):
+    repo, head, _, read = _registered_pr_fixture(tmp_path, monkeypatch)
+    for repository, branch in (
+        ("ChoiWonJae850610/ESC", "cloud-dev-v1"),
+        (edge.SOURCE_REPO, "main"),
+    ):
+        with pytest.raises(EdgePrerequisiteError, match="ROUTE_MISMATCH"):
+            _verify_pr(repo, head, read, repository=repository, branch=branch)
+    with pytest.raises(EdgePrerequisiteError, match="LOCAL_SOURCE_OR_ANCESTRY_CHANGED"):
+        _verify_pr(repo, "f" * 40, read)
+    _real_git(repo, "remote", "set-url", "origin",
+              "https://github.com/ChoiWonJae850610/MUVEL.git")
+    with pytest.raises(EdgePrerequisiteError, match="LOCAL_SOURCE_OR_ANCESTRY_CHANGED"):
+        _verify_pr(repo, head, read)
+
+
+def test_unreadable_github_identity_does_not_expose_transport_or_start_download(
+    tmp_path, monkeypatch,
+):
+    repo, head, api, _ = _registered_pr_fixture(tmp_path, monkeypatch)
+    calls = []
+    root = "repos/" + edge.SOURCE_REPO + "/"
+
+    def public_download():
+        calls.append("download")
+        raise AssertionError("unsafe preflight reached public download")
+
+    monkeypatch.setattr(edge, "_public_deno_archive", public_download)
+    api[root + "pulls/141"]["head"]["sha"] = "f" * 40
+    with pytest.raises(EdgePrerequisiteError, match="PR_IDENTITY_OR_HEAD_CHANGED"):
+        prepare_classmo_edge(
+            repo, project="CLASSMO", command="retry", task=edge.SOURCE_TASK,
+            source_sha=head, repository=edge.SOURCE_REPO,
+            branch=edge.SOURCE_BRANCH,
+            reader=lambda endpoint: api[endpoint],
+        )
+    assert calls == []
+    assert not (repo / edge.EDGE_ROOT).exists()
+
+    def secret_failure(_):
+        raise RuntimeError("untrusted GitHub stderr: Bearer SUPER_SECRET_1234")
+
+    with pytest.raises(EdgePrerequisiteError) as captured:
+        _verify_pr(repo, head, secret_failure)
+    assert str(captured.value) == "CLASSMO_EDGE_PR_READ_UNAVAILABLE"
+    assert "SUPER_SECRET" not in str(captured.value)
