@@ -148,11 +148,18 @@ def test_public_deno_preflight_stage_codes_are_fixed_and_never_echo_stderr():
         ),
         (
             "run", "CLASSMO_EDGE_STAGE_JS_MODULE_IMPORTED\n", adversarial,
-            "CLASSMO_EDGE_WASM_RESOURCE_OR_INIT_FAILED",
+            "CLASSMO_EDGE_WASM_ASSET_RESOLUTION_OR_READ_FAILED",
         ),
         (
             "run",
             "CLASSMO_EDGE_STAGE_JS_MODULE_IMPORTED\n"
+            "CLASSMO_EDGE_STAGE_WASM_RESOURCE_LOADED\n", adversarial,
+            "CLASSMO_EDGE_WASM_INITIALIZATION_FAILED",
+        ),
+        (
+            "run",
+            "CLASSMO_EDGE_STAGE_JS_MODULE_IMPORTED\n"
+            "CLASSMO_EDGE_STAGE_WASM_RESOURCE_LOADED\n"
             "CLASSMO_EDGE_STAGE_WASM_INITIALIZED\n", adversarial,
             "CLASSMO_EDGE_IMAGE_CODEC_SMOKE_FAILED",
         ),
@@ -172,6 +179,7 @@ def test_deno_package_pin_and_host_ca_do_not_expand_codex_network_scope():
     ).read_text()
     assert '"DENO_TLS_CA_STORE": "system"' in script
     assert '"CLASSMO_EDGE_STAGE_JS_MODULE_IMPORTED"' in script
+    assert '"CLASSMO_EDGE_STAGE_WASM_RESOURCE_LOADED"' in script
     assert '"CLASSMO_EDGE_STAGE_WASM_INITIALIZED"' in script
     assert '"--allow-net=registry.npmjs.org"' in script
     assert 'capture_output=True' in script
@@ -364,3 +372,24 @@ def test_unreadable_github_identity_does_not_expose_transport_or_start_download(
         _verify_pr(repo, head, secret_failure)
     assert str(captured.value) == "CLASSMO_EDGE_PR_READ_UNAVAILABLE"
     assert "SUPER_SECRET" not in str(captured.value)
+
+
+def test_exact_magick_wasm_export_path_matches_published_v0044_manifest():
+    """Upstream 0.0.44 package.json exports ./magick.wasm to dist/x86/magick.wasm.
+
+    The previous pattern built a non-existent dist/magick.wasm URL beside the
+    JavaScript entry dist/index.js. Never revive the relative-url loading path.
+    This does not claim successful real Deno or deployed Supabase Edge execution.
+    """
+    script = (
+        Path(__file__).resolve().parents[1]
+        / "src/wonjae_dispatcher_runner/classmo_edge_preparation.py"
+    ).read_text()
+    assert 'npm:@imagemagick/magick-wasm@0.0.44/magick.wasm' in script
+    assert 'import.meta.resolve("npm:@imagemagick/magick-wasm@0.0.44")' not in script
+    assert 'new URL("magick.wasm",' not in script
+    assert "const wasm = await Deno.readFile(wasmFile);" in script
+    assert script.index('CLASSMO_EDGE_STAGE_WASM_RESOURCE_LOADED') < script.index(
+        'CLASSMO_EDGE_STAGE_WASM_INITIALIZED'
+    )
+    assert "await initializeImageMagick(wasm);" in script
