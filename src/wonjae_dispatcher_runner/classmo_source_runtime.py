@@ -12,6 +12,7 @@ from __future__ import annotations
 import hashlib
 import http.client
 import os
+import shutil
 import socket
 import subprocess
 import time
@@ -134,8 +135,6 @@ def _run_reviewed_user_worker(repo: Path) -> None:
     user.mkdir(parents=True, mode=0o700)
     main.mkdir(mode=0o700)
     # Use the already verified local npm cache; do not fetch or install anything.
-    import shutil
-
     shutil.copytree(vendor, user / "vendor", symlinks=False)
     for name, text in source.items():
         (user / name).write_text(text, encoding="utf-8")
