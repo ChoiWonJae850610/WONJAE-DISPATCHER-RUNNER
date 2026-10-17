@@ -180,7 +180,11 @@ def inspect_readiness(project: str, client: ReadOnlySupabase) -> dict:
             and identity.get("id") == config["ref"]
             and identity.get("name") == config["name"],
             "READINESS_PROVIDER_PROJECT_NOT_VERIFIED")
-    schemas = exposed_schemas(client.request("/postgrest"))
+    # WAFL must prove that wafl_private is excluded from the Data API.
+    # CLASSMO P2 checks its private Storage bucket through the read-only
+    # database endpoint; its reviewed P2 plan does not require PostgREST
+    # exposure configuration. Do not require an unrelated config-read grant.
+    schemas = exposed_schemas(client.request("/postgrest")) if project == "WAFL" else ()
     ledger = client.read(LEDGER)
     names = [x.get("name") for x in ledger]
     require(all(isinstance(x, str) for x in names)
@@ -203,7 +207,7 @@ def inspect_readiness(project: str, client: ReadOnlySupabase) -> dict:
             "project": project,
             "private_bucket": "READBACK",
             "migration_017": "LEDGER_PRESENT",
-            "data_api": "READBACK",
+            "data_api": "NOT_CHECKED_NOT_REQUIRED_FOR_CLASSMO_P2",
             "edge_deployment": "NOT_RUN",
             "authenticated_image_matrix": "NOT_RUN",
             "two_session_db_race": "NOT_RUN",
