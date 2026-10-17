@@ -19,10 +19,10 @@ import subprocess
 import tarfile
 import time
 from pathlib import Path
-
-import zstandard
 from urllib.error import HTTPError, URLError
 from urllib.request import ProxyHandler, Request, build_opener
+
+import zstandard
 
 RUNTIME_VERSION = "1.76.2"  # SHA-256-pinned release asset tag, not the CLI version.
 CLI_VERSION = "0.1.0"  # Upstream v1.76.2 cli/Cargo.toml package version.
