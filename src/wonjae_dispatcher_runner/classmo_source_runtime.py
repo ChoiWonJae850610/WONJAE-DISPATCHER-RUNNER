@@ -24,7 +24,6 @@ from .classmo_edge_preparation import (
     needs_classmo_edge_preparation,
     verify_classmo_pr_identity,
 )
-from .classmo_edge_runtime import SelectedEdgeRuntimeError
 
 # A follow-up head must be reviewed before a different source revision is
 # executed outside the Codex source sandbox. These are Git blob identities
