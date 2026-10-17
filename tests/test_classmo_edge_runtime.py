@@ -1,10 +1,13 @@
 """Bounded, synthetic native Supabase Edge preflight tests; no live download or product run."""
 
 import hashlib
+import io
 import json
+import tarfile
 from pathlib import Path
 
 import pytest
+import zstandard
 
 from wonjae_dispatcher_runner import classmo_edge_preparation as edge
 from wonjae_dispatcher_runner import classmo_edge_runtime as selected
@@ -57,6 +60,77 @@ def test_bad_archive_rejected_prior_to_any_execution(monkeypatch):
     selected.verify_archive(data)
     with pytest.raises(selected.SelectedEdgeRuntimeError, match="DIGEST_MISMATCH"):
         selected.verify_archive(data + b"tampering")
+
+
+def _synthetic_archive(entries):
+    raw = io.BytesIO()
+    with tarfile.open(fileobj=raw, mode="w") as archive:
+        for name, content, kind in entries:
+            entry = tarfile.TarInfo(name)
+            entry.type = kind
+            entry.mode = 0o755 if kind == tarfile.DIRTYPE or name.endswith("edge-runtime") else 0o644
+            if kind == tarfile.REGTYPE:
+                entry.size = len(content)
+                archive.addfile(entry, io.BytesIO(content))
+            else:
+                if kind == tarfile.SYMTYPE:
+                    entry.linkname = "../../outside"
+                archive.addfile(entry)
+    return zstandard.ZstdCompressor().compress(raw.getvalue())
+
+
+def test_portable_pinned_zstd_extraction_needs_no_external_tar_or_zstd(
+    tmp_path, monkeypatch,
+):
+    compressed = _synthetic_archive([
+        ("./", b"", tarfile.DIRTYPE),
+        ("./bin/", b"", tarfile.DIRTYPE),
+        ("./bin/edge-runtime", b"#!/bin/sh\nexit 0\n", tarfile.REGTYPE),
+        ("./lib/", b"", tarfile.DIRTYPE),
+        ("./lib/libdummy.so", b"synthetic", tarfile.REGTYPE),
+    ])
+    monkeypatch.setattr(selected, "ARCHIVE_SHA256", hashlib.sha256(compressed).hexdigest())
+    destination = tmp_path / "selected-runtime"
+    destination.mkdir()
+
+    def forbidden_external(*args, **kwargs):
+        raise AssertionError("untrusted external tar/zstd invocation")
+
+    monkeypatch.setattr(selected.subprocess, "run", forbidden_external)
+    selected._extract_runtime_archive(compressed, destination)
+    assert (destination / "bin/edge-runtime").read_bytes() == b"#!/bin/sh\nexit 0\n"
+    assert (destination / "bin/edge-runtime").stat().st_mode & 0o111
+    assert (destination / "lib/libdummy.so").read_bytes() == b"synthetic"
+    assert not (tmp_path / "selected-runtime.tar.zst").exists()
+    assert not (destination / "lib/libdummy.so").stat().st_mode & 0o002
+
+
+@pytest.mark.parametrize("path, kind", [
+    ("../escape", tarfile.REGTYPE),
+    ("/tmp/escape", tarfile.REGTYPE),
+    ("./bin/../../escape", tarfile.REGTYPE),
+    ("bin/link", tarfile.SYMTYPE),
+])
+def test_zstd_archive_rejects_traversal_and_links(tmp_path, monkeypatch, path, kind):
+    archive = _synthetic_archive([(path, b"unsafe", kind)])
+    monkeypatch.setattr(selected, "ARCHIVE_SHA256", hashlib.sha256(archive).hexdigest())
+    destination = tmp_path / "selected-runtime"
+    destination.mkdir()
+    with pytest.raises(selected.SelectedEdgeRuntimeError, match="ARCHIVE_UNSAFE"):
+        selected._extract_runtime_archive(archive, destination)
+    assert not (tmp_path / "escape").exists()
+
+
+def test_zstd_archive_rejects_corruption_and_wrong_digest(tmp_path, monkeypatch):
+    compressed = _synthetic_archive([("bin/edge-runtime", b"safe", tarfile.REGTYPE)])
+    destination = tmp_path / "selected-runtime"
+    destination.mkdir()
+    with pytest.raises(selected.SelectedEdgeRuntimeError, match="DIGEST_MISMATCH"):
+        selected._extract_runtime_archive(compressed, destination)
+    damaged = b"not a zstandard archive"
+    monkeypatch.setattr(selected, "ARCHIVE_SHA256", hashlib.sha256(damaged).hexdigest())
+    with pytest.raises(selected.SelectedEdgeRuntimeError, match="EXTRACT_FAILED"):
+        selected._extract_runtime_archive(damaged, destination)
 
 
 def _cache(root: Path):
