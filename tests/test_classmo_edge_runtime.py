@@ -68,7 +68,8 @@ def _synthetic_archive(entries):
         for name, content, kind in entries:
             entry = tarfile.TarInfo(name)
             entry.type = kind
-            entry.mode = 0o755 if kind == tarfile.DIRTYPE or name.endswith("edge-runtime") else 0o644
+            executable = kind == tarfile.DIRTYPE or name.endswith("edge-runtime")
+            entry.mode = 0o755 if executable else 0o644
             if kind == tarfile.REGTYPE:
                 entry.size = len(content)
                 archive.addfile(entry, io.BytesIO(content))
