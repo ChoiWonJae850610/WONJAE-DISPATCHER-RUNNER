@@ -129,10 +129,11 @@ def test_source_handoff_does_not_add_secrets_or_enable_network():
     assert "source_environment(codex_home" in src
     assert "network_access\": False" in src
     assert "prepare_classmo_edge(" in wrapper
-    assert "reader=lambda endpoint: read(endpoint, token)" in wrapper
-    assert wrapper.index("image_ready = prepare_classmo_edge(") < wrapper.index(
+    assert "def reader(endpoint):" in wrapper
+    assert "return read(endpoint, token)" in wrapper
+    assert wrapper.index("verify_classmo_pr_identity(") < wrapper.index(
         "prepared = prepare_npm(repo, preparation)"
-    )
+    ) < wrapper.index("image_ready = prepare_classmo_edge(")
     assert "NPM_CONFIG_OFFLINE" in (Path(__file__).resolve().parents[1]
                                   / "src/wonjae_dispatcher_runner/npm_preparation.py").read_text()
 
@@ -393,3 +394,20 @@ def test_exact_magick_wasm_export_path_matches_published_v0044_manifest():
         'CLASSMO_EDGE_STAGE_WASM_INITIALIZED'
     )
     assert "await initializeImageMagick(wasm);" in script
+
+
+def test_prepared_npm_root_can_receive_edge_tools_without_overwriting(tmp_path):
+    """Regression for Runner #38992982120, not an actual product/Provider run."""
+    repo = tmp_path / "repo"
+    _fixture(repo)
+    # npm owns the root node_modules and prepares the shared .direct-worker
+    # artifacts. The CLASSMO Edge tool directory must NOT be created first.
+    npm_root = repo / "node_modules"
+    (npm_root / ".direct-worker").mkdir(parents=True)
+    (npm_root / ".direct-worker" / "ready.json").write_text('{"offline": true}')
+    edge_dir = edge._safe_artifact_dir(repo)
+    assert edge_dir == npm_root / ".direct-worker/classmo-edge-wasm"
+    assert not edge_dir.exists()
+    (edge_dir / "bin").mkdir(parents=True)
+    assert (npm_root / ".direct-worker" / "ready.json").is_file()
+    assert not _real_git(repo, "status", "--porcelain")

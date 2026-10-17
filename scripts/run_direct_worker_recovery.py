@@ -9,7 +9,11 @@ import subprocess
 import sys
 from pathlib import Path
 
-from wonjae_dispatcher_runner.classmo_edge_preparation import prepare_classmo_edge
+from wonjae_dispatcher_runner.classmo_edge_preparation import (
+    needs_classmo_edge_preparation,
+    prepare_classmo_edge,
+    verify_classmo_pr_identity,
+)
 from wonjae_dispatcher_runner.direct_worker import (
     DirectWorkerError,
     git_head,
@@ -84,20 +88,26 @@ def main() -> int:
         state = (load_product_execution_state(repo, route.state_path, route.project)
                  if route.state_path else None)
         preparation = state.next_action.npm_preparation if state else None
-        # Only the existing registered CLASSMO #141 task, in either Owner
-        # retry or resume, may use this public-tool prerequisite. Fresh
-        # GitHub PR/base/ref/sole-writer evidence is checked independently
-        # BEFORE npm/Deno downloads and rechecked after the real WASM smoke.
+        task = (state.next_action.source_task_id
+                if state and state.next_action.type == "SOURCE_READY" else None)
+        def reader(endpoint):
+            return read(endpoint, token)
+        # Verify the single authorized CLASSMO #141 PR BEFORE public downloads.
+        # npm owns creation of the root node_modules directory; ImageMagick/Deno
+        # assets are added inside it only AFTER npm preparation completes.
+        if needs_classmo_edge_preparation(
+            route.project, args.command, task, original_sha
+        ):
+            verify_classmo_pr_identity(
+                repo, repository=route.repository, branch=route.branch,
+                source_sha=original_sha, reader=reader,
+            )
+        prepared = prepare_npm(repo, preparation)
         image_ready = prepare_classmo_edge(
             repo, project=route.project, command=args.command,
-            task=(state.next_action.source_task_id
-                  if state and state.next_action.type == "SOURCE_READY"
-                  else None),
-            source_sha=original_sha,
-            repository=route.repository, branch=route.branch,
-            reader=lambda endpoint: read(endpoint, token),
+            task=task, source_sha=original_sha,
+            repository=route.repository, branch=route.branch, reader=reader,
         )
-        prepared = prepare_npm(repo, preparation)
         print(f"SOURCE_DEPENDENCIES prepared={str(prepared).lower()} offline=true", flush=True)
         print(
             "CLASSMO_EDGE_TOOLS_LOCAL_ONLY prepared="
