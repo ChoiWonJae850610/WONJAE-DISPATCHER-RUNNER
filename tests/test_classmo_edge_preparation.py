@@ -129,7 +129,8 @@ def test_source_handoff_does_not_add_secrets_or_enable_network():
     assert "source_environment(codex_home" in src
     assert "network_access\": False" in src
     assert "prepare_classmo_edge(" in wrapper
-    assert "reader = lambda endpoint: read(endpoint, token)" in wrapper
+    assert "def reader(endpoint):" in wrapper
+    assert "return read(endpoint, token)" in wrapper
     assert wrapper.index("verify_classmo_pr_identity(") < wrapper.index(
         "prepared = prepare_npm(repo, preparation)"
     ) < wrapper.index("image_ready = prepare_classmo_edge(")
