@@ -14,6 +14,7 @@ from wonjae_dispatcher_runner.classmo_edge_preparation import (
     prepare_classmo_edge,
     verify_classmo_pr_identity,
 )
+from wonjae_dispatcher_runner.classmo_source_runtime import prepare_reviewed_classmo_source
 from wonjae_dispatcher_runner.direct_worker import (
     DirectWorkerError,
     git_head,
@@ -108,6 +109,13 @@ def main() -> int:
             task=task, source_sha=original_sha,
             repository=route.repository, branch=route.branch, reader=reader,
         )
+        source_pass = prepare_reviewed_classmo_source(
+            repo, project=route.project, command=args.command,
+            task=task, source_sha=original_sha,
+            repository=route.repository, branch=route.branch, reader=reader,
+        )
+        if source_pass:
+            print("CLASSMO_TRUSTED_SELECTED_SOURCE_RUNTIME_PASS_NOT_PROVIDER", flush=True)
         print(f"SOURCE_DEPENDENCIES prepared={str(prepared).lower()} offline=true", flush=True)
         print(
             "CLASSMO_EDGE_TOOLS_LOCAL_ONLY prepared="
@@ -115,6 +123,9 @@ def main() -> int:
         )
         child_env = {key: value for key, value in os.environ.items()
                      if key not in {"GH_TOKEN", "PRODUCT_TOKEN", "RUNNER_TOKEN"}}
+        if source_pass:
+            # Evidence only, never authority or a new product execution trigger.
+            child_env["CLASSMO_TRUSTED_SOURCE_RUNTIME_HEAD"] = original_sha
         return subprocess.run(
             [sys.executable, str(Path(__file__).with_name("run_direct_worker.py")),
              *sys.argv[1:]], env=child_env, check=False,

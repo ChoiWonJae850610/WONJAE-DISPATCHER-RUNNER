@@ -16,6 +16,7 @@ from .classmo_edge_preparation import EDGE_ROOT, edge_environment
 from .classmo_edge_preparation import SOURCE_BRANCH as EDGE_SOURCE_BRANCH
 from .classmo_edge_preparation import SOURCE_REPO as EDGE_SOURCE_REPO
 from .classmo_edge_preparation import SOURCE_TASK as EDGE_SOURCE_TASK
+from .classmo_source_runtime import REVIEWED_SOURCE_HEAD
 from .execution_state import (
     ExecutionStateError,
     ProductExecutionState,
@@ -429,6 +430,7 @@ def _prompt(
     checkout_branch: str,
     validation_failure: str,
     execution_state: ProductExecutionState | None = None,
+    trusted_source_runtime_pass: bool = False,
 ) -> str:
     docs = "\n".join(f"- {path}" for path in route.canonical_docs)
     failure = validation_failure[-80_000:] if validation_failure else "(none)"
@@ -520,6 +522,17 @@ def _prompt(
             "This run uses the legacy repository-document fallback because no registered "
             "product execution-state path or execution handoff is available."
         )
+    trusted_source_note = (
+        "The trusted Owner-launched Runner just executed exact-HEAD, synthetic-only "
+        "source compatibility checks under the pinned Supabase Edge user worker and "
+        "reported CLASSMO_TRUSTED_SELECTED_SOURCE_RUNTIME_PASS_NOT_PROVIDER. "
+        "Do not run check-selected-runtime.py or launch native Edge processes "
+        "inside this Codex sandbox: loopback/process syscalls are intentionally "
+        "restricted here. The trusted PASS applies only to the unmodified starting "
+        "source HEAD, not to any changes you now make; finish the remaining "
+        "source-only code and tests without fabricating new runtime/provider PASS."
+        if trusted_source_runtime_pass else ""
+    )
     return f"""You are the single source-writing Direct Worker for {route.project}.
 
 The Owner has authorized command: {command}.
@@ -546,6 +559,8 @@ GitHub checkout state and repository safety/approval rules are authoritative; ch
 {authority_description}
 
 {retry_note}
+
+{trusted_source_note}
 
 Authority and hard boundaries:
 - Work only inside this repository checkout.
@@ -644,6 +659,23 @@ def run_direct_worker(
     if changed_paths(repo_path):
         raise DirectWorkerError("product checkout must be clean before Direct Worker")
     git_metadata = git_metadata_snapshot(repo_path)
+    trusted_source_runtime_pass = (
+        route.project == "CLASSMO"
+        and command in {"retry", "resume"}
+        and execution_state is not None
+        and execution_state.next_action.type == "SOURCE_READY"
+        and execution_state.next_action.source_task_id == EDGE_SOURCE_TASK
+        and starting_sha == REVIEWED_SOURCE_HEAD
+        and os.environ.get("CLASSMO_TRUSTED_SOURCE_RUNTIME_HEAD") == starting_sha
+        and not (repo_path / EDGE_ROOT / "reviewed-source-pass").is_symlink()
+        and (repo_path / EDGE_ROOT / "reviewed-source-pass").is_file()
+        and (repo_path / EDGE_ROOT / "reviewed-source-pass").read_text(
+            encoding="ascii",
+        ) == (
+            f"source_head={starting_sha}\nselected_edge_runtime=1.76.2\n"
+            "synthetic_tests_only=true\nprovider=false\n"
+        )
+    )
 
     home_isolation = os.environ.get("DIRECT_WORKER_HOME_ISOLATION") == "1"
     denied_roots: tuple[Path, ...] = ()
@@ -816,6 +848,7 @@ def run_direct_worker(
                         checkout_branch,
                         validation_failure,
                         execution_state,
+                        trusted_source_runtime_pass,
                     ),
                     approval_mode=ApprovalMode.deny_all,
                     output_schema=output_schema,
