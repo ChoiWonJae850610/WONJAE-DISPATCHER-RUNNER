@@ -1,7 +1,8 @@
 """Credential-free exact CLASSMO #141 Edge image-tool preparation.
 
-Runs in the trusted parent only after an authenticated Owner resume. Leaves
-tracked product files unchanged. The local Deno/WASM smoke is not live Edge PASS.
+Runs in the trusted parent only after authenticated Owner retry/resume and
+fresh exact existing-PR identity checks. Leaves tracked product files unchanged.
+The local Deno/WASM smoke is not live Supabase Edge-runtime PASS.
 """
 
 from __future__ import annotations
@@ -14,11 +15,19 @@ import re
 import subprocess
 import zipfile
 from pathlib import Path
+from typing import Callable
 from urllib.error import HTTPError, URLError
 from urllib.request import ProxyHandler, Request, build_opener
 
 EDGE_ROOT = Path("node_modules/.direct-worker/classmo-edge-wasm")
-SOURCE_HEAD = "80760bfaf9d62ab3c1697a66b9f9879833bb0a41"
+SOURCE_REPO = "ChoiWonJae850610/CLASSMO"
+SOURCE_BRANCH = "cloud-dev-v1"
+SOURCE_BASE = "6df7d54401bca708e1089fe9a0b806cff2e0ef50"
+PR_NUMBER = 141
+PR_BRANCH = "direct/CLASSMO-38828604168"
+PR_RUN_ID = 38828604168
+PR_DOC = "docs/ux/CLASSMO_EDITORIAL_MEDIA_027_P2_BACKEND_20261015.md"
+_SHA = re.compile(r"[a-f0-9]{40}\Z")
 SOURCE_TASK = "CLASSMO-EDITORIAL-MEDIA-P2-BACKEND-002"
 DENO_VERSION = "2.9.7"
 MAGICK_VERSION = "0.0.44"
@@ -84,11 +93,127 @@ def safe_deno_failure_code(command: str, stdout: str, stderr: str) -> str:
 def needs_classmo_edge_preparation(
     project: str, command: str, task: str | None, source_sha: str,
 ) -> bool:
-    if project != "CLASSMO" or command != "resume" or task != SOURCE_TASK:
+    # Neither an unrelated project nor a different CLASSMO source task can
+    # trigger public tool downloads. Retry and resume of THIS task both need
+    # the same public toolchain; the source HEAD is checked live, not pinned to
+    # the initial document-only PR commit.
+    if project != "CLASSMO" or command not in ("retry", "resume") or task != SOURCE_TASK:
         return False
-    if source_sha != SOURCE_HEAD:
-        raise EdgePrerequisiteError("CLASSMO #141 exact source HEAD changed")
+    if not isinstance(source_sha, str) or not _SHA.fullmatch(source_sha):
+        raise EdgePrerequisiteError("CLASSMO_EDGE_EXACT_HEAD_INVALID")
     return True
+
+
+def _obj(value: object) -> dict:
+    return value if isinstance(value, dict) else {}
+
+
+def _read(reader: Callable[[str], object], endpoint: str) -> object:
+    try:
+        return reader(endpoint)
+    except Exception:
+        # GitHub CLI can include private transport context in its stderr.
+        # Never expose it through a traceback or public Actions summary.
+        raise EdgePrerequisiteError("CLASSMO_EDGE_PR_READ_UNAVAILABLE") from None
+
+
+def _allowed_pr_file(filename: object, status: object) -> bool:
+    if not isinstance(filename, str) or status not in ("added", "modified"):
+        return False
+    if filename in {
+        PR_DOC,
+        "scripts/validate-repository.mjs",
+        "supabase/tests/editorial_media_p2_plan.json",
+    }:
+        return True
+    return any(filename.startswith(prefix) and len(filename) > len(prefix)
+               for prefix in (
+                   "supabase/functions/editorial-media-prepare/",
+                   "packages/domain/src/media/",
+                   "packages/domain/test/media",
+                   "packages/domain/tests/media",
+                   "tests/media",
+               ))
+
+
+def verify_classmo_pr_identity(
+    repo: Path, *, repository: str, branch: str,
+    source_sha: str, reader: Callable[[str], object],
+) -> None:
+    """Prove existing sole authorized source PR identity from fresh GitHub GETs.
+
+    This is a trusted-parent read gate, never a generic PR writer. It also
+    applies if the same Runner legitimately appended a document-only commit.
+    The original base/task/PR branch stay immutable; live PR head may advance.
+    """
+    if repository != SOURCE_REPO or branch != SOURCE_BRANCH:
+        raise EdgePrerequisiteError("CLASSMO_EDGE_REGISTERED_ROUTE_MISMATCH")
+    if not isinstance(source_sha, str) or not _SHA.fullmatch(source_sha):
+        raise EdgePrerequisiteError("CLASSMO_EDGE_EXACT_HEAD_INVALID")
+    try:
+        origin = subprocess.run(
+            ["git", "-C", str(repo), "remote", "get-url", "origin"],
+            check=True, capture_output=True, text=True, timeout=15,
+        ).stdout.strip()
+        checkout = subprocess.run(
+            ["git", "-C", str(repo), "rev-parse", "HEAD"],
+            check=True, capture_output=True, text=True, timeout=15,
+        ).stdout.strip()
+        ancestor = subprocess.run(
+            ["git", "-C", str(repo), "merge-base", "--is-ancestor",
+             SOURCE_BASE, source_sha],
+            check=False, capture_output=True, timeout=15,
+        )
+    except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired):
+        raise EdgePrerequisiteError("CLASSMO_EDGE_LOCAL_GIT_IDENTITY_UNAVAILABLE") from None
+    if origin != "https://github.com/" + SOURCE_REPO + ".git" or (
+        checkout != source_sha or ancestor.returncode != 0
+    ):
+        raise EdgePrerequisiteError("CLASSMO_EDGE_LOCAL_SOURCE_OR_ANCESTRY_CHANGED")
+    root = "repos/" + SOURCE_REPO + "/"
+    current = _obj(_read(reader, root + "branches/" + SOURCE_BRANCH))
+    if _obj(current.get("commit")).get("sha") != SOURCE_BASE:
+        raise EdgePrerequisiteError("CLASSMO_EDGE_BASE_SHA_CHANGED")
+    open_prs = _read(
+        reader, root + "pulls?state=open&base=" + SOURCE_BRANCH + "&per_page=100",
+    )
+    if (not isinstance(open_prs, list) or len(open_prs) != 1
+            or _obj(open_prs[0]).get("number") != PR_NUMBER):
+        raise EdgePrerequisiteError("CLASSMO_EDGE_SINGLE_WRITER_PR_CHANGED")
+    pr = _obj(_read(reader, root + "pulls/" + str(PR_NUMBER)))
+    head = _obj(pr.get("head"))
+    base = _obj(pr.get("base"))
+    body = pr.get("body")
+    if not (
+        pr.get("number") == PR_NUMBER
+        and pr.get("state") == "open"
+        and pr.get("merged") is False
+        and pr.get("draft") is False
+        and pr.get("html_url") == "https://github.com/" + SOURCE_REPO
+        + "/pull/" + str(PR_NUMBER)
+        and head.get("sha") == source_sha
+        and head.get("ref") == PR_BRANCH
+        and _obj(head.get("repo")).get("full_name") == SOURCE_REPO
+        and base.get("sha") == SOURCE_BASE
+        and base.get("ref") == SOURCE_BRANCH
+        and _obj(base.get("repo")).get("full_name") == SOURCE_REPO
+        and isinstance(body, str)
+        and "- project: `CLASSMO`" in body
+        and "- command: `next`" in body
+        and "- source_base_sha: `" + SOURCE_BASE + "`" in body
+        and "- runner_run_id: `" + str(PR_RUN_ID) + "`" in body
+    ):
+        raise EdgePrerequisiteError("CLASSMO_EDGE_PR_IDENTITY_OR_HEAD_CHANGED")
+    files = _read(reader, root + "pulls/" + str(PR_NUMBER) + "/files?per_page=100")
+    if (not isinstance(files, list) or not 1 <= len(files) < 100
+            or pr.get("changed_files") != len(files)
+            or not all(_allowed_pr_file(_obj(x).get("filename"),
+                                        _obj(x).get("status")) for x in files)):
+        raise EdgePrerequisiteError("CLASSMO_EDGE_PR_CHANGED_PATHS_OUT_OF_SCOPE")
+    ref = _obj(_read(reader, root + "git/ref/heads/" + PR_BRANCH))
+    if _obj(ref.get("object")).get("sha") != source_sha:
+        raise EdgePrerequisiteError("CLASSMO_EDGE_PR_REF_MOVED")
+
 
 
 def _safe_artifact_dir(repo: Path) -> Path:
@@ -155,17 +280,22 @@ def edge_environment(repo: Path) -> dict[str, str]:
 def prepare_classmo_edge(
     repo: Path, *, project: str, command: str,
     task: str | None, source_sha: str,
+    repository: str = "", branch: str = "",
+    reader: Callable[[str], object] | None = None,
 ) -> bool:
     """Pin public artifacts and smoke-test Deno/WASM before source handoff."""
     if not needs_classmo_edge_preparation(project, command, task, source_sha):
         return False
+    if reader is None:
+        raise EdgePrerequisiteError("CLASSMO_EDGE_PR_READER_UNAVAILABLE")
+    # Independent remote PR identity must be established BEFORE any download,
+    # local executable, npm cache or model source action can start.
+    verify_classmo_pr_identity(
+        repo, repository=repository, branch=branch, source_sha=source_sha,
+        reader=reader,
+    )
     if platform.system() != "Linux" or platform.machine() not in ("x86_64", "AMD64"):
         raise EdgePrerequisiteError("pinned Deno archive requires Linux x86_64")
-    current = subprocess.check_output(
-        ["git", "-C", str(repo), "rev-parse", "HEAD"], text=True, timeout=15,
-    ).strip()
-    if current != SOURCE_HEAD:
-        raise EdgePrerequisiteError("CLASSMO #141 checkout HEAD differs")
     root = _safe_artifact_dir(repo)
     binary = _verify_deno_zip(_public_deno_archive())
     (root / "bin").mkdir(parents=True, exist_ok=False)
@@ -227,5 +357,11 @@ def prepare_classmo_edge(
     ):
         raise EdgePrerequisiteError("preflight modified tracked product source")
     edge_environment(repo)
+    # A writer could have moved the PR during npm download or WASM smoke.
+    # Check the live PR/base/ref again before releasing tools to source Codex.
+    verify_classmo_pr_identity(
+        repo, repository=repository, branch=branch, source_sha=source_sha,
+        reader=reader,
+    )
     print("CLASSMO_EDGE_WASM_LOCAL_PREFLIGHT_PASS_NOT_EDGE_PROVIDER")
     return True
