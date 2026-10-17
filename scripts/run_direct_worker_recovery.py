@@ -84,14 +84,20 @@ def main() -> int:
         state = (load_product_execution_state(repo, route.state_path, route.project)
                  if route.state_path else None)
         preparation = state.next_action.npm_preparation if state else None
-        prepared = prepare_npm(repo, preparation)
-        # Only a registered CLASSMO #141 Owner resume can fetch a pinned,
-        # credential-free Deno/WASM cache before the network-disabled Codex turn.
+        # Only the existing registered CLASSMO #141 task, in either Owner
+        # retry or resume, may use this public-tool prerequisite. Fresh
+        # GitHub PR/base/ref/sole-writer evidence is checked independently
+        # BEFORE npm/Deno downloads and rechecked after the real WASM smoke.
         image_ready = prepare_classmo_edge(
             repo, project=route.project, command=args.command,
-            task=state.next_action.source_task_id if state else None,
+            task=(state.next_action.source_task_id
+                  if state and state.next_action.type == "SOURCE_READY"
+                  else None),
             source_sha=original_sha,
+            repository=route.repository, branch=route.branch,
+            reader=lambda endpoint: read(endpoint, token),
         )
+        prepared = prepare_npm(repo, preparation)
         print(f"SOURCE_DEPENDENCIES prepared={str(prepared).lower()} offline=true", flush=True)
         print(
             "CLASSMO_EDGE_TOOLS_LOCAL_ONLY prepared="
