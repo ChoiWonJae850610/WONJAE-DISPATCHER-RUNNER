@@ -399,17 +399,14 @@ jobs:
               "PROVIDER_READINESS_PLAN_BLOB" => config["plan_blob"]
             )
           elsif executor == "classmo_editorial_027_p2_live_guard_v1"
-            # Future 027-P2 runtime gate is deliberately dormant.
-            # Existing read-only preflight is NOT live image/DB acceptance.
             expected = {
               "approval_mode" => "sanjinworks_owner_button",
-              "ready_for_owner" => false,
-              "provider" => "classmo_p2_source_contract_only",
               "environment" => "development",
               "project_ref" => "hfclkbqzxiqhcckwknih",
               "source_baseline_sha" => "e635a359f9393efa4e5a8fe54ab9ec7aa9cb389c",
               "plan_path" => "supabase/tests/editorial_media_p2_plan.json",
               "plan_blob" => "2aebbaf9dfa2699c60d14e3e614927d6653103c1",
+              "runtime_adapter_path" => "scripts/classmo_editorial_p2_live_owner_adapter.py",
               "production" => false,
               "destructive" => false,
               "credential_mutation" => false,
@@ -417,22 +414,33 @@ jobs:
             }
             abort("CLASSMO P2 exact gate identity mismatch") unless
               project == "CLASSMO" && gate == "editorial_027_p2_live_acceptance" &&
-              config.keys.sort == (expected.keys + %w[label executor]).sort &&
-              expected.all? { |key, value| config[key] == value }
-            abort("CLASSMO_P2_OWNER_RUNTIME_NOT_EXECUTABLE")
+              expected.all? { |k, v| config[k] == v }
+            if config["ready_for_owner"] == false
+              abort("CLASSMO P2 dormant metadata mismatch") unless
+                config["provider"] == "classmo_p2_source_contract_only" &&
+                config.keys.sort == (expected.keys + %w[label executor ready_for_owner provider]).sort
+              abort("CLASSMO_P2_OWNER_RUNTIME_NOT_EXECUTABLE")
+            end
+            abort("CLASSMO P2 live adapter not registered") unless
+              config["ready_for_owner"] == true &&
+              config["provider"] == "supabase_development_live" &&
+              config.keys.sort ==
+                (expected.keys + %w[label executor ready_for_owner provider runtime_adapter_blob]).sort &&
+              config["runtime_adapter_blob"].is_a?(String) &&
+              config["runtime_adapter_blob"].match?(/\A[0-9a-f]{40}\z/)
+            values.merge!(
+              "PROVIDER_LIVE_REF" => config["project_ref"],
+              "PROVIDER_LIVE_ADAPTER_BLOB" => config["runtime_adapter_blob"]
+            )
           elsif executor == "wafl_g1v1v2_preparation_guard_v1"
-            # Registered for one WAFL future source/runtime integration only.
-            # No live Apple sessions, race or named Neon invariant proof exists.
-            # Never present an authenticated Owner action or mark Provider PASS.
             expected = {
               "approval_mode" => "sanjinworks_owner_button",
-              "ready_for_owner" => false,
-              "provider" => "wafl_g1_source_contract_only",
               "environment" => "development",
               "project_ref" => "aqqarddfmdfyzeonfgwl",
               "source_baseline_sha" => "b22bc730e409c2468ba92aad2cb962e8035c916f",
               "g1v1_plan_blob" => "7183ab1e76061b7f4896bd52a04d16fb039bff47",
               "g1v2_manifest_blob" => "febe58943d1b98f042053091798aa88fc3d8b345",
+              "runtime_adapter_path" => "scripts/wafl_g1_owner_runtime_adapter.mjs",
               "production" => false,
               "destructive" => false,
               "credential_mutation" => false,
@@ -440,9 +448,24 @@ jobs:
             }
             abort("WAFL G1 preparation target mismatch") unless
               project == "WAFL" && gate == "g1v1_v2_live_acceptance" &&
-              config.keys.sort == (expected.keys + %w[label executor]).sort &&
-              expected.all? { |key, value| config[key] == value }
-            abort("WAFL_G1_OWNER_RUNTIME_NOT_EXECUTABLE")
+              expected.all? { |k, v| config[k] == v }
+            if config["ready_for_owner"] == false
+              abort("WAFL G1 dormant metadata mismatch") unless
+                config["provider"] == "wafl_g1_source_contract_only" &&
+                config.keys.sort == (expected.keys + %w[label executor ready_for_owner provider]).sort
+              abort("WAFL_G1_OWNER_RUNTIME_NOT_EXECUTABLE")
+            end
+            abort("WAFL G1 live adapter not registered") unless
+              config["ready_for_owner"] == true &&
+              config["provider"] == "development_apple_neon_live" &&
+              config.keys.sort ==
+                (expected.keys + %w[label executor ready_for_owner provider runtime_adapter_blob]).sort &&
+              config["runtime_adapter_blob"].is_a?(String) &&
+              config["runtime_adapter_blob"].match?(/\A[0-9a-f]{40}\z/)
+            values.merge!(
+              "PROVIDER_LIVE_REF" => config["project_ref"],
+              "PROVIDER_LIVE_ADAPTER_BLOB" => config["runtime_adapter_blob"]
+            )
           elsif executor == "registered_development_psql_verify_v1"
             abort("Registered Development psql gate not executable") unless
               config["approval_mode"] == "sanjinworks_owner_button" &&
@@ -1414,6 +1437,38 @@ jobs:
           path: ${{ runner.temp }}/development-readiness.json
           if-no-files-found: warn
           retention-days: 14
+
+      - name: CLASSMO P2 · approved Development real-provider adapter
+        if: env.PROVIDER_EXECUTOR == 'classmo_editorial_027_p2_live_guard_v1'
+        env:
+          CLASSMO_SUPABASE_ACCESS_TOKEN: ${{ secrets.supabase_access_token }}
+          CLASSMO_G1V_DEV_DB_PASSWORD: ${{ secrets.development_db_password }}
+          CLASSMO_G1V_DEV_DB_CA_PEM: ${{ secrets.development_db_ca_pem }}
+          WONJAE_OWNER_LIVE_APPROVED: "yes"
+        shell: bash
+        run: |
+          set -euo pipefail
+          python scripts/classmo_p2_live_owner_handoff.py \
+            --repo "$GITHUB_WORKSPACE/.approval/product" \
+            --source-sha "$SOURCE_SHA" \
+            --project-ref "$PROVIDER_LIVE_REF" \
+            --adapter-blob "$PROVIDER_LIVE_ADAPTER_BLOB" \
+            --evidence "$RUNNER_TEMP/classmo-p2-live-evidence.json" --execute
+
+      - name: WAFL G1 · approved Development real-provider adapter
+        if: env.PROVIDER_EXECUTOR == 'wafl_g1v1v2_preparation_guard_v1'
+        env:
+          WAFL_SUPABASE_ACCESS_TOKEN: ${{ secrets.supabase_access_token }}
+          WONJAE_OWNER_LIVE_APPROVED: "yes"
+        shell: bash
+        run: |
+          set -euo pipefail
+          python scripts/wafl_g1_live_owner_handoff.py \
+            --repo "$GITHUB_WORKSPACE/.approval/product" \
+            --source-sha "$SOURCE_SHA" \
+            --project-ref "$PROVIDER_LIVE_REF" \
+            --adapter-blob "$PROVIDER_LIVE_ADAPTER_BLOB" \
+            --evidence "$RUNNER_TEMP/wafl-g1-live-evidence.json" --execute
 
       - name: Prepare predeclared next-stage Owner document PR
         if: success() && env.PROVIDER_EXECUTOR != 'approval_only'
