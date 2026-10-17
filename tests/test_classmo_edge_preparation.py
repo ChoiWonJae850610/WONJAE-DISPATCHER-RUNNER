@@ -18,25 +18,31 @@ from wonjae_dispatcher_runner.classmo_edge_preparation import (
 )
 
 
-def test_only_exact_existing_classmo_141_resume_is_eligible():
-    assert needs_classmo_edge_preparation(
-        "CLASSMO", "resume", edge.SOURCE_TASK, edge.SOURCE_HEAD,
-    )
+def test_only_registered_classmo_141_retry_or_resume_is_eligible():
+    for command in ("retry", "resume"):
+        for head in (
+            "e315b29fd22629cb9eedcacd17b355b6b2dab6be",
+            "a" * 40,
+        ):
+            assert needs_classmo_edge_preparation(
+                "CLASSMO", command, edge.SOURCE_TASK, head,
+            )
     for project, command, task in (
         ("WAFL", "resume", edge.SOURCE_TASK),
-        ("ESC", "resume", edge.SOURCE_TASK),
+        ("ESC", "retry", edge.SOURCE_TASK),
         ("MUVEL", "resume", edge.SOURCE_TASK),
         ("CLASSMO", "next", edge.SOURCE_TASK),
-        ("CLASSMO", "retry", edge.SOURCE_TASK),
         ("CLASSMO", "resume", "CLASSMO-OTHER"),
+        ("CLASSMO", "retry", "CLASSMO-OTHER"),
     ):
         assert not needs_classmo_edge_preparation(
-            project, command, task, edge.SOURCE_HEAD,
+            project, command, task, "e315b29fd22629cb9eedcacd17b355b6b2dab6be",
         )
-    with pytest.raises(EdgePrerequisiteError, match="HEAD changed"):
-        needs_classmo_edge_preparation(
-            "CLASSMO", "resume", edge.SOURCE_TASK, "0" * 40,
-        )
+    for bad_head in ("", "0" * 39, "not-a-commit"):
+        with pytest.raises(EdgePrerequisiteError, match="EXACT_HEAD_INVALID"):
+            needs_classmo_edge_preparation(
+                "CLASSMO", "resume", edge.SOURCE_TASK, bad_head,
+            )
 
 
 def test_unrelated_products_cannot_fetch_or_modify_workspace(tmp_path, monkeypatch):
@@ -46,7 +52,7 @@ def test_unrelated_products_cannot_fetch_or_modify_workspace(tmp_path, monkeypat
     monkeypatch.setattr(edge, "_public_deno_archive", reject)
     assert not prepare_classmo_edge(
         tmp_path, project="WAFL", command="resume", task=edge.SOURCE_TASK,
-        source_sha=edge.SOURCE_HEAD,
+        source_sha="e315b29fd22629cb9eedcacd17b355b6b2dab6be",
     )
     assert not list(tmp_path.iterdir())
 
@@ -122,6 +128,10 @@ def test_source_handoff_does_not_add_secrets_or_enable_network():
     assert "source_environment(codex_home" in src
     assert "network_access\": False" in src
     assert "prepare_classmo_edge(" in wrapper
+    assert "reader=lambda endpoint: read(endpoint, token)" in wrapper
+    assert wrapper.index("image_ready = prepare_classmo_edge(") < wrapper.index(
+        "prepared = prepare_npm(repo, preparation)"
+    )
     assert "NPM_CONFIG_OFFLINE" in (Path(__file__).resolve().parents[1]
                                   / "src/wonjae_dispatcher_runner/npm_preparation.py").read_text()
 
