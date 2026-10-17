@@ -35,11 +35,13 @@ _PNG_1PX = (
 _SMOKE = """
 import { ImageMagick, initializeImageMagick, MagickFormat } from
   "npm:@imagemagick/magick-wasm@0.0.44";
+console.log("CLASSMO_EDGE_STAGE_JS_MODULE_IMPORTED");
 const wasm = await Deno.readFile(
   new URL("magick.wasm",
     import.meta.resolve("npm:@imagemagick/magick-wasm@0.0.44"))
 );
 await initializeImageMagick(wasm);
+console.log("CLASSMO_EDGE_STAGE_WASM_INITIALIZED");
 const png = Uint8Array.from(atob("__PNG__"), ch => ch.charCodeAt(0));
 for (const format of [MagickFormat.Png, MagickFormat.Jpeg, MagickFormat.WebP]) {
   const converted = ImageMagick.read(png, image =>
@@ -56,6 +58,27 @@ console.log("CLASSMO_EDGE_WASM_3_FORMATS_LOCAL_DENO_PASS_NOT_EDGE_RUNTIME");
 
 class EdgePrerequisiteError(RuntimeError):
     """Unverified public image tools; block before running any Codex source turn."""
+
+
+def safe_deno_failure_code(command: str, stdout: str, stderr: str) -> str:
+    """Return a fixed, credential-free stage code; never surface raw subprocess logs.
+
+    The first JS marker is emitted only after Deno resolves the pinned public
+    package. The second marker proves the WebAssembly module initialized. A
+    failed CLI or codec step must never be classified as a successful source.
+    """
+    if command == "--version":
+        return "CLASSMO_EDGE_DENO_BINARY_START_FAILED"
+    if "CLASSMO_EDGE_STAGE_JS_MODULE_IMPORTED" not in stdout:
+        if any(word in stderr.lower() for word in (
+            "certificate", "tls", "dns", "network", "connection", "proxy",
+            "failed to fetch", "error sending request",
+        )):
+            return "CLASSMO_EDGE_NPM_TRANSPORT_OR_TRUST_FAILED"
+        return "CLASSMO_EDGE_DENO_MODULE_OR_NPM_RESOLUTION_FAILED"
+    if "CLASSMO_EDGE_STAGE_WASM_INITIALIZED" not in stdout:
+        return "CLASSMO_EDGE_WASM_RESOURCE_OR_INIT_FAILED"
+    return "CLASSMO_EDGE_IMAGE_CODEC_SMOKE_FAILED"
 
 
 def needs_classmo_edge_preparation(
@@ -161,6 +184,9 @@ def prepare_classmo_edge(
         "DENO_DIR": str(root / "deno-cache"),
         "DENO_NO_UPDATE_CHECK": "1",
         "DENO_NO_PACKAGE_JSON": "1",
+        # Align trusted Deno public npm TLS with the verified host CA store;
+        # no token, proxy secret, broader permission or network-capable Codex.
+        "DENO_TLS_CA_STORE": "system",
     }
     invocations = (
         [str(runtime), "--version"],
@@ -174,9 +200,14 @@ def prepare_classmo_edge(
                 capture_output=True, text=True, timeout=180,
             )
         except (OSError, subprocess.TimeoutExpired) as exc:
-            raise EdgePrerequisiteError("local Deno/WASM smoke unavailable") from exc
+            phase = "DENO_BINARY" if args[1] == "--version" else "DENO_PUBLIC_WASM"
+            raise EdgePrerequisiteError(
+                "CLASSMO_EDGE_" + phase + "_PROCESS_UNAVAILABLE"
+            ) from exc
         if result.returncode != 0:
-            raise EdgePrerequisiteError("Deno/WASM prerequisite did not pass")
+            raise EdgePrerequisiteError(
+                safe_deno_failure_code(args[1], result.stdout, result.stderr)
+            )
         if args[1] == "--version" and not re.search(
             rf"^deno {re.escape(DENO_VERSION)}\b", result.stdout, re.MULTILINE,
         ):
