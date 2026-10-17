@@ -120,6 +120,9 @@ def _read(reader: Callable[[str], object], endpoint: str) -> object:
 def _allowed_pr_file(filename: object, status: object) -> bool:
     if not isinstance(filename, str) or status not in ("added", "modified"):
         return False
+    if (filename.startswith("/") or "\\" in filename
+            or any(part in ("", ".", "..") for part in filename.split("/"))):
+        return False
     if filename in {
         PR_DOC,
         "scripts/validate-repository.mjs",
