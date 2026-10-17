@@ -109,11 +109,16 @@ class ReadOnlySupabase:
         self.token = token
 
     def request(self, path: str, query: str | None = None):
-        require(
-            (path in ("", "/postgrest") and query is None)
-            or (path == "/database/query/read-only" and query in SQL),
-            "READINESS_ENDPOINT_OR_SQL_NOT_ALLOWED",
-        )
+        # These labels are code-owned and contain no provider URLs, credentials,
+        # SQL bodies, response text, project-specific data or identifiers.
+        stage = {
+            ("", None): "PROJECT_SETTINGS_READ",
+            ("/postgrest", None): "DATA_API_CONFIG_READ",
+            ("/database/query/read-only", LEDGER): "MIGRATION_LEDGER_READ",
+            ("/database/query/read-only", CLASSMO_BUCKET): "STORAGE_BUCKET_CONFIG_READ",
+            ("/database/query/read-only", WAFL_AUTH): "AUTH_AGGREGATE_READ",
+        }.get((path, query))
+        require(stage is not None, "READINESS_ENDPOINT_OR_SQL_NOT_ALLOWED")
         data = json.dumps({"query": query}).encode() if query else None
         headers = {
             "Authorization": "Bearer " + self.token,
@@ -128,9 +133,12 @@ class ReadOnlySupabase:
             with urlopen(req, timeout=45) as response:
                 return json.loads(response.read(2_000_001))
         except HTTPError as exc:
-            raise ReadinessBlocked(f"READINESS_PROVIDER_HTTP_{exc.code}") from None
+            # Report only a bounded status code and the fixed stage. Never
+            # print the error URL, headers, response body or provider reason.
+            status = exc.code if isinstance(exc.code, int) and 400 <= exc.code <= 599 else "UNKNOWN"
+            raise ReadinessBlocked(f"READINESS_PROVIDER_HTTP_{status}_{stage}") from None
         except (URLError, OSError, ValueError):
-            raise ReadinessBlocked("READINESS_PROVIDER_READ_UNVERIFIED") from None
+            raise ReadinessBlocked(f"READINESS_PROVIDER_READ_UNVERIFIED_{stage}") from None
 
     def read(self, sql: str) -> list[dict]:
         result = self.request("/database/query/read-only", sql)
