@@ -107,5 +107,5 @@ def test_dormant_provider_gate_is_explicitly_fail_closed():
         / ".github/workflows/provider-gate-approval-core.yml"
     ).read_text(encoding="utf-8")
     assert 'executor == "classmo_editorial_027_p2_live_guard_v1"' in workflow
-    assert '"ready_for_owner" => false' in workflow
+    assert 'config["ready_for_owner"] == false' in workflow
     assert 'abort("CLASSMO_P2_OWNER_RUNTIME_NOT_EXECUTABLE")' in workflow
