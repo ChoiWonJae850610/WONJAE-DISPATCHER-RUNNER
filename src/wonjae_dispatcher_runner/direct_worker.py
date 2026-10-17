@@ -12,13 +12,10 @@ from pathlib import Path
 import yaml
 from openai_codex import ApprovalMode, Codex, CodexConfig, Sandbox
 
-from .classmo_edge_preparation import (
-    EDGE_ROOT,
-    SOURCE_BRANCH as EDGE_SOURCE_BRANCH,
-    SOURCE_REPO as EDGE_SOURCE_REPO,
-    SOURCE_TASK as EDGE_SOURCE_TASK,
-    edge_environment,
-)
+from .classmo_edge_preparation import EDGE_ROOT, edge_environment
+from .classmo_edge_preparation import SOURCE_BRANCH as EDGE_SOURCE_BRANCH
+from .classmo_edge_preparation import SOURCE_REPO as EDGE_SOURCE_REPO
+from .classmo_edge_preparation import SOURCE_TASK as EDGE_SOURCE_TASK
 from .execution_state import (
     ExecutionStateError,
     ProductExecutionState,
