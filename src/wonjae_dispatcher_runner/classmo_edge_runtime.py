@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import http.client
+import io
 import json
 import os
 import platform
@@ -15,10 +16,13 @@ import re
 import shutil
 import socket
 import subprocess
+import tarfile
 import time
 from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.request import ProxyHandler, Request, build_opener
+
+import zstandard
 
 RUNTIME_VERSION = "1.76.2"  # SHA-256-pinned release asset tag, not the CLI version.
 CLI_VERSION = "0.1.0"  # Upstream v1.76.2 cli/Cargo.toml package version.
@@ -100,6 +104,64 @@ def matches_cli_version(stdout: str) -> bool:
     return bool(re.match(r"\Aedge-runtime " + re.escape(CLI_VERSION) + r"(?:\r?\n|\Z)", stdout))
 
 
+def _extract_runtime_archive(data: bytes, runtime_root: Path) -> None:
+    """Decode the pinned tar.zst without assuming a host-installed zstd binary.
+
+    Extract regular files and directories only, under a fresh private root.
+    Do not trust tar member paths, links, device nodes, or archive permissions.
+    """
+    verify_archive(data)
+    try:
+        with zstandard.ZstdDecompressor().stream_reader(io.BytesIO(data)) as stream:
+            with tarfile.open(fileobj=stream, mode="r|") as members:
+                total_bytes = 0
+                seen = set()
+                for index, member in enumerate(members, 1):
+                    if index > 2_000:
+                        raise SelectedEdgeRuntimeError("CLASSMO_EDGE_RUNTIME_ARCHIVE_UNSAFE")
+                    name = member.name
+                    while name.startswith("./"):
+                        name = name[2:]
+                    if name in ("", ".") and member.isdir():
+                        continue
+                    if member.isdir():
+                        name = name.rstrip("/")
+                    parts = name.split("/")
+                    if (name.startswith("/") or "\\" in name or len(parts) > 32
+                            or any(part in ("", ".", "..") for part in parts)
+                            or name in seen or not (member.isdir() or member.isfile())):
+                        raise SelectedEdgeRuntimeError("CLASSMO_EDGE_RUNTIME_ARCHIVE_UNSAFE")
+                    seen.add(name)
+                    target = runtime_root.joinpath(*parts)
+                    if target.is_symlink():
+                        raise SelectedEdgeRuntimeError("CLASSMO_EDGE_RUNTIME_ARCHIVE_UNSAFE")
+                    if member.isdir():
+                        target.mkdir(parents=True, exist_ok=True)
+                        target.chmod(0o700)
+                        continue
+                    total_bytes += member.size
+                    if (member.size < 0 or member.size > 300_000_000
+                            or total_bytes > 600_000_000):
+                        raise SelectedEdgeRuntimeError("CLASSMO_EDGE_RUNTIME_ARCHIVE_UNSAFE")
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    source = members.extractfile(member)
+                    if source is None:
+                        raise SelectedEdgeRuntimeError("CLASSMO_EDGE_RUNTIME_EXTRACT_FAILED")
+                    with source, target.open("xb") as output:
+                        remaining = member.size
+                        while remaining:
+                            chunk = source.read(min(1024 * 1024, remaining))
+                            if not chunk:
+                                raise SelectedEdgeRuntimeError(
+                                    "CLASSMO_EDGE_RUNTIME_EXTRACT_FAILED"
+                                )
+                            output.write(chunk)
+                            remaining -= len(chunk)
+                    target.chmod(0o700 if member.mode & 0o111 else 0o600)
+    except (OSError, ValueError, EOFError, tarfile.TarError, zstandard.ZstdError):
+        raise SelectedEdgeRuntimeError("CLASSMO_EDGE_RUNTIME_EXTRACT_FAILED") from None
+
+
 def _install_runtime(root: Path, data: bytes) -> Path:
     """Extract an already SHA-256-pinned official native Linux release."""
     verify_archive(data)
@@ -107,22 +169,7 @@ def _install_runtime(root: Path, data: bytes) -> Path:
     if runtime_root.exists() or runtime_root.is_symlink():
         raise SelectedEdgeRuntimeError("CLASSMO_EDGE_RUNTIME_PATH_ALREADY_EXISTS")
     runtime_root.mkdir()
-    archive = root / "selected-runtime.tar.zst"
-    if archive.exists() or archive.is_symlink():
-        raise SelectedEdgeRuntimeError("CLASSMO_EDGE_RUNTIME_ARCHIVE_PATH_OCCUPIED")
-    archive.write_bytes(data)
-    try:
-        result = subprocess.run(
-            ["tar", "--zstd", "--no-same-owner", "--no-same-permissions",
-             "-xf", str(archive), "-C", str(runtime_root)],
-            capture_output=True, timeout=90, check=False,
-        )
-    except (OSError, subprocess.TimeoutExpired):
-        raise SelectedEdgeRuntimeError("CLASSMO_EDGE_RUNTIME_EXTRACT_UNAVAILABLE") from None
-    finally:
-        archive.unlink(missing_ok=True)
-    if result.returncode != 0:
-        raise SelectedEdgeRuntimeError("CLASSMO_EDGE_RUNTIME_EXTRACT_FAILED")
+    _extract_runtime_archive(data, runtime_root)
     binary = runtime_root / "bin/edge-runtime"
     if binary.is_symlink() or not binary.is_file() or not os.access(binary, os.X_OK):
         raise SelectedEdgeRuntimeError("CLASSMO_EDGE_RUNTIME_NATIVE_BINARY_MISSING")
