@@ -186,7 +186,8 @@ def test_workflow_is_scoped_to_registered_nonproduction_gate():
     ).read_text(encoding="utf-8")
     assert (
         '"registered_supabase_migration_v1", '
-        '"registered_development_psql_verify_v1"].include?(executor)' in workflow
+        '"registered_development_psql_verify_v1", '
+        '"registered_development_readiness_v1"].include?(executor)' in workflow
     )
     for needle in (
         'config["environment"] == "development"',
