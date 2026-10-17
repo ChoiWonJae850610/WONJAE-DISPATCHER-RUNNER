@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib.util
 import json
 from pathlib import Path
+from urllib.error import HTTPError, URLError
 
 import pytest
 
@@ -162,3 +163,52 @@ def test_exact_owner_flow_not_general_provider_or_write_token():
     assert "CREATE ROLE" not in mod.LEDGER
     assert not any(word in "".join(mod.SQL).lower()
                    for word in (" insert ", " update ", " delete ", " drop ", " alter "))
+
+@pytest.mark.parametrize(
+    ("path", "query", "stage"),
+    [
+        ("", None, "PROJECT_SETTINGS_READ"),
+        ("/postgrest", None, "DATA_API_CONFIG_READ"),
+        ("/database/query/read-only", mod.LEDGER, "MIGRATION_LEDGER_READ"),
+        ("/database/query/read-only", mod.CLASSMO_BUCKET, "STORAGE_BUCKET_CONFIG_READ"),
+        ("/database/query/read-only", mod.WAFL_AUTH, "AUTH_AGGREGATE_READ"),
+    ],
+)
+def test_http_403_identifies_exact_read_stage_without_leaking_secrets(
+    monkeypatch, path, query, stage,
+):
+    calls = []
+
+    def forbidden(request, timeout):
+        calls.append((request.full_url, request.get_method(), timeout))
+        raise HTTPError(
+            "https://secret-provider.invalid/token=PRIVATE_MARKER",
+            403, "PRIVATE_MARKER_denied", {"x-internal": "PRIVATE_MARKER"}, None,
+        )
+
+    monkeypatch.setattr(mod, "urlopen", forbidden)
+    api = mod.ReadOnlySupabase("hfclkbqzxiqhcckwknih", "PRIVATE_MARKER")
+    with pytest.raises(mod.ReadinessBlocked) as error:
+        api.request(path, query)
+    assert str(error.value) == f"READINESS_PROVIDER_HTTP_403_{stage}"
+    assert "PRIVATE_MARKER" not in str(error.value)
+    assert "https://" not in str(error.value)
+    assert len(calls) == 1
+    assert calls[0][2] == 45
+    assert calls[0][1] == ("GET" if query is None else "POST")
+
+
+def test_non_http_connection_failure_has_fixed_read_stage_without_provider_text(
+    monkeypatch,
+):
+    def disconnected(_request, timeout):
+        raise URLError("PRIVATE_MARKER_host_and_token")
+
+    monkeypatch.setattr(mod, "urlopen", disconnected)
+    api = mod.ReadOnlySupabase("hfclkbqzxiqhcckwknih", "PRIVATE_MARKER")
+    with pytest.raises(mod.ReadinessBlocked) as error:
+        api.request("/postgrest")
+    assert str(error.value) == (
+        "READINESS_PROVIDER_READ_UNVERIFIED_DATA_API_CONFIG_READ"
+    )
+    assert "PRIVATE_MARKER" not in str(error.value)
