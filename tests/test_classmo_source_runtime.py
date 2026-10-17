@@ -58,12 +58,12 @@ def test_only_existing_reviewed_classmo_head_can_enter_trusted_source_check(tmp_
         calls.append("network")
         raise AssertionError("must not reach GitHub")
 
-    base = dict(
-        repo=tmp_path, project="CLASSMO", command="retry",
-        task=SOURCE_TASK, source_sha=selected.REVIEWED_SOURCE_HEAD,
-        repository="ChoiWonJae850610/CLASSMO", branch="cloud-dev-v1",
-        reader=reader,
-    )
+    base = {
+        "repo": tmp_path, "project": "CLASSMO", "command": "retry",
+        "task": SOURCE_TASK, "source_sha": selected.REVIEWED_SOURCE_HEAD,
+        "repository": "ChoiWonJae850610/CLASSMO", "branch": "cloud-dev-v1",
+        "reader": reader,
+    }
     assert selected.prepare_reviewed_classmo_source(
         **{**base, "project": "ESC"},
     ) is False
