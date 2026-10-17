@@ -124,3 +124,46 @@ def test_source_handoff_does_not_add_secrets_or_enable_network():
     assert "prepare_classmo_edge(" in wrapper
     assert "NPM_CONFIG_OFFLINE" in (Path(__file__).resolve().parents[1]
                                   / "src/wonjae_dispatcher_runner/npm_preparation.py").read_text()
+
+
+def test_public_deno_preflight_stage_codes_are_fixed_and_never_echo_stderr():
+    adversarial = "Bearer SENSITIVE_FAKE_TOKEN\nfailed to fetch package from upstream"
+    samples = (
+        ("--version", "", adversarial, "CLASSMO_EDGE_DENO_BINARY_START_FAILED"),
+        ("run", "", adversarial, "CLASSMO_EDGE_NPM_TRANSPORT_OR_TRUST_FAILED"),
+        (
+            "run", "", "Unexpected TypeScript import error: file:///arbitrary",
+            "CLASSMO_EDGE_DENO_MODULE_OR_NPM_RESOLUTION_FAILED",
+        ),
+        (
+            "run", "CLASSMO_EDGE_STAGE_JS_MODULE_IMPORTED\n", adversarial,
+            "CLASSMO_EDGE_WASM_RESOURCE_OR_INIT_FAILED",
+        ),
+        (
+            "run",
+            "CLASSMO_EDGE_STAGE_JS_MODULE_IMPORTED\n"
+            "CLASSMO_EDGE_STAGE_WASM_INITIALIZED\n", adversarial,
+            "CLASSMO_EDGE_IMAGE_CODEC_SMOKE_FAILED",
+        ),
+    )
+    for command, output, stderr, expected in samples:
+        message = edge.safe_deno_failure_code(command, output, stderr)
+        assert message == expected
+        assert "SENSITIVE" not in message
+        assert "Bearer" not in message
+        assert "arbitrary" not in message
+
+
+def test_deno_package_pin_and_host_ca_do_not_expand_codex_network_scope():
+    script = (
+        Path(__file__).resolve().parents[1]
+        / "src/wonjae_dispatcher_runner/classmo_edge_preparation.py"
+    ).read_text()
+    assert '"DENO_TLS_CA_STORE": "system"' in script
+    assert '"CLASSMO_EDGE_STAGE_JS_MODULE_IMPORTED"' in script
+    assert '"CLASSMO_EDGE_STAGE_WASM_INITIALIZED"' in script
+    assert '"--allow-net=registry.npmjs.org"' in script
+    assert 'capture_output=True' in script
+    assert 'safe_deno_failure_code(args[1], result.stdout, result.stderr)' in script
+    assert 'print(result.stderr)' not in script
+    assert 'print(result.stdout)' not in script
