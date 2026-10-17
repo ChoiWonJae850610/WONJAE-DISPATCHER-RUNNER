@@ -667,6 +667,14 @@ def run_direct_worker(
         and execution_state.next_action.source_task_id == EDGE_SOURCE_TASK
         and starting_sha == REVIEWED_SOURCE_HEAD
         and os.environ.get("CLASSMO_TRUSTED_SOURCE_RUNTIME_HEAD") == starting_sha
+        and not (repo_path / EDGE_ROOT / "reviewed-source-pass").is_symlink()
+        and (repo_path / EDGE_ROOT / "reviewed-source-pass").is_file()
+        and (repo_path / EDGE_ROOT / "reviewed-source-pass").read_text(
+            encoding="ascii",
+        ) == (
+            f"source_head={starting_sha}\nselected_edge_runtime=1.76.2\n"
+            "synthetic_tests_only=true\nprovider=false\n"
+        )
     )
 
     home_isolation = os.environ.get("DIRECT_WORKER_HOME_ISOLATION") == "1"
