@@ -12,6 +12,7 @@ from wonjae_dispatcher_runner import classmo_edge_runtime as selected
 
 def test_native_pin_matches_a_published_fixed_linux_release():
     assert selected.RUNTIME_VERSION == "1.76.2"
+    assert selected.CLI_VERSION == "0.1.0"
     assert selected.ARCHIVE_NAME == "edge-runtime-v1.76.2-linux-amd64.tar.zst"
     assert selected.ARCHIVE_URL == (
         "https://github.com/supabase/slim-services/releases/download/"
@@ -28,6 +29,20 @@ def test_native_pin_matches_a_published_fixed_linux_release():
     assert 'from\n  "./vendor/dist/index.js"' in selected._USER_PREFIX
     assert "npm:" not in selected._USER_PREFIX
     assert "https://" not in selected._USER_PREFIX
+
+
+def test_release_tag_is_not_the_official_cli_version():
+    # Upstream cli/Cargo.toml is 0.1.0 even for slim-services v1.76.2.
+    # Verify only the CLI signature here; the release is pinned by SHA-256.
+    assert selected.matches_cli_version("edge-runtime 0.1.0\ndeno 2.1.4 (release)\n")
+    assert selected.matches_cli_version("edge-runtime 0.1.0\r\ndeno 2.1.4\r\n")
+    assert selected.matches_cli_version("edge-runtime 0.1.0")
+    for unexpected in (
+        "edge-runtime 1.76.2", "edge-runtime 0.2.0",
+        "edge-runtime 0.1.0-other", "edge-runtime 0.1.0 extra",
+        "prefix edge-runtime 0.1.0", "",
+    ):
+        assert not selected.matches_cli_version(unexpected)
 
 
 def test_bad_archive_rejected_prior_to_any_execution(monkeypatch):
