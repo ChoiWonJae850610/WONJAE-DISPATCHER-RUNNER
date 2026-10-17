@@ -55,8 +55,12 @@ def main() -> int:
     except CodexAccountLookupFailed:
         write_account_failure_output(step_output, "CODEX_AUTH_LOOKUP_ERROR")
         raise
-    except DirectWorkerTurnTimeout:
-        print("INITIAL_CODEX_TIMEOUT_480_SECONDS", flush=True)
+    except DirectWorkerTurnTimeout as exc:
+        marker = (
+            "DIRECT_CODEX_TIMEOUT_960_SECONDS"
+            if exc.seconds == 960 else "INITIAL_CODEX_TIMEOUT_480_SECONDS"
+        )
+        print(marker, flush=True)
         return 75
     Path(args.result_file).write_text(
         json.dumps(
