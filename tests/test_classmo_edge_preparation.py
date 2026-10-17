@@ -312,7 +312,7 @@ def test_stale_head_other_writer_wrong_paths_or_changed_base_fail_closed(
         changed = copy.deepcopy(api)
         mutate(changed)
         with pytest.raises(EdgePrerequisiteError):
-            _verify_pr(repo, head, lambda endpoint: changed[endpoint])
+            _verify_pr(repo, head, lambda endpoint, snapshot=changed: snapshot[endpoint])
     _verify_pr(repo, head, read)
 
 
