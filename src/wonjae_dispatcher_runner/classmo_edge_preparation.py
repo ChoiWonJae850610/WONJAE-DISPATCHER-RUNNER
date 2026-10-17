@@ -356,6 +356,19 @@ def prepare_classmo_edge(
             not in result.stdout
         ):
             raise EdgePrerequisiteError("WASM 3-format smoke not observed")
+    # The earlier Deno smoke is necessary but not proof of Supabase's user worker.
+    # This second stage uses a SHA-256-pinned native Edge runtime and a local-only
+    # copy of the already verified WASM package. No provider or product code runs.
+    from .classmo_edge_runtime import (
+        SelectedEdgeRuntimeError,
+        prepare_selected_edge_runtime,
+    )
+
+    try:
+        prepare_selected_edge_runtime(root, _PNG_1PX)
+    except SelectedEdgeRuntimeError as exc:
+        raise EdgePrerequisiteError(str(exc)) from None
+    print("CLASSMO_EDGE_SELECTED_RUNTIME_USER_WORKER_LOCAL_PASS_NOT_PROVIDER")
     (root / "local-smoke-pass").write_text(
         f"deno={DENO_VERSION}\nmagick={MAGICK_VERSION}\nlocal_only=true\n",
         encoding="ascii",
