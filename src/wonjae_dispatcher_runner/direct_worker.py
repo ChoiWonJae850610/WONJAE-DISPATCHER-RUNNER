@@ -12,7 +12,13 @@ from pathlib import Path
 import yaml
 from openai_codex import ApprovalMode, Codex, CodexConfig, Sandbox
 
-from .classmo_edge_preparation import EDGE_ROOT, edge_environment
+from .classmo_edge_preparation import (
+    EDGE_ROOT,
+    SOURCE_BRANCH as EDGE_SOURCE_BRANCH,
+    SOURCE_REPO as EDGE_SOURCE_REPO,
+    SOURCE_TASK as EDGE_SOURCE_TASK,
+    edge_environment,
+)
 from .execution_state import (
     ExecutionStateError,
     ProductExecutionState,
@@ -25,7 +31,13 @@ from .home_isolation import (
     source_environment,
 )
 from .npm_preparation import ARTIFACT_ROOT, source_npm_environment
-from .repair_timeout import RepairPlanTimeout, repair_plan_deadline
+from .repair_timeout import (
+    EXTENDED_SOURCE_TURN_TIMEOUT_SECONDS,
+    REPAIR_PLAN_TIMEOUT_SECONDS,
+    RepairPlanTimeout,
+    extended_source_turn_deadline,
+    repair_plan_deadline,
+)
 
 RUNNER_REPOSITORY = "ChoiWonJae850610/WONJAE-DISPATCHER-RUNNER"
 RUNNER_WORKFLOW = ".github/workflows/direct-worker.yml"
@@ -41,7 +53,11 @@ class DirectWorkerError(RuntimeError):
 
 
 class DirectWorkerTurnTimeout(DirectWorkerError):
-    """The exact 480-second turn deadline, distinct from other failures."""
+    """A bounded source-turn timeout, distinguished from other failures."""
+
+    def __init__(self, seconds: int = REPAIR_PLAN_TIMEOUT_SECONDS):
+        self.seconds = seconds
+        super().__init__("Direct Worker Codex turn timed out")
 
 
 class CodexAccountSessionMissing(DirectWorkerError):
@@ -83,6 +99,27 @@ class DirectWorkerRoute:
     state_path: str | None
     handoff_path: str | None
     handoff: DirectWorkerHandoff | None
+
+
+def source_turn_timeout_seconds(
+    route: DirectWorkerRoute,
+    command: str,
+    execution_state: ProductExecutionState | None,
+) -> int:
+    """Extend only the Owner-started exact CLASSMO 027-P2 source retry.
+
+    The trusted parent has already verified existing PR #141 identity and its
+    protected execution-state before the isolated source turn begins.
+    """
+    if (route.project == "CLASSMO"
+            and route.repository == EDGE_SOURCE_REPO
+            and route.branch == EDGE_SOURCE_BRANCH
+            and command in {"retry", "resume"}
+            and execution_state is not None
+            and execution_state.next_action.type == "SOURCE_READY"
+            and execution_state.next_action.source_task_id == EDGE_SOURCE_TASK):
+        return EXTENDED_SOURCE_TURN_TIMEOUT_SECONDS
+    return REPAIR_PLAN_TIMEOUT_SECONDS
 
 
 @dataclass(frozen=True)
@@ -721,7 +758,14 @@ def run_direct_worker(
         thread_config["shell_environment_policy"]["set"].update(edge_runtime)
         sandbox = None
 
-    # A 480-second deadline bounds the WHOLE SDK interaction, not just the first
+    source_timeout = source_turn_timeout_seconds(route, command, execution_state)
+    source_deadline = (
+        extended_source_turn_deadline(source_timeout)
+        if source_timeout == EXTENDED_SOURCE_TURN_TIMEOUT_SECONDS
+        else repair_plan_deadline()
+    )
+
+    # A bounded wall-clock deadline covers the WHOLE SDK interaction, not just the first
     # model response. Only coarse, static phase labels and elapsed seconds are logged:
     # never prompts, model text, account objects, auth, paths or environment values.
     codex_started = time.monotonic()
@@ -736,7 +780,7 @@ def run_direct_worker(
     try:
         report_codex_phase("sandbox_setup")
         mounts = protected_mount_placeholders(repo_path) if home_isolation else nullcontext()
-        with mounts, repair_plan_deadline():
+        with mounts, source_deadline:
             report_codex_phase("sdk_start")
             with Codex(config=config) as codex:
                 report_codex_phase("account_lookup")
@@ -786,7 +830,7 @@ def run_direct_worker(
         elapsed_s = int(time.monotonic() - codex_started)
         print(f"DIRECT_CODEX_TIMEOUT_PHASE phase={codex_phase} elapsed_s={elapsed_s}",
               flush=True)
-        raise DirectWorkerTurnTimeout("Direct Worker Codex turn timed out") from exc
+        raise DirectWorkerTurnTimeout(source_timeout) from exc
 
     status_value = str(getattr(result.status, "value", result.status)).lower()
     if status_value != "completed" or result.error is not None:
