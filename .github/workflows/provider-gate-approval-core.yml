@@ -125,7 +125,7 @@ jobs:
           abort("provider gate is not registered") unless config.is_a?(Hash)
           abort("provider gate approval mode mismatch") unless config["approval_mode"] == "sanjinworks_owner_button"
           executor = config["executor"]
-          abort("provider gate executor is unsupported") unless ["approval_only", "classmo_supabase_migration", "classmo_eas_build", "classmo_eas_update", "wafl_supabase_hardening", "wafl_eas_update", "wafl_eas_build", "wafl_r2_preview_deploy", "wafl_supabase_g1_readonly", "wafl_supabase_g1_schema_apply", "wafl_supabase_g1_006_only_recovery", "classmo_editorial_016_readonly", "classmo_editorial_016_schema_apply", "classmo_editorial_017_storage_apply", "registered_supabase_migration_v1", "registered_development_psql_verify_v1"].include?(executor)
+          abort("provider gate executor is unsupported") unless ["approval_only", "classmo_supabase_migration", "classmo_eas_build", "classmo_eas_update", "wafl_supabase_hardening", "wafl_eas_update", "wafl_eas_build", "wafl_r2_preview_deploy", "wafl_supabase_g1_readonly", "wafl_supabase_g1_schema_apply", "wafl_supabase_g1_006_only_recovery", "classmo_editorial_016_readonly", "classmo_editorial_016_schema_apply", "classmo_editorial_017_storage_apply", "registered_supabase_migration_v1", "registered_development_psql_verify_v1", "registered_development_readiness_v1"].include?(executor)
           label = config["label"]
           abort("provider gate label missing") unless label.is_a?(String) && !label.strip.empty?
 
@@ -352,6 +352,51 @@ jobs:
               "PROVIDER_REGISTERED_MIGRATION_BLOB" => config["migration_blob"],
               "PROVIDER_REGISTERED_MIGRATION_NAME" => config["migration_name"],
               "PROVIDER_REGISTERED_PRIOR_NAME" => config["expected_prior_migration_name"],
+            )
+          elsif executor == "registered_development_readiness_v1"
+            expected = {
+              "CLASSMO" => {
+                "gate" => "editorial_027_p2_readonly",
+                "ref" => "hfclkbqzxiqhcckwknih",
+                "baseline" => "f03953b855fc88f57ea6da7b68b24fd820d69a22",
+                "plan" => "supabase/tests/editorial_media_p2_plan.json",
+                "blob" => "2aebbaf9dfa2699c60d14e3e614927d6653103c1"
+              },
+              "WAFL" => {
+                "gate" => "g1v_auth_db_readonly",
+                "ref" => "aqqarddfmdfyzeonfgwl",
+                "baseline" => "0fb09a669485d78de8a3245609642dc5dec88851",
+                "plan" => "supabase/tests/wafl_g1v_plan.json",
+                "blob" => "7183ab1e76061b7f4896bd52a04d16fb039bff47"
+              }
+            }[project]
+            abort("Development readiness route unsupported") unless expected &&
+              gate == expected["gate"] &&
+              config["executor"] == "registered_development_readiness_v1"
+            checked = {
+              "approval_mode" => "sanjinworks_owner_button",
+              "ready_for_owner" => true,
+              "provider" => "supabase_management_api",
+              "environment" => "development",
+              "project_ref" => expected["ref"],
+              "source_baseline_sha" => expected["baseline"],
+              "plan_path" => expected["plan"],
+              "plan_blob" => expected["blob"],
+              "production" => false,
+              "destructive" => false,
+              "credential_mutation" => false,
+              "device_mutation" => false
+            }
+            checked.each do |key, value|
+              abort("Unreviewed readiness metadata #{key}") unless config[key] == value
+            end
+            abort("Readiness gate cannot contain execution authority extras") unless
+              (config.keys - (checked.keys + %w[label executor])).empty?
+            values.merge!(
+              "PROVIDER_READINESS_REF" => config["project_ref"],
+              "PROVIDER_READINESS_BASELINE" => config["source_baseline_sha"],
+              "PROVIDER_READINESS_PLAN" => config["plan_path"],
+              "PROVIDER_READINESS_PLAN_BLOB" => config["plan_blob"]
             )
           elsif executor == "registered_development_psql_verify_v1"
             abort("Registered Development psql gate not executable") unless
@@ -1293,6 +1338,37 @@ jobs:
           path: ${{ runner.temp }}/registered-psql-g1v.json
           if-no-files-found: warn
           retention-days: 30
+
+      - name: CLASSMO/WAFL · read-only Development next-stage prerequisite check
+        if: env.PROVIDER_EXECUTOR == 'registered_development_readiness_v1'
+        env:
+          CLASSMO_SUPABASE_ACCESS_TOKEN: ${{ inputs.project == 'CLASSMO' && secrets.supabase_access_token || '' }}
+          WAFL_SUPABASE_ACCESS_TOKEN: ${{ inputs.project == 'WAFL' && secrets.supabase_access_token || '' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          git -C .approval/product merge-base --is-ancestor \
+            "$PROVIDER_READINESS_BASELINE" "$SOURCE_SHA" || {
+            echo "::error::READINESS_SOURCE_BEFORE_ACCEPTED_STAGE"
+            exit 1
+          }
+          python scripts/development_readiness_preflight.py \
+            --project "$PROJECT" \
+            --project-ref "$PROVIDER_READINESS_REF" \
+            --repo "$GITHUB_WORKSPACE/.approval/product" \
+            --source-sha "$SOURCE_SHA" \
+            --plan-blob "$PROVIDER_READINESS_PLAN_BLOB" \
+            --evidence "$RUNNER_TEMP/development-readiness.json" \
+            --summary "$GITHUB_STEP_SUMMARY"
+
+      - name: CLASSMO/WAFL · archive only sanitized readiness receipt
+        if: env.PROVIDER_EXECUTOR == 'registered_development_readiness_v1' && always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: development-readiness-${{ inputs.project }}-${{ inputs.source_sha }}
+          path: ${{ runner.temp }}/development-readiness.json
+          if-no-files-found: warn
+          retention-days: 14
 
       - name: Prepare predeclared next-stage Owner document PR
         if: success() && env.PROVIDER_EXECUTOR != 'approval_only'
