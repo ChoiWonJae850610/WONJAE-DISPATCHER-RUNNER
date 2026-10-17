@@ -6,8 +6,8 @@ from pathlib import Path
 
 import pytest
 
-from wonjae_dispatcher_runner import classmo_edge_runtime as selected
 from wonjae_dispatcher_runner import classmo_edge_preparation as edge
+from wonjae_dispatcher_runner import classmo_edge_runtime as selected
 
 
 def test_native_pin_matches_a_published_fixed_linux_release():
