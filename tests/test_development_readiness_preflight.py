@@ -111,7 +111,8 @@ def test_classmo_readback_is_readiness_not_live_image_acceptance():
     assert result["two_session_db_race"] == "NOT_RUN"
     assert result["storage_cleanup"] == "NOT_RUN"
     assert result["provider_mutations"] == 0
-    assert set(client.paths) == {"", "/postgrest", mod.LEDGER, mod.CLASSMO_BUCKET}
+    assert client.paths == ["", mod.LEDGER, mod.CLASSMO_BUCKET]
+    assert result["data_api"] == "NOT_CHECKED_NOT_REQUIRED_FOR_CLASSMO_P2"
 
     class Bad(FixtureClient):
         def read(self, sql):
@@ -132,6 +133,7 @@ def test_wafl_seven_ledger_and_apple_subject_not_claimed():
     assert result["authenticated_rpc_rls"] == "NOT_RUN"
     assert result["neon_50_not_valid_parity"] == "NOT_RUN"
     assert result["provider_mutations"] == 0
+    assert client.paths == ["", "/postgrest", mod.LEDGER, mod.WAFL_AUTH]
 
     class SchemaDrift(FixtureClient):
         def request(self, path):
@@ -212,3 +214,36 @@ def test_non_http_connection_failure_has_fixed_read_stage_without_provider_text(
         "READINESS_PROVIDER_READ_UNVERIFIED_DATA_API_CONFIG_READ"
     )
     assert "PRIVATE_MARKER" not in str(error.value)
+
+
+
+def test_classmo_skips_unneeded_postgrest_permission_but_preserves_real_reads():
+    class DenyPostgrest(FixtureClient):
+        def request(self, path):
+            if path == "/postgrest":
+                raise mod.ReadinessBlocked(
+                    "READINESS_PROVIDER_HTTP_403_DATA_API_CONFIG_READ"
+                )
+            return super().request(path)
+
+    client = DenyPostgrest("CLASSMO")
+    result = mod.inspect_readiness("CLASSMO", client)
+    assert result["private_bucket"] == "READBACK"
+    assert result["migration_017"] == "LEDGER_PRESENT"
+    assert result["data_api"] == "NOT_CHECKED_NOT_REQUIRED_FOR_CLASSMO_P2"
+    assert client.paths == ["", mod.LEDGER, mod.CLASSMO_BUCKET]
+
+
+def test_wafl_still_fails_closed_on_postgrest_403_before_any_sql():
+    class DenyPostgrest(FixtureClient):
+        def request(self, path):
+            if path == "/postgrest":
+                raise mod.ReadinessBlocked(
+                    "READINESS_PROVIDER_HTTP_403_DATA_API_CONFIG_READ"
+                )
+            return super().request(path)
+
+    client = DenyPostgrest("WAFL")
+    with pytest.raises(mod.ReadinessBlocked, match="HTTP_403_DATA_API_CONFIG_READ"):
+        mod.inspect_readiness("WAFL", client)
+    assert client.paths == [""]
