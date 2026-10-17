@@ -405,7 +405,7 @@ jobs:
             expected = {
               "approval_mode" => "sanjinworks_owner_button",
               "ready_for_owner" => false,
-              "provider" => "waft_g1_source_contract_only",
+              "provider" => "wafl_g1_source_contract_only",
               "environment" => "development",
               "project_ref" => "aqqarddfmdfyzeonfgwl",
               "source_baseline_sha" => "b22bc730e409c2468ba92aad2cb962e8035c916f",
