@@ -125,7 +125,7 @@ jobs:
           abort("provider gate is not registered") unless config.is_a?(Hash)
           abort("provider gate approval mode mismatch") unless config["approval_mode"] == "sanjinworks_owner_button"
           executor = config["executor"]
-          abort("provider gate executor is unsupported") unless ["approval_only", "classmo_supabase_migration", "classmo_eas_build", "classmo_eas_update", "wafl_supabase_hardening", "wafl_eas_update", "wafl_eas_build", "wafl_r2_preview_deploy", "wafl_supabase_g1_readonly", "wafl_supabase_g1_schema_apply", "wafl_supabase_g1_006_only_recovery", "classmo_editorial_016_readonly", "classmo_editorial_016_schema_apply", "classmo_editorial_017_storage_apply", "registered_supabase_migration_v1", "registered_development_psql_verify_v1", "registered_development_readiness_v1"].include?(executor)
+          abort("provider gate executor is unsupported") unless ["approval_only", "classmo_supabase_migration", "classmo_eas_build", "classmo_eas_update", "wafl_supabase_hardening", "wafl_eas_update", "wafl_eas_build", "wafl_r2_preview_deploy", "wafl_supabase_g1_readonly", "wafl_supabase_g1_schema_apply", "wafl_supabase_g1_006_only_recovery", "classmo_editorial_016_readonly", "classmo_editorial_016_schema_apply", "classmo_editorial_017_storage_apply", "registered_supabase_migration_v1", "registered_development_psql_verify_v1", "registered_development_readiness_v1", "wafl_g1v1v2_preparation_guard_v1"].include?(executor)
           label = config["label"]
           abort("provider gate label missing") unless label.is_a?(String) && !label.strip.empty?
 
@@ -398,6 +398,29 @@ jobs:
               "PROVIDER_READINESS_PLAN" => config["plan_path"],
               "PROVIDER_READINESS_PLAN_BLOB" => config["plan_blob"]
             )
+          elsif executor == "wafl_g1v1v2_preparation_guard_v1"
+            # Registered for one WAFL future source/runtime integration only.
+            # No live Apple sessions, race or named Neon invariant proof exists.
+            # Never present an authenticated Owner action or mark Provider PASS.
+            expected = {
+              "approval_mode" => "sanjinworks_owner_button",
+              "ready_for_owner" => false,
+              "provider" => "wafl_g1_source_contract_only",
+              "environment" => "development",
+              "project_ref" => "aqqarddfmdfyzeonfgwl",
+              "source_baseline_sha" => "b22bc730e409c2468ba92aad2cb962e8035c916f",
+              "g1v1_plan_blob" => "7183ab1e76061b7f4896bd52a04d16fb039bff47",
+              "g1v2_manifest_blob" => "febe58943d1b98f042053091798aa88fc3d8b345",
+              "production" => false,
+              "destructive" => false,
+              "credential_mutation" => false,
+              "device_mutation" => false
+            }
+            abort("WAFL G1 preparation target mismatch") unless
+              project == "WAFL" && gate == "g1v1_v2_live_acceptance" &&
+              config.keys.sort == (expected.keys + %w[label executor]).sort &&
+              expected.all? { |key, value| config[key] == value }
+            abort("WAFL_G1_OWNER_RUNTIME_NOT_EXECUTABLE")
           elsif executor == "registered_development_psql_verify_v1"
             abort("Registered Development psql gate not executable") unless
               config["approval_mode"] == "sanjinworks_owner_button" &&
