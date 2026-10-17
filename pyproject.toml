@@ -12,6 +12,7 @@ license = { text = "MIT" }
 dependencies = [
   "openai-codex==0.159.2",
   "PyYAML>=6.0,<7",
+  "zstandard==0.25.0",  # pinned portable .tar.zst decoder for CLASSMO Edge preflight
 ]
 
 [project.optional-dependencies]
