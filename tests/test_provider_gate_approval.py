@@ -32,7 +32,7 @@ def test_provider_gate_core_rechecks_identity_validation_and_registered_executor
         '"classmo_editorial_017_storage_apply", '
         '"registered_supabase_migration_v1", '
         '"registered_development_psql_verify_v1", '
-        '"registered_development_readiness_v1"].include?(executor)' in raw
+        '"registered_development_readiness_v1", '\n        '"wafl_g1v1v2_preparation_guard_v1"].include?(executor)' in raw
     )
     assert 'action["type"] == "PROVIDER_GATE"' in raw
     assert 'action["gate"] == gate' in raw
