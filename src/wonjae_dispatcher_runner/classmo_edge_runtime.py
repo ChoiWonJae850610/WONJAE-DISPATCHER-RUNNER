@@ -20,7 +20,8 @@ from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.request import ProxyHandler, Request, build_opener
 
-RUNTIME_VERSION = "1.76.2"
+RUNTIME_VERSION = "1.76.2"  # SHA-256-pinned release asset tag, not the CLI version.
+CLI_VERSION = "0.1.0"  # Upstream v1.76.2 cli/Cargo.toml package version.
 ARCHIVE_NAME = "edge-runtime-v1.76.2-linux-amd64.tar.zst"
 ARCHIVE_URL = (
     "https://github.com/supabase/slim-services/releases/download/"
@@ -94,6 +95,11 @@ def public_runtime_archive() -> bytes:
     return data
 
 
+def matches_cli_version(stdout: str) -> bool:
+    """Check the official CLI first line; release identity comes from archive SHA-256."""
+    return bool(re.match(r"\Aedge-runtime " + re.escape(CLI_VERSION) + r"(?:\r?\n|\Z)", stdout))
+
+
 def _install_runtime(root: Path, data: bytes) -> Path:
     """Extract an already SHA-256-pinned official native Linux release."""
     verify_archive(data)
@@ -127,9 +133,7 @@ def _install_runtime(root: Path, data: bytes) -> Path:
         )
     except (OSError, subprocess.TimeoutExpired):
         raise SelectedEdgeRuntimeError("CLASSMO_EDGE_RUNTIME_BINARY_START_FAILED") from None
-    if version.returncode != 0 or not re.search(
-        r"\b" + re.escape(RUNTIME_VERSION) + r"\b", version.stdout,
-    ):
+    if version.returncode != 0 or not matches_cli_version(version.stdout):
         raise SelectedEdgeRuntimeError("CLASSMO_EDGE_RUNTIME_VERSION_MISMATCH")
     return binary
 
