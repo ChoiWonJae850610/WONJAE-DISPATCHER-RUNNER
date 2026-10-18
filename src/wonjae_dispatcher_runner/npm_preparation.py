@@ -219,16 +219,12 @@ def prepare_npm(repo: Path, preparation: NpmPreparation | None) -> bool:
                 "--save-exact",
             )
         _verify_lock(stage / "package-lock.json")
-        # An online install can leave partially populated cache entries. Explicitly
-        # consume every locked tarball before claiming the offline cache is complete.
+        # An exact offline npm ci is the real acceptance gate. The former
+        # unconditional "npm cache add" over *every* locked tarball fetched
+        # platform-inapplicable optional packages and could fail even when
+        # npm ci had already warmed all packages needed by this host.
+        # Do not loosen integrity checks or accept an incomplete offline install.
         npm("cache", "verify")
-        lock = json.loads((stage / "package-lock.json").read_text())
-        tarballs = sorted({package["resolved"] for package in lock["packages"].values()
-                           if package.get("resolved") and not package.get("link")})
-        for offset in range(0, len(tarballs), 50):
-            npm("cache", "add", *tarballs[offset:offset + 50], "--prefer-offline")
-        npm("cache", "verify")
-        # A second install must succeed with network requests forbidden by npm itself.
         npm("ci", "--offline")
         for installed in sorted(stage.rglob("node_modules"), key=lambda path: len(path.parts)):
             if any(parent.name == "node_modules" for parent in installed.parents):
