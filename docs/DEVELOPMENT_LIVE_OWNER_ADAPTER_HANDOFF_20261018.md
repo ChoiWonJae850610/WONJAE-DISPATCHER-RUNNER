@@ -39,3 +39,43 @@ absent, changed or mock-only product adapters and incomplete evidence.
 This common PR does not modify product source, GitHub Runner permissions,
 Provider, credentials, Production, KDN or actual database/storage state.
 No new generic Dispatcher, engine or Owner admin screen is introduced.
+
+
+## 2026-10-18: CLASSMO #149 source identity contract, not LIVE acceptance
+
+The trusted-main scripts/classmo_p2_live_owner_handoff.py source_runtime_contract()
+publishes CLASSMO_P2_RUNTIME_HANDOFF_V1 for **source-stage implementation only**:
+the fixed CLASSMO Development project, immutable P2 plan blob,
+editorial-media-prepare Edge function, Edge Runtime 1.76.2 and ImageMagick WASM
+0.0.44. These values describe a future authenticated Owner executor's proof
+requirements. They do not prove deployment, signer trust, license approval or
+provider authentication. The product source adapter may finish offline
+transport, synthetic fixture and fail-closed runtime-verification interfaces
+without calling the Provider or producing fake PASS evidence.
+
+Future LIVE admission must bind a fresh trusted Runner challenge to the exact
+integrated source SHA, immutable project/plan/adapter blob, independently
+observed deployed non-Production function revision and WASM asset digest,
+and a cryptographic signature verified against a reviewed independent runtime
+signer/trust root. It must separately verify server-only license authorization
+against actual processed bytes and normalized receipts; then real Auth roles,
+negative HTTP/Storage and upload cases, PostgreSQL A/B lock barriers and exact
+synthetic zero-residue/non-owned fingerprint readbacks. JSON "signature: PASS",
+"reviewed: true", client flags, mock replies, a source hash alone, or an Owner
+session boolean are not admission. The trusted-main
+require_registered_runtime_signature() currently always blocks; actual signer,
+trust-root registration and independent deployment proof remain separate
+Provider-stage work requiring their own authority. No new credential, runtime
+configuration or LIVE acceptance is provided here.
+
+Existing CLASSMO source PR #149 already received Owner recovery-doc PR #150 and
+then repeatedly returned MANUAL_REQUIRED. To preserve that source and its
+prior canonical text, the existing two-file Owner recovery-doc attachment now
+accepts exactly one subsequent appended source-scope entry ONLY after reviewing
+the prior trusted attachment commit history and unchanged previous scope and
+document suffix, the new failed-run identity, one open source PR and the exact
+docs-head CI. This remains an authenticated SANJINWORKS Owner action; no product
+source merge, Provider launch, new UI, applied SQL 017 or Production operation.
+
+WAFL #95 is already integrated; its G1-V1/V2 LIVE acceptance remains inactive
+pending real Apple/identity-map/Neon proof. No WAFL source/gate is changed.

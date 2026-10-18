@@ -193,3 +193,80 @@ def test_docs_attachment_failed_ci_is_not_source_pass():
         assert not guard.attached_failed_source_ci_requires_owner_resume(
             {"status": status, "conclusion": conclusion}
         )
+
+
+def test_second_attachment_preserves_first_scope_and_existing_document():
+    base, first = states()
+    second = yaml.safe_load(yaml.safe_dump(first))
+    second["next_action"]["source_scope"].append(
+        f"PR #66 head {SOURCE} failed run {RUN}: implement only "
+        "scripts/classmo_editorial_p2_live_test.py and registered source-mode "
+        "Runtime proof contract; actual credentials and Provider stay NOT_RUN."
+    )
+    base_doc = "## Existing canonical\n"
+    first_doc = "## First trusted attachment\n" + base_doc
+    second_doc = "## Latest bound attachment\n" + first_doc
+    guard.check_existing_attachment(
+        yaml.safe_dump(base), yaml.safe_dump(first),
+        base_doc, first_doc, second_doc,
+    )
+    guard.check_scope(yaml.safe_dump(first), yaml.safe_dump(second), 66, SOURCE, RUN)
+
+
+@pytest.mark.parametrize("tamper", [
+    "drop_first_scope", "change_task", "remove_old_doc", "change_old_doc",
+    "reverse_scope", "too_many_previous", "no_new_document",
+])
+def test_existing_attachment_must_not_be_overwritten(tamper):
+    base, first = states()
+    base_doc = "Existing canonical\n"
+    first_doc = "Previous trusted docs\n" + base_doc
+    new_doc = "Another strictly additive section\n" + first_doc
+    if tamper == "drop_first_scope":
+        first["next_action"]["source_scope"].pop()
+    elif tamper == "change_task":
+        first["next_action"]["source_task_id"] = "WRONG"
+    elif tamper == "remove_old_doc":
+        new_doc = "New without prior docs"
+    elif tamper == "change_old_doc":
+        first_doc = "Previous trusted docs\nWrong existing content\n"
+    elif tamper == "reverse_scope":
+        first["next_action"]["source_scope"].reverse()
+    elif tamper == "too_many_previous":
+        first["next_action"]["source_scope"].extend(
+            ["PR #66 repeated scope"] * 4
+        )
+    elif tamper == "no_new_document":
+        new_doc = first_doc
+    with pytest.raises(guard.DocumentMergeError):
+        guard.check_existing_attachment(
+            yaml.safe_dump(base), yaml.safe_dump(first),
+            base_doc, first_doc, new_doc,
+        )
+
+
+def test_prior_provenance_only_accepts_trusted_two_file_attachment(monkeypatch):
+    paths = [".wonjae/execution-state.yaml", "docs/NEXT_WORK.md"]
+
+    def fake_git(_workspace, *args):
+        if args[:2] == ("log", "--format=%H"):
+            return "d" * 40
+        if args[:3] == ("show", "-s", "--format=%s"):
+            return "docs: attach recovery PR #150 to source PR #149"
+        if args[:3] == ("show", "-s", "--format=%ae"):
+            return "trusted-recovery@users.noreply.github.com"
+        if args[:3] == ("diff-tree", "--no-commit-id", "--name-only"):
+            return "\n".join(paths)
+        raise AssertionError(args)
+
+    monkeypatch.setattr(guard, "git", fake_git)
+    guard.check_prior_attachment_commits(Path("."), BASE, SOURCE, paths)
+
+    def forged_git(workspace, *args):
+        if args[:3] == ("show", "-s", "--format=%ae"):
+            return "codex@untrusted.invalid"
+        return fake_git(workspace, *args)
+
+    monkeypatch.setattr(guard, "git", forged_git)
+    with pytest.raises(guard.DocumentMergeError, match="provenance"):
+        guard.check_prior_attachment_commits(Path("."), BASE, SOURCE, paths)
