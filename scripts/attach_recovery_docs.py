@@ -324,6 +324,7 @@ def attach(args: argparse.Namespace) -> None:
         raise DocumentMergeError("unreviewed source PR canonical document change")
     check_scope(source_state, new_state,
                 args.source_pr, args.source_head, args.failed_run_id)
+    for path in paths:
         target = workspace / path
         if target.is_symlink() or not target.is_file():
             raise DocumentMergeError("recovery destination is not a regular file")
