@@ -105,10 +105,12 @@ def test_real_install_and_offline_source_install_preserve_original_manifests(tmp
     monkeypatch.setenv("PRODUCT_TOKEN", "synthetic-secret")
     monkeypatch.setenv("NPM_TOKEN", "synthetic-secret")
     assert prepare_npm(repo, NpmPreparation("apps/client", ("picocolors@1.1.1",)))
-    assert len(calls) == 6
+    # Ignore optional-platform tarballs: only actual offline reinstallation
+    # proves the locked dependencies needed by this source host are complete.
+    assert len(calls) == 4
     assert calls[2][0][2:4] == ["cache", "verify"]
-    assert calls[3][0][2:4] == ["cache", "add"]
-    assert calls[4][0][2:4] == ["cache", "verify"]
+    assert not any(command[0][2:4] == ["cache", "add"] for command in calls)
+    assert calls[-1][0][2:4] == ["ci", "--offline"]
     assert "--offline" in calls[-1][0]
     for args, env in calls:
         assert "--ignore-scripts" in args
