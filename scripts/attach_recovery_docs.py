@@ -46,10 +46,16 @@ def checked_source_pr(pr: object, route: dict, number: int, sha: str,
         or target.get("repo", {}).get("full_name") != route["repo"]):
         raise DocumentMergeError("source PR/base/head identity changed")
     body = pr.get("body")
-    if (not isinstance(body, str) or
-        f"- source_base_sha: `{base}`" not in body or
-        f"- runner_run_id: `{failed_run_id}`" not in body or
-        f"- project: `{route['repo'].split('/')[-1]}`" not in body):
+    # The immutable PR body identifies the INITIAL next run. A later
+    # MANUAL_REQUIRED resume uses a different run ID, independently proved
+    # by verify_manual_gate on this same exact PR and current HEAD.
+    project = route["repo"].split("/")[-1]
+    original = re.fullmatch(r"direct/" + re.escape(project) + r"-([1-9][0-9]*)", branch)
+    if (not original or failed_run_id < int(original.group(1))
+        or not isinstance(body, str)
+        or f"- source_base_sha: `{base}`" not in body
+        or f"- runner_run_id: `{original.group(1)}`" not in body
+        or f"- project: `{project}`" not in body):
         raise DocumentMergeError("original Direct Worker run binding missing")
     return branch
 

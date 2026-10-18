@@ -270,3 +270,26 @@ def test_prior_provenance_only_accepts_trusted_two_file_attachment(monkeypatch):
     monkeypatch.setattr(guard, "git", forged_git)
     with pytest.raises(guard.DocumentMergeError, match="provenance"):
         guard.check_prior_attachment_commits(Path("."), BASE, SOURCE, paths)
+
+
+def test_later_manual_resume_keeps_initial_pr_identity_without_requiring_same_run_id():
+    # An original PR created by next is not rewritten on resume. The newest
+    # MANUAL_REQUIRED run+SHA is independently checked on the same PR.
+    first = source()
+    first["head"]["sha"] = DOCS
+    assert guard.checked_source_pr(first, route(), 66, DOCS, BASE, RUN + 100) == (
+        "direct/WAFL-38038579147"
+    )
+    with pytest.raises(guard.DocumentMergeError):
+        guard.checked_source_pr(first, route(), 66, DOCS, BASE, RUN - 1)
+
+
+def test_original_pr_branch_and_immutable_body_must_agree_on_run_identity():
+    p = source()
+    p["head"]["ref"] = "direct/WAFL-39000000001"
+    with pytest.raises(guard.DocumentMergeError):
+        guard.checked_source_pr(p, route(), 66, SOURCE, BASE, RUN + 1)
+    p = source()
+    p["body"] = p["body"].replace("runner_run_id:", "current_resume_run_id:")
+    with pytest.raises(guard.DocumentMergeError):
+        guard.checked_source_pr(p, route(), 66, SOURCE, BASE, RUN + 1)
