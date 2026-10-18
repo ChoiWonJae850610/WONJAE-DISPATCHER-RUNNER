@@ -113,7 +113,8 @@ def check_scope(original: str, doc: str, source_pr: int,
         or str(failed_run_id) not in extra
         or len(set(re.findall(
             r"(?:tests/[A-Za-z0-9_./-]+\.mjs|"
-            r"apps/mobile/test/[A-Za-z0-9_./-]+\.test\.ts)", extra,
+            r"apps/mobile/test/[A-Za-z0-9_./-]+\.test\.ts|"
+            r"scripts/classmo_editorial_p2_live_test\.py)", extra,
         ))) != 1):
         raise DocumentMergeError("narrow exact-PR/test/manual exception missing")
     remaining_old = {k: v for k, v in old_action.items() if k != "source_scope"}
@@ -123,6 +124,63 @@ def check_scope(original: str, doc: str, source_pr: int,
     if ({k: v for k, v in old.items() if k != "next_action"}
         != {k: v for k, v in proposed.items() if k != "next_action"}):
         raise DocumentMergeError("recovery modified successor queue or non-scope authority")
+
+
+
+def check_existing_attachment(base_state: str, source_state: str,
+                              base_doc: str, source_doc: str,
+                              proposed_doc: str) -> None:
+    """Preserve previous trusted attachments; accept one new scope, not a rewrite.
+
+    The caller additionally verifies Git commit provenance, exact PR identity,
+    current MANUAL_REQUIRED, docs PR CI and one-writer concurrency.
+    """
+    base, source = yaml.safe_load(base_state), yaml.safe_load(source_state)
+    if not isinstance(base, dict) or not isinstance(source, dict):
+        raise DocumentMergeError("existing protected state unavailable")
+    b_action, s_action = base.get("next_action"), source.get("next_action")
+    if not isinstance(b_action, dict) or not isinstance(s_action, dict):
+        raise DocumentMergeError("existing source action missing")
+    previous, current = b_action.get("source_scope"), s_action.get("source_scope")
+    if (b_action.get("type") != "SOURCE_READY"
+        or not isinstance(previous, list) or not previous
+        or not isinstance(current, list) or current[:len(previous)] != previous
+        or not 1 <= len(current) - len(previous) <= 3
+        or any(not isinstance(item, str) or not item.strip() or len(item) > 2600
+               or "PR #" not in item for item in current[len(previous):])):
+        raise DocumentMergeError("prior recovery source scope was modified")
+    if ({k: v for k, v in b_action.items() if k != "source_scope"}
+        != {k: v for k, v in s_action.items() if k != "source_scope"}
+        or {k: v for k, v in base.items() if k != "next_action"}
+        != {k: v for k, v in source.items() if k != "next_action"}):
+        raise DocumentMergeError("prior recovery modified other authority")
+    if (source_doc == base_doc or not source_doc.endswith(base_doc)
+        or proposed_doc == source_doc or not proposed_doc.endswith(source_doc)
+        or len(proposed_doc) - len(source_doc) > 14000):
+        raise DocumentMergeError("recovery must preserve all existing canonical text")
+
+
+def check_prior_attachment_commits(workspace: Path, base: str, source: str,
+                                   paths: list[str]) -> None:
+    """Check protected-file provenance on the actual existing source branch.
+
+    Commit metadata is not standalone trust; the authenticated Owner workflow,
+    exact SHA/CI and manual-gate verification remain mandatory.
+    """
+    commits = git(workspace, "log", "--format=%H", f"{base}..{source}",
+                  "--", *paths).splitlines()
+    if not 1 <= len(commits) <= 3:
+        raise DocumentMergeError("previous attachment chain unsupported")
+    for commit in commits:
+        subject = git(workspace, "show", "-s", "--format=%s", commit)
+        email = git(workspace, "show", "-s", "--format=%ae", commit)
+        changed = git(workspace, "diff-tree", "--no-commit-id",
+                      "--name-only", "-r", commit).splitlines()
+        if (not re.fullmatch(r"docs: attach recovery PR #[1-9][0-9]* "
+                             r"to source PR #[1-9][0-9]*", subject)
+            or email != "trusted-recovery@users.noreply.github.com"
+            or sorted(changed) != sorted(paths)):
+            raise DocumentMergeError("prior protected files lack trusted attachment provenance")
 
 
 def git(root: Path, *args: str) -> str:
@@ -211,9 +269,12 @@ def attach(args: argparse.Namespace) -> None:
         or any(entry["status"] != "modified" for entry in files)):
         raise DocumentMergeError("recovery requires only one state and one docs modification")
     changes = request_json([f"repos/{repo}/pulls/{args.source_pr}/files?per_page=100"])
-    if (not isinstance(changes, list) or len(changes) != source.get("changed_files")
-        or any(item.get("filename") in paths for item in changes)):
-        raise DocumentMergeError("source PR independently changed a recovery document")
+    if not isinstance(changes, list) or len(changes) != source.get("changed_files"):
+        raise DocumentMergeError("source PR changed-file inventory unavailable")
+    protected_in_source = {item.get("filename") for item in changes
+                           if item.get("filename") in paths}
+    if protected_in_source and protected_in_source != set(paths):
+        raise DocumentMergeError("partial protected-file change in source PR")
     open_prs = request_json(
         [f"repos/{repo}/pulls?state=open&base={route['branch']}&per_page=100"]
     )
@@ -240,18 +301,29 @@ def attach(args: argparse.Namespace) -> None:
     if git(workspace, "status", "--porcelain=v1", "--untracked-files=all"):
         raise DocumentMergeError("dirty fresh source checkout")
     original = git(workspace, "show", f"{args.base}:{route['state_path']}")
-    if git(workspace, "show", f"{args.source_head}:{route['state_path']}") != original:
-        raise DocumentMergeError("source PR modified protected state")
+    source_state = git(workspace, "show", f"{args.source_head}:{route['state_path']}")
     new_state = git(workspace, "show", f"{args.docs_head}:{route['state_path']}")
-    check_scope(original, new_state, args.source_pr, args.source_head, args.failed_run_id)
+    doc_path = next(path for path in paths if path != route["state_path"])
     for path in paths:
         regular_tree_file(workspace, args.base, path)
         regular_tree_file(workspace, args.source_head, path)
         regular_tree_file(workspace, args.docs_head, path)
-        if git(workspace, "show", f"{args.base}:{path}") != git(
-            workspace, "show", f"{args.source_head}:{path}"
-        ):
-            raise DocumentMergeError("source PR document diverged from original base")
+    base_doc = git(workspace, "show", f"{args.base}:{doc_path}")
+    source_doc = git(workspace, "show", f"{args.source_head}:{doc_path}")
+    proposed_doc = git(workspace, "show", f"{args.docs_head}:{doc_path}")
+    prior = source_state != original
+    if prior != bool(protected_in_source):
+        raise DocumentMergeError("protected document and state provenance mismatch")
+    if prior:
+        check_existing_attachment(original, source_state,
+                                  base_doc, source_doc, proposed_doc)
+        check_prior_attachment_commits(
+            workspace, args.base, args.source_head, paths,
+        )
+    elif source_doc != base_doc:
+        raise DocumentMergeError("unreviewed source PR canonical document change")
+    check_scope(source_state, new_state,
+                args.source_pr, args.source_head, args.failed_run_id)
         target = workspace / path
         if target.is_symlink() or not target.is_file():
             raise DocumentMergeError("recovery destination is not a regular file")
