@@ -17,6 +17,53 @@ REF = "hfclkbqzxiqhcckwknih"
 SHA = re.compile(r"[a-f0-9]{40}\Z")
 
 
+def source_runtime_contract() -> dict[str, object]:
+    """Reviewed source-stage seam; NOT an authenticated LIVE attestation.
+
+    Source Codex may implement this interface without provider calls. The trusted
+    Owner LIVE workflow must later independently verify every claimed runtime
+    and license property. No field here can be used as an acceptance flag.
+    """
+    return {
+        "contract": "CLASSMO_P2_RUNTIME_HANDOFF_V1",
+        "stage": "SOURCE_INTERFACE_ONLY_PROVIDER_NOT_RUN",
+        "project_ref": REF,
+        "environment": "development",
+        "gate": "editorial_027_p2_live_acceptance",
+        "adapter_path": ADAPTER,
+        "plan_git_blob": "2aebbaf9dfa2699c60d14e3e614927d6653103c1",
+        "edge_function": "editorial-media-prepare",
+        "edge_runtime": "1.76.2",
+        "wasm_package": "imagemagick-wasm",
+        "wasm_version": "0.0.44",
+        "required_live_proof": [
+            "authenticated_owner_dispatch_and_exact_integrated_source_sha",
+            "registered_project_ref_and_plan_blob_and_adapter_blob",
+            "independent_deployed_edge_origin_version_and_asset_digest_readback",
+            "fresh_runner_challenge_bound_to_deployment_and_source_sha",
+            "cryptographically_verified_deployment_signature_from_reviewed_trust_root",
+            "reviewed_server_only_license_reference_and_receipt_binding",
+            "genuine_auth_roles_http_storage_and_independent_postgres_readback",
+            "exact_synthetic_cleanup_and_non_owned_fingerprint_readback",
+        ],
+        "runtime_proof": "NOT_VERIFIED",
+        "signature_proof": "NOT_VERIFIED",
+        "server_license_proof": "NOT_VERIFIED",
+        "live_approval": False,
+    }
+
+
+def require_registered_runtime_signature(_evidence: object) -> None:
+    """Fail closed until a separately reviewed trusted-main verifier exists.
+
+    The adapter's JSON, its 'signature' string, environment flags and a
+    fixture's PASS fields are not cryptographic proofs. This verifier must
+    eventually use a reviewed pinned trust root and independently observed
+    deployed-runtime readback; never accept a caller-supplied boolean or key.
+    """
+    raise Blocked("CLASSMO_P2_RUNTIME_SIGNATURE_VERIFIER_NOT_REGISTERED")
+
+
 class Blocked(Exception):
     """Only safe, fixed error codes leave the trusted Runner."""
 
@@ -74,6 +121,8 @@ def verify_evidence(data: object, sha: str) -> None:
             and phases["cleanup"].get("independent_zero_residue") is True
             and phases["cleanup"].get("unknown_keys") == [],
             "CLASSMO_P2_LIVE_RACE_OR_CLEANUP_UNVERIFIED")
+    # A self-asserted JSON receipt can never sign itself into LIVE acceptance.
+    require_registered_runtime_signature(data)
 
 
 def execute(repo: Path, sha: str, ref: str, blob: str,
