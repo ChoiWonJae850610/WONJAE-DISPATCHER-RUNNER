@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import sys
+from types import SimpleNamespace
 from pathlib import Path
 
 import pytest
@@ -97,3 +99,187 @@ def test_dormant_live_registration_pins_source_without_enabling_provider():
     assert 'abort("WAFL_G1_OWNER_RUNTIME_NOT_EXECUTABLE")' in workflow
     # Live is still a separate registration, requiring a different reviewed blob.
     assert 'config["runtime_adapter_blob"].match?' in workflow
+
+
+
+def source_only_fixture(file: str, sha: str, ref: str) -> dict:
+    if file.startswith("wafl"):
+        return {
+            "sourceSha": sha, "projectRef": ref, "runtime": "NOT_VERIFIED",
+            "neon": "NOT_VERIFIED", "G1_ACCEPT": False,
+        }
+    return {
+        "schema_version": 1, "source_sha": sha, "project_ref": ref,
+        "status": "SOURCE_ONLY_NOT_RUNTIME_ACCEPTANCE",
+        "source_completion": "INCOMPLETE", "executable_live_adapter": False,
+        "owner_gate": "REGISTERED_DEVELOPMENT_RUNTIME_HANDOFF_REQUIRED",
+        "phases": {
+            name: "NOT_RUN" for name in (
+                "admission", "auth", "runtime_asset", "images", "http_matrix",
+                "db_commit_race", "db_rollback_race", "cleanup"
+            )
+        },
+        "runtime_handoff": {
+            "interface": "CLASSMO_P2_RUNTIME_HANDOFF_V1", "source_sha": sha,
+            "project_ref": ref, "plan_blob": "2aebbaf9dfa2699c60d14e3e614927d6653103c1",
+            "status": "NOT_VERIFIED", "live_admission_available": False,
+        },
+    }
+
+
+@pytest.mark.parametrize(
+    "file",
+    ["wafl_g1_live_owner_handoff.py", "classmo_p2_live_owner_handoff.py"],
+)
+def test_source_preflight_uses_relative_tmp_and_never_forwards_credentials(
+    tmp_path, monkeypatch, file
+):
+    module = load(file)
+    sha = "b" * 40
+    monkeypatch.setattr(module, "admit", lambda *_: tmp_path / "exact-product-adapter")
+    monkeypatch.setenv("OWNER_PRIVATE_CANARY", "must-not-be-forwarded")
+    calls = []
+
+    def fake_run(argv, **kwargs):
+        calls.append(argv)
+        assert kwargs["cwd"] == tmp_path
+        assert "OWNER_PRIVATE_CANARY" not in kwargs["env"]
+        assert set(kwargs["env"]).issubset(
+            {"PATH", "NODE_ENV", "PYTHONDONTWRITEBYTECODE"}
+        )
+        assert kwargs["timeout"] == 60
+        path = argv[argv.index("--evidence") + 1]
+        assert path.startswith("tmp/.") and path.endswith("/source.json")
+        assert not Path(path).is_absolute()
+        target = tmp_path / path
+        assert target.parent.is_dir()
+        target.write_text(
+            json.dumps(source_only_fixture(file, sha, module.REF)), encoding="utf-8"
+        )
+        return SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(module.subprocess, "run", fake_run)
+    result = module.source_preflight(tmp_path, sha, module.REF, "c" * 40)
+    assert result.endswith("SOURCE_CONTRACT_PASS_LIVE_NOT_RUN")
+    assert len(calls) == 1
+    assert not (tmp_path / "tmp").exists()  # Disposable source evidence only.
+
+
+@pytest.mark.parametrize(
+    "file",
+    ["wafl_g1_live_owner_handoff.py", "classmo_p2_live_owner_handoff.py"],
+)
+def test_source_preflight_rejects_self_declared_live_success(tmp_path, monkeypatch, file):
+    module = load(file)
+    sha = "c" * 40
+    monkeypatch.setattr(module, "admit", lambda *_: tmp_path / "exact-product-adapter")
+
+    def forged_run(argv, **kwargs):
+        payload = source_only_fixture(file, sha, module.REF)
+        payload["status"] = "INDEPENDENTLY_VERIFIED"
+        if file.startswith("wafl"):
+            payload["runtime"] = "PASS"
+            payload["G1_ACCEPT"] = True
+        evidence = tmp_path / argv[argv.index("--evidence") + 1]
+        evidence.write_text(json.dumps(payload), encoding="utf-8")
+        return SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(module.subprocess, "run", forged_run)
+    with pytest.raises(module.Blocked, match="SOURCE_RECEIPT_NOT_FAIL_CLOSED"):
+        module.source_preflight(tmp_path, sha, module.REF, "d" * 40)
+    assert not (tmp_path / "tmp").exists()
+
+
+@pytest.mark.parametrize(
+    "file",
+    ["wafl_g1_live_owner_handoff.py", "classmo_p2_live_owner_handoff.py"],
+)
+def test_source_preflight_rejects_tmp_symlink(tmp_path, monkeypatch, file):
+    module = load(file)
+    monkeypatch.setattr(module, "admit", lambda *_: tmp_path / "exact-product-adapter")
+    foreign = tmp_path.parent / f"foreign-{tmp_path.name}"
+    foreign.mkdir()
+    (tmp_path / "tmp").symlink_to(foreign, target_is_directory=True)
+    with pytest.raises(module.Blocked, match="SOURCE_PROBE_PATH_UNSAFE"):
+        module.source_preflight(tmp_path, "a" * 40, module.REF, "b" * 40)
+
+
+@pytest.mark.parametrize(
+    ("file", "blocked"),
+    [
+        ("wafl_g1_live_owner_handoff.py", "TRUSTED_LIVE_HOST_NOT_REGISTERED"),
+        ("classmo_p2_live_owner_handoff.py", "RUNTIME_SIGNATURE_VERIFIER_NOT_REGISTERED"),
+    ],
+)
+def test_live_cannot_invoke_product_cli_without_registered_trust(
+    tmp_path, monkeypatch, file, blocked
+):
+    module = load(file)
+    monkeypatch.setattr(module, "admit", lambda *_: tmp_path / "exact-product-adapter")
+    for key, value in {
+        "GITHUB_ACTIONS": "true",
+        "WONJAE_OWNER_LIVE_APPROVED": "yes",
+        "WAFL_SUPABASE_ACCESS_TOKEN": "offline-only",
+        "CLASSMO_SUPABASE_ACCESS_TOKEN": "offline-only",
+        "CLASSMO_G1V_DEV_DB_PASSWORD": "offline-only",
+    }.items():
+        monkeypatch.setenv(key, value)
+
+    def no_product_launch(*_args, **_kwargs):
+        raise AssertionError("Unregistered LIVE route must not invoke product code")
+
+    monkeypatch.setattr(module.subprocess, "run", no_product_launch)
+    with pytest.raises(module.Blocked, match=blocked):
+        module.execute(
+            tmp_path, "a" * 40, module.REF, "b" * 40,
+            tmp_path / "live-evidence.json", approved=True,
+        )
+
+
+def test_waffle_all_green_json_still_cannot_self_attest_live():
+    module = load("wafl_g1_live_owner_handoff.py")
+    sha = "a" * 40
+    phases = {
+        key: {"status": "PASS", "real_provider_readback": True}
+        for key in (
+            "apple_auth", "identity_map", "rls_rpc", "neon_50",
+            "domain_parity", "cleanup",
+        )
+    }
+    phases["apple_auth"]["subject_sha256"] = ["a" * 64, "b" * 64]
+    phases["identity_map"]["audited_bijection"] = True
+    phases["rls_rpc"]["independent_sessions"] = True
+    phases["rls_rpc"]["cross_label_denied"] = True
+    phases["neon_50"].update(
+        count=50, fk=46, check=4, readback_per_invariant=True, bounded_violations=0
+    )
+    phases["domain_parity"]["fingerprints_equal"] = True
+    phases["cleanup"]["independent_zero_residue"] = True
+    with pytest.raises(module.Blocked, match="INDEPENDENT_READBACK_VERIFIER_NOT_REGISTERED"):
+        module.verify_evidence(
+            {
+                "schema_version": 1, "source_sha": sha, "project_ref": module.REF,
+                "status": "INDEPENDENTLY_VERIFIED", "phases": phases,
+            },
+            sha,
+        )
+
+
+@pytest.mark.parametrize(
+    "file",
+    ["wafl_g1_live_owner_handoff.py", "classmo_p2_live_owner_handoff.py"],
+)
+def test_source_probe_is_explicit_cli_mode_only(monkeypatch, capsys, tmp_path, file):
+    module = load(file)
+    monkeypatch.setattr(
+        module, "source_preflight",
+        lambda *_: "OFFLINE_SOURCE_CONTRACT_ONLY_LIVE_NOT_RUN",
+    )
+    monkeypatch.setattr(
+        sys, "argv",
+        [file, "--repo", str(tmp_path), "--source-sha", "a" * 40,
+         "--project-ref", module.REF, "--adapter-blob", "b" * 40,
+         "--evidence", str(tmp_path / "unused.json"), "--source-preflight"],
+    )
+    assert module.main() == 0
+    assert "OFFLINE_SOURCE_CONTRACT_ONLY_LIVE_NOT_RUN" in capsys.readouterr().out
