@@ -436,12 +436,15 @@ jobs:
               config["ready_for_owner"] == true &&
               config["provider"] == "supabase_development_live" &&
               config.keys.sort ==
-                (expected.keys + %w[label executor ready_for_owner provider runtime_adapter_blob]).sort &&
+                (expected.keys + %w[label executor ready_for_owner provider runtime_adapter_blob trusted_host_blob]).sort &&
+              config["trusted_host_blob"].is_a?(String) &&
+              config["trusted_host_blob"].match?(/\A[0-9a-f]{40}\z/) &&
               config["runtime_adapter_blob"].is_a?(String) &&
               config["runtime_adapter_blob"].match?(/\A[0-9a-f]{40}\z/)
             values.merge!(
               "PROVIDER_LIVE_REF" => config["project_ref"],
-              "PROVIDER_LIVE_ADAPTER_BLOB" => config["runtime_adapter_blob"]
+              "PROVIDER_LIVE_ADAPTER_BLOB" => config["runtime_adapter_blob"],
+              "PROVIDER_LIVE_HOST_BLOB" => config["trusted_host_blob"]
             )
           elsif executor == "wafl_g1v1v2_preparation_guard_v1"
             expected = {
@@ -481,12 +484,15 @@ jobs:
               config["ready_for_owner"] == true &&
               config["provider"] == "development_apple_neon_live" &&
               config.keys.sort ==
-                (expected.keys + %w[label executor ready_for_owner provider runtime_adapter_blob]).sort &&
+                (expected.keys + %w[label executor ready_for_owner provider runtime_adapter_blob trusted_host_blob]).sort &&
+              config["trusted_host_blob"].is_a?(String) &&
+              config["trusted_host_blob"].match?(/\A[0-9a-f]{40}\z/) &&
               config["runtime_adapter_blob"].is_a?(String) &&
               config["runtime_adapter_blob"].match?(/\A[0-9a-f]{40}\z/)
             values.merge!(
               "PROVIDER_LIVE_REF" => config["project_ref"],
-              "PROVIDER_LIVE_ADAPTER_BLOB" => config["runtime_adapter_blob"]
+              "PROVIDER_LIVE_ADAPTER_BLOB" => config["runtime_adapter_blob"],
+              "PROVIDER_LIVE_HOST_BLOB" => config["trusted_host_blob"]
             )
           elsif executor == "registered_development_psql_verify_v1"
             abort("Registered Development psql gate not executable") unless
@@ -1483,7 +1489,8 @@ jobs:
             --source-sha "$SOURCE_SHA" \
             --project-ref "$PROVIDER_LIVE_REF" \
             --adapter-blob "$PROVIDER_LIVE_ADAPTER_BLOB" \
-            --evidence "$RUNNER_TEMP/classmo-p2-live-evidence.json" --execute
+            --evidence "$RUNNER_TEMP/classmo-p2-live-evidence.json" \
+            --host-blob "$PROVIDER_LIVE_HOST_BLOB" --execute
 
       - name: WAFL G1 · approved Development real-provider adapter
         if: env.PROVIDER_EXECUTOR == 'wafl_g1v1v2_preparation_guard_v1'
@@ -1506,7 +1513,8 @@ jobs:
             --source-sha "$SOURCE_SHA" \
             --project-ref "$PROVIDER_LIVE_REF" \
             --adapter-blob "$PROVIDER_LIVE_ADAPTER_BLOB" \
-            --evidence "$RUNNER_TEMP/wafl-g1-live-evidence.json" --execute
+            --evidence "$RUNNER_TEMP/wafl-g1-live-evidence.json" \
+            --host-blob "$PROVIDER_LIVE_HOST_BLOB" --execute
 
       - name: Prepare predeclared next-stage Owner document PR
         if: success() && env.PROVIDER_EXECUTOR != 'approval_only'

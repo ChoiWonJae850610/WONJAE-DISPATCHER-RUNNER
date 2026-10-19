@@ -139,8 +139,73 @@ def source_preflight(repo: Path, sha: str, ref: str, blob: str) -> str:
                 pass  # Never remove an existing or nonempty product tmp directory.
     return "WAFL_G1_SOURCE_CONTRACT_PASS_LIVE_NOT_RUN"
 
+
+# Existing project-specific LIVE host. Product source must implement this path
+# through an authenticated SANJINWORKS SOURCE_READY task; no generic executor.
+HOST = "scripts/wafl_g1_owner_live_host.mjs"
+
+
+def admit_host(repo: Path, sha: str, host_blob: str) -> Path:
+    """Require the reviewed exact-integrated product LIVE host, not the source CLI."""
+    require(SHA.fullmatch(host_blob) is not None,
+            "WAFL_G1_TRUSTED_HOST_NOT_REGISTERED")
+    host = repo / HOST
+    require(host.is_file() and not host.is_symlink()
+            and host.resolve().is_relative_to(repo.resolve()),
+            "WAFL_G1_TRUSTED_HOST_NOT_INTEGRATED")
+    require(git(repo, "rev-parse", "HEAD") == sha
+            and git(repo, "rev-parse", f"{sha}:{HOST}") == host_blob
+            and git(repo, "hash-object", HOST) == host_blob,
+            "WAFL_G1_TRUSTED_HOST_BLOB_MISMATCH")
+    return host
+
+
+def launch_host(repo: Path, sha: str, ref: str, host: Path,
+                evidence: Path) -> dict:
+    """Run the pinned product LIVE host only in an authenticated Owner job.
+
+    The product host may COLLECT real readbacks. Runner acceptance still
+    requires independent verified evidence; CLI exit 0 is not LIVE PASS.
+    """
+    run_id = os.getenv("GITHUB_RUN_ID", "")
+    require(re.fullmatch(r"[1-9][0-9]{0,19}", run_id) is not None,
+            "WAFL_G1_OWNER_RUN_ID_NOT_REGISTERED")
+    temporary = Path(os.getenv("RUNNER_TEMP", "/unregistered-runner-temp"))
+    require(temporary.is_dir() and not temporary.is_symlink()
+            and evidence.parent.resolve() == temporary.resolve()
+            and evidence.suffix == ".json" and not evidence.is_symlink()
+            and not evidence.exists(), "WAFL_G1_LIVE_RECEIPT_PATH_UNSAFE")
+    # Fixed allowlist: never inherit arbitrary runner secrets, user URLs or
+    # dynamic environment flags into the product. Credential presence alone
+    # is not independent Provider or signer acceptance.
+    allow = ("PATH", "GITHUB_ACTIONS", "GITHUB_RUN_ID",
+             "WONJAE_OWNER_LIVE_APPROVED", "WAFL_SUPABASE_ACCESS_TOKEN")
+    env = {key: os.environ[key] for key in allow if key in os.environ}
+    try:
+        result = subprocess.run(
+            ["node", str(host), "--source-sha", sha,
+             "--project-ref", ref, "--run-id", run_id,
+             "--evidence", str(evidence)],
+            cwd=repo, env=env, check=False, timeout=900,
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        raise Blocked("WAFL_G1_TRUSTED_HOST_EXECUTION_FAILED") from None
+    require(result.returncode == 0 and evidence.is_file()
+            and not evidence.is_symlink() and 0 < evidence.stat().st_size <= 262144,
+            "WAFL_G1_LIVE_RECEIPT_NOT_COLLECTED")
+    try:
+        data = json.loads(evidence.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        raise Blocked("WAFL_G1_LIVE_RECEIPT_INVALID") from None
+    require(isinstance(data, dict) and data.get("source_sha") == sha
+            and data.get("project_ref") == ref
+            and data.get("owner_run_id") == run_id,
+            "WAFL_G1_LIVE_RECEIPT_IDENTITY_MISMATCH")
+    return data
+
 def execute(repo: Path, sha: str, ref: str, blob: str,
-            evidence: Path, approved: bool) -> str:
+            evidence: Path, approved: bool, host_blob: str = "") -> str:
     admit(repo, sha, ref, blob)
     if not approved:
         return "WAFL_G1_ADAPTER_SOURCE_CHECK_ONLY_NOT_LIVE"
@@ -149,10 +214,12 @@ def execute(repo: Path, sha: str, ref: str, blob: str,
             "WAFL_G1_OWNER_NOT_AUTHENTICATED")
     require(bool(os.getenv("WAFL_SUPABASE_ACCESS_TOKEN")),
             "WAFL_G1_DEV_PROVIDER_CONNECTION_NOT_READY")
-    # Source-only CLI has no trusted in-process Apple/Neon host. Never pass a
-    # LIVE-authorized credential context to that CLI or mistake NOT_VERIFIED for
-    # externally observed runtime evidence. A separately reviewed host is needed.
-    raise Blocked("WAFL_G1_TRUSTED_LIVE_HOST_NOT_REGISTERED")
+    host = admit_host(repo, sha, host_blob)
+    data = launch_host(repo, sha, ref, host, evidence)
+    # This remains deliberately fail-closed until independent Apple/Neon
+    # observer evidence has been verified by reviewed trusted Runner code.
+    verify_evidence(data, sha)
+    return "WAFL_G1_LIVE_EVIDENCE_REVIEWED_G1_ACCEPT_SEPARATE"
 
 
 def main() -> int:
@@ -161,6 +228,7 @@ def main() -> int:
     p.add_argument("--source-sha", required=True)
     p.add_argument("--project-ref", required=True)
     p.add_argument("--adapter-blob", required=True)
+    p.add_argument("--host-blob", default="")
     p.add_argument("--evidence", required=True)
     mode = p.add_mutually_exclusive_group()
     mode.add_argument("--execute", action="store_true")
@@ -173,7 +241,8 @@ def main() -> int:
                                       args.adapter_blob)
         else:
             result = execute(repo, args.source_sha, args.project_ref,
-                             args.adapter_blob, Path(args.evidence), args.execute)
+                             args.adapter_blob, Path(args.evidence), args.execute,
+                             args.host_blob)
     except Exception as exc:
         code = str(exc) if isinstance(exc, Blocked) else "WAFL_G1_LIVE_NOT_VERIFIED"
         print("WAFL_G1_LIVE_BLOCKED code=" + code, flush=True)

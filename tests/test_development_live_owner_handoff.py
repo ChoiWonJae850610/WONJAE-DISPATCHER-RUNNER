@@ -208,8 +208,8 @@ def test_source_preflight_rejects_tmp_symlink(tmp_path, monkeypatch, file):
 @pytest.mark.parametrize(
     ("file", "blocked"),
     [
-        ("wafl_g1_live_owner_handoff.py", "TRUSTED_LIVE_HOST_NOT_REGISTERED"),
-        ("classmo_p2_live_owner_handoff.py", "RUNTIME_SIGNATURE_VERIFIER_NOT_REGISTERED"),
+        ("wafl_g1_live_owner_handoff.py", "TRUSTED_HOST_NOT_REGISTERED"),
+        ("classmo_p2_live_owner_handoff.py", "TRUSTED_HOST_NOT_REGISTERED"),
     ],
 )
 def test_live_cannot_invoke_product_cli_without_registered_trust(
@@ -301,3 +301,117 @@ def test_trusted_workflow_runs_non_live_probe_before_guarded_execute():
     assert workflow.count("--source-preflight") == 2
     assert "CLASSMO_P2_OWNER_RUNTIME_NOT_EXECUTABLE" in workflow
     assert "WAFL_G1_OWNER_RUNTIME_NOT_EXECUTABLE" in workflow
+
+
+
+@pytest.mark.parametrize(
+    "file",
+    ["wafl_g1_live_owner_handoff.py", "classmo_p2_live_owner_handoff.py"],
+)
+def test_exact_live_host_blob_must_be_new_trusted_product_source(tmp_path, monkeypatch, file):
+    module = load(file)
+    sha, blob = "a" * 40, "b" * 40
+    with pytest.raises(module.Blocked, match="TRUSTED_HOST_NOT_REGISTERED"):
+        module.admit_host(tmp_path, sha, "")
+    with pytest.raises(module.Blocked, match="TRUSTED_HOST_NOT_INTEGRATED"):
+        module.admit_host(tmp_path, sha, blob)
+    host = tmp_path / module.HOST
+    host.parent.mkdir(parents=True)
+    host.write_text("no provider fixture")
+    monkeypatch.setattr(
+        module, "git",
+        lambda _repo, *args: sha if args[-1] == "HEAD" else blob,
+    )
+    assert module.admit_host(tmp_path, sha, blob) == host
+    with pytest.raises(module.Blocked, match="TRUSTED_HOST_BLOB_MISMATCH"):
+        module.admit_host(tmp_path, sha, "c" * 40)
+    host.unlink()
+    host.symlink_to(tmp_path / "untrusted-product-source")
+    with pytest.raises(module.Blocked, match="TRUSTED_HOST_NOT_INTEGRATED"):
+        module.admit_host(tmp_path, sha, blob)
+
+
+@pytest.mark.parametrize(
+    "file",
+    ["wafl_g1_live_owner_handoff.py", "classmo_p2_live_owner_handoff.py"],
+)
+def test_trusted_host_launch_uses_exact_run_receipt_and_no_other_secrets(
+    tmp_path, monkeypatch, file
+):
+    module = load(file)
+    sha = "a" * 40
+    evidence = tmp_path / "owner-proof.json"
+    host = tmp_path / module.HOST
+    host.parent.mkdir(parents=True)
+    host.touch()
+    monkeypatch.setenv("RUNNER_TEMP", str(tmp_path))
+    monkeypatch.setenv("GITHUB_RUN_ID", "12345")
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    monkeypatch.setenv("WONJAE_OWNER_LIVE_APPROVED", "yes")
+    monkeypatch.setenv("EXTRA_PRODUCT_SECRET_CANARY", "must-not-leak")
+    monkeypatch.setenv("WAFL_SUPABASE_ACCESS_TOKEN", "development-placeholder")
+    monkeypatch.setenv("CLASSMO_SUPABASE_ACCESS_TOKEN", "development-placeholder")
+    monkeypatch.setenv("CLASSMO_G1V_DEV_DB_PASSWORD", "development-placeholder")
+    observed = []
+
+    def fake_run(cmd, **kwargs):
+        observed.append(cmd)
+        assert kwargs["cwd"] == tmp_path
+        assert kwargs["timeout"] == 900
+        assert "EXTRA_PRODUCT_SECRET_CANARY" not in kwargs["env"]
+        assert "WAFL_SUPABASE_ACCESS_TOKEN" not in kwargs["env"] if file.startswith(
+            "classmo"
+        ) else "CLASSMO_SUPABASE_ACCESS_TOKEN" not in kwargs["env"]
+        assert cmd[cmd.index("--source-sha") + 1] == sha
+        assert cmd[cmd.index("--project-ref") + 1] == module.REF
+        assert cmd[cmd.index("--run-id") + 1] == "12345"
+        assert cmd[cmd.index("--evidence") + 1] == str(evidence)
+        evidence.write_text(json.dumps({
+            "source_sha": sha, "project_ref": module.REF,
+            "owner_run_id": "12345", "status": "COLLECTED_REQUIRES_INDEPENDENT_REVIEW",
+        }))
+        return SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(module.subprocess, "run", fake_run)
+    receipt = module.launch_host(tmp_path, sha, module.REF, host, evidence)
+    assert receipt["status"] == "COLLECTED_REQUIRES_INDEPENDENT_REVIEW"
+    assert len(observed) == 1
+    with pytest.raises(module.Blocked, match="LIVE_RECEIPT_PATH_UNSAFE"):
+        module.launch_host(tmp_path, sha, module.REF, host, evidence)
+
+
+@pytest.mark.parametrize(
+    "file",
+    ["wafl_g1_live_owner_handoff.py", "classmo_p2_live_owner_handoff.py"],
+)
+def test_registered_host_does_not_make_product_collected_result_live_pass(
+    tmp_path, monkeypatch, file
+):
+    module = load(file)
+    sha, blob = "a" * 40, "b" * 40
+    monkeypatch.setattr(module, "admit", lambda *_: tmp_path / "source-only")
+    monkeypatch.setattr(module, "admit_host", lambda *_: tmp_path / "trusted-live-host")
+    monkeypatch.setattr(
+        module, "launch_host",
+        lambda *_: {"source_sha": sha, "project_ref": module.REF,
+                    "owner_run_id": "12345",
+                    "status": "COLLECTED_REQUIRES_INDEPENDENT_REVIEW"},
+    )
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    monkeypatch.setenv("WONJAE_OWNER_LIVE_APPROVED", "yes")
+    monkeypatch.setenv("WAFL_SUPABASE_ACCESS_TOKEN", "offline-only")
+    monkeypatch.setenv("CLASSMO_SUPABASE_ACCESS_TOKEN", "offline-only")
+    monkeypatch.setenv("CLASSMO_G1V_DEV_DB_PASSWORD", "offline-only")
+    with pytest.raises(module.Blocked, match="LIVE_RECEIPT_UNVERIFIED"):
+        module.execute(tmp_path, sha, module.REF, blob, tmp_path / "evidence.json",
+                       approved=True, host_blob=blob)
+
+
+def test_existing_provider_gate_requires_new_host_blob_only_for_future_live_mode():
+    source = (ROOT / ".github/workflows/provider-gate-approval-core.yml").read_text()
+    assert source.count("trusted_host_blob") == 8
+    assert source.count('"PROVIDER_LIVE_HOST_BLOB" =>') == 2
+    assert source.count('--host-blob "$PROVIDER_LIVE_HOST_BLOB" --execute') == 2
+    assert source.count('if config["ready_for_owner"] == false') >= 2
+    assert 'abort("CLASSMO_P2_OWNER_RUNTIME_NOT_EXECUTABLE")' in source
+    assert 'abort("WAFL_G1_OWNER_RUNTIME_NOT_EXECUTABLE")' in source
