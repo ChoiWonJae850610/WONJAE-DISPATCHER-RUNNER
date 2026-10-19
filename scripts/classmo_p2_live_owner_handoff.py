@@ -8,6 +8,7 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 from classmo_editorial_027_p2_live_guard import verify_source
@@ -125,9 +126,67 @@ def verify_evidence(data: object, sha: str) -> None:
     require_registered_runtime_signature(data)
 
 
+
+def source_preflight(repo: Path, sha: str, ref: str, blob: str) -> str:
+    """Run the pinned CLASSMO SOURCE CLI without credentials or LIVE authority."""
+    adapter = admit(repo, sha, ref, blob)
+    parent = repo / "tmp"
+    created_parent = not parent.exists()
+    if created_parent:
+        parent.mkdir(mode=0o700)
+    require(parent.is_dir() and not parent.is_symlink()
+            and parent.resolve().is_relative_to(repo.resolve()),
+            "CLASSMO_P2_SOURCE_PROBE_PATH_UNSAFE")
+    try:
+        with tempfile.TemporaryDirectory(prefix=".p2-source-", dir=parent) as folder:
+            relative = f"tmp/{Path(folder).name}/source.json"
+            receipt = Path(folder) / "source.json"
+            try:
+                result = subprocess.run(
+                    [sys.executable, str(adapter), "--source-sha", sha, "--project-ref", ref,
+                     "--evidence", relative],
+                    cwd=repo,
+                    env={"PATH": os.environ.get("PATH", ""),
+                         "PYTHONDONTWRITEBYTECODE": "1"},
+                    check=False, timeout=60,
+                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                )
+            except (OSError, subprocess.TimeoutExpired):
+                raise Blocked("CLASSMO_P2_SOURCE_PROBE_FAILED") from None
+            require(result.returncode == 0 and receipt.is_file()
+                    and not receipt.is_symlink() and receipt.stat().st_size <= 262144,
+                    "CLASSMO_P2_SOURCE_PROBE_FAILED")
+            try:
+                data = json.loads(receipt.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                raise Blocked("CLASSMO_P2_SOURCE_PROBE_INVALID") from None
+            handoff = data.get("runtime_handoff") if isinstance(data, dict) else None
+            require(data.get("schema_version") == 1
+                    and data.get("source_sha") == sha
+                    and data.get("project_ref") == ref
+                    and data.get("status") == "SOURCE_ONLY_NOT_RUNTIME_ACCEPTANCE"
+                    and data.get("source_completion") == "INCOMPLETE"
+                    and data.get("executable_live_adapter") is False
+                    and data.get("owner_gate")
+                    == "REGISTERED_DEVELOPMENT_RUNTIME_HANDOFF_REQUIRED"
+                    and isinstance(data.get("phases"), dict)
+                    and all(value == "NOT_RUN" for value in data["phases"].values())
+                    and isinstance(handoff, dict)
+                    and handoff.get("interface") == "CLASSMO_P2_RUNTIME_HANDOFF_V1"
+                    and handoff.get("status") == "NOT_VERIFIED"
+                    and handoff.get("live_admission_available") is False,
+                    "CLASSMO_P2_SOURCE_RECEIPT_NOT_FAIL_CLOSED")
+    finally:
+        if created_parent:
+            try:
+                parent.rmdir()
+            except OSError:
+                pass  # Keep any preexisting product tmp state.
+    return "CLASSMO_P2_SOURCE_CONTRACT_PASS_LIVE_NOT_RUN"
+
 def execute(repo: Path, sha: str, ref: str, blob: str,
             evidence: Path, approved: bool) -> str:
-    adapter = admit(repo, sha, ref, blob)
+    admit(repo, sha, ref, blob)
     if not approved:
         return "CLASSMO_P2_ADAPTER_SOURCE_CHECK_ONLY_NOT_LIVE"
     require(os.getenv("GITHUB_ACTIONS") == "true"
@@ -136,25 +195,10 @@ def execute(repo: Path, sha: str, ref: str, blob: str,
     require(bool(os.getenv("CLASSMO_SUPABASE_ACCESS_TOKEN"))
             and bool(os.getenv("CLASSMO_G1V_DEV_DB_PASSWORD")),
             "CLASSMO_P2_DEV_PROVIDER_CONNECTION_NOT_READY")
-    require(not evidence.exists(), "CLASSMO_P2_RECEIPT_ALREADY_EXISTS")
-    try:
-        result = subprocess.run(
-            [sys.executable, str(adapter), "--source-sha", sha,
-             "--project-ref", ref, "--evidence", str(evidence)],
-            cwd=repo, check=False, timeout=900,
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-        )
-    except (OSError, subprocess.TimeoutExpired):
-        raise Blocked("CLASSMO_P2_LIVE_ADAPTER_EXECUTION_FAILED") from None
-    require(result.returncode == 0 and evidence.is_file()
-            and not evidence.is_symlink() and evidence.stat().st_size <= 262144,
-            "CLASSMO_P2_LIVE_RECEIPT_MISSING")
-    try:
-        value = json.loads(evidence.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        raise Blocked("CLASSMO_P2_LIVE_RECEIPT_INVALID") from None
-    verify_evidence(value, sha)
-    return "CLASSMO_P2_LIVE_EVIDENCE_PRESENT_DEVICE_QA_NOT_RUN"
+    # A self-issued SOURCE JSON cannot supply deployed Edge/WASM identity,
+    # server-only license, independently registered signer trust root or
+    # authenticated DB/Auth proof. Stop BEFORE launching product code.
+    raise Blocked("CLASSMO_P2_RUNTIME_SIGNATURE_VERIFIER_NOT_REGISTERED")
 
 
 def main() -> int:
@@ -164,12 +208,18 @@ def main() -> int:
     p.add_argument("--project-ref", required=True)
     p.add_argument("--adapter-blob", required=True)
     p.add_argument("--evidence", required=True)
-    p.add_argument("--execute", action="store_true")
+    mode = p.add_mutually_exclusive_group()
+    mode.add_argument("--execute", action="store_true")
+    mode.add_argument("--source-preflight", action="store_true")
     args = p.parse_args()
     try:
-        result = execute(Path(args.repo).resolve(), args.source_sha,
-                         args.project_ref, args.adapter_blob,
-                         Path(args.evidence), args.execute)
+        repo = Path(args.repo).resolve()
+        if args.source_preflight:
+            result = source_preflight(repo, args.source_sha, args.project_ref,
+                                      args.adapter_blob)
+        else:
+            result = execute(repo, args.source_sha, args.project_ref,
+                             args.adapter_blob, Path(args.evidence), args.execute)
     except Exception as exc:
         code = str(exc) if isinstance(exc, Blocked) else "CLASSMO_P2_LIVE_NOT_VERIFIED"
         print("CLASSMO_P2_LIVE_BLOCKED code=" + code, flush=True)
