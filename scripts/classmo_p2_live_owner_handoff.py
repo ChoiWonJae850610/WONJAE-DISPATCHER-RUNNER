@@ -233,7 +233,8 @@ def launch_host(repo: Path, sha: str, ref: str, host: Path,
     # dynamic environment flags into the product. Credential presence alone
     # is not independent Provider or signer acceptance.
     allow = ("PATH", "GITHUB_ACTIONS", "GITHUB_RUN_ID",
-             "WONJAE_OWNER_LIVE_APPROVED", "CLASSMO_SUPABASE_ACCESS_TOKEN", "CLASSMO_G1V_DEV_DB_PASSWORD", "CLASSMO_G1V_DEV_DB_CA_PEM")
+             "WONJAE_OWNER_LIVE_APPROVED", "CLASSMO_SUPABASE_ACCESS_TOKEN",
+             "CLASSMO_G1V_DEV_DB_PASSWORD", "CLASSMO_G1V_DEV_DB_CA_PEM")
     env = {key: os.environ[key] for key in allow if key in os.environ}
     try:
         result = subprocess.run(
