@@ -183,7 +183,7 @@ def launch_host(repo: Path, sha: str, ref: str, host: Path,
     env = {key: os.environ[key] for key in allow if key in os.environ}
     try:
         result = subprocess.run(
-            [node, str(host), "--source-sha", sha,
+            ["node", str(host), "--source-sha", sha,
              "--project-ref", ref, "--run-id", run_id,
              "--evidence", str(evidence)],
             cwd=repo, env=env, check=False, timeout=900,
