@@ -161,7 +161,8 @@ def source_preflight(repo: Path, sha: str, ref: str, blob: str) -> str:
             except (OSError, ValueError):
                 raise Blocked("CLASSMO_P2_SOURCE_PROBE_INVALID") from None
             handoff = data.get("runtime_handoff") if isinstance(data, dict) else None
-            require(data.get("schema_version") == 1
+            require(isinstance(data, dict)
+                    and data.get("schema_version") == 1
                     and data.get("source_sha") == sha
                     and data.get("project_ref") == ref
                     and data.get("status") == "SOURCE_ONLY_NOT_RUNTIME_ACCEPTANCE"
@@ -170,9 +171,17 @@ def source_preflight(repo: Path, sha: str, ref: str, blob: str) -> str:
                     and data.get("owner_gate")
                     == "REGISTERED_DEVELOPMENT_RUNTIME_HANDOFF_REQUIRED"
                     and isinstance(data.get("phases"), dict)
+                    and set(data["phases"]) == {
+                        "admission", "auth", "runtime_asset", "images", "http_matrix",
+                        "db_commit_race", "db_rollback_race", "cleanup"
+                    }
                     and all(value == "NOT_RUN" for value in data["phases"].values())
                     and isinstance(handoff, dict)
                     and handoff.get("interface") == "CLASSMO_P2_RUNTIME_HANDOFF_V1"
+                    and handoff.get("source_sha") == sha
+                    and handoff.get("project_ref") == ref
+                    and handoff.get("plan_blob")
+                    == "2aebbaf9dfa2699c60d14e3e614927d6653103c1"
                     and handoff.get("status") == "NOT_VERIFIED"
                     and handoff.get("live_admission_available") is False,
                     "CLASSMO_P2_SOURCE_RECEIPT_NOT_FAIL_CLOSED")
