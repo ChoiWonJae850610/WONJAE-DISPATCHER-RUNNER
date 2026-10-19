@@ -284,3 +284,20 @@ def test_source_probe_is_explicit_cli_mode_only(monkeypatch, capsys, tmp_path, f
     )
     assert module.main() == 0
     assert "OFFLINE_SOURCE_CONTRACT_ONLY_LIVE_NOT_RUN" in capsys.readouterr().out
+
+
+def test_trusted_workflow_runs_non_live_probe_before_guarded_execute():
+    workflow = (ROOT / ".github/workflows/provider-gate-approval-core.yml").read_text()
+    for script in (
+        "classmo_p2_live_owner_handoff.py",
+        "wafl_g1_live_owner_handoff.py",
+    ):
+        prefix = "python scripts/" + script
+        assert workflow.count(prefix) == 2
+        first = workflow.index(prefix)
+        second = workflow.index(prefix, first + 1)
+        assert "--source-preflight" in workflow[first:second]
+        assert "--execute" in workflow[second:second + 400]
+    assert workflow.count("--source-preflight") == 2
+    assert "CLASSMO_P2_OWNER_RUNTIME_NOT_EXECUTABLE" in workflow
+    assert "WAFL_G1_OWNER_RUNTIME_NOT_EXECUTABLE" in workflow
