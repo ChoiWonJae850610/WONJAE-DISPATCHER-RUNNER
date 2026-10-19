@@ -83,6 +83,9 @@ def verify_evidence(data: object, sha: str) -> None:
             and phases["domain_parity"].get("fingerprints_equal") is True
             and phases["cleanup"].get("independent_zero_residue") is True,
             "WAFL_G1_NEON_PARITY_CLEANUP_UNVERIFIED")
+    # A product-generated JSON cannot attest its own independent observer.
+    # All-green fields alone never constitute native Apple/Neon LIVE proof.
+    raise Blocked("WAFL_G1_INDEPENDENT_READBACK_VERIFIER_NOT_REGISTERED")
 
 
 
