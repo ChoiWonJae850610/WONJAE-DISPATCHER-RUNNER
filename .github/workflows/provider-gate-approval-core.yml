@@ -1470,6 +1470,14 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          # SOURCE contract is a disposable, credential-scrubbed probe only.
+          # Successful preflight never upgrades the following LIVE guard.
+          python scripts/classmo_p2_live_owner_handoff.py \
+            --repo "$GITHUB_WORKSPACE/.approval/product" \
+            --source-sha "$SOURCE_SHA" \
+            --project-ref "$PROVIDER_LIVE_REF" \
+            --adapter-blob "$PROVIDER_LIVE_ADAPTER_BLOB" \
+            --evidence "$RUNNER_TEMP/classmo-p2-live-evidence.json" --source-preflight
           python scripts/classmo_p2_live_owner_handoff.py \
             --repo "$GITHUB_WORKSPACE/.approval/product" \
             --source-sha "$SOURCE_SHA" \
@@ -1485,6 +1493,14 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          # SOURCE contract is a disposable, credential-scrubbed probe only.
+          # Successful preflight never upgrades the following LIVE guard.
+          python scripts/wafl_g1_live_owner_handoff.py \
+            --repo "$GITHUB_WORKSPACE/.approval/product" \
+            --source-sha "$SOURCE_SHA" \
+            --project-ref "$PROVIDER_LIVE_REF" \
+            --adapter-blob "$PROVIDER_LIVE_ADAPTER_BLOB" \
+            --evidence "$RUNNER_TEMP/wafl-g1-live-evidence.json" --source-preflight
           python scripts/wafl_g1_live_owner_handoff.py \
             --repo "$GITHUB_WORKSPACE/.approval/product" \
             --source-sha "$SOURCE_SHA" \
