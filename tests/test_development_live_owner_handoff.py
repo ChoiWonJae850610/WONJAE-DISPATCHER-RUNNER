@@ -4,8 +4,8 @@ from __future__ import annotations
 import importlib.util
 import json
 import sys
-from types import SimpleNamespace
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -113,12 +113,13 @@ def source_only_fixture(file: str, sha: str, ref: str) -> dict:
         "status": "SOURCE_ONLY_NOT_RUNTIME_ACCEPTANCE",
         "source_completion": "INCOMPLETE", "executable_live_adapter": False,
         "owner_gate": "REGISTERED_DEVELOPMENT_RUNTIME_HANDOFF_REQUIRED",
-        "phases": {
-            name: "NOT_RUN" for name in (
+        "phases": dict.fromkeys(
+            (
                 "admission", "auth", "runtime_asset", "images", "http_matrix",
-                "db_commit_race", "db_rollback_race", "cleanup"
-            )
-        },
+                "db_commit_race", "db_rollback_race", "cleanup",
+            ),
+            "NOT_RUN",
+        ),
         "runtime_handoff": {
             "interface": "CLASSMO_P2_RUNTIME_HANDOFF_V1", "source_sha": sha,
             "project_ref": ref, "plan_blob": "2aebbaf9dfa2699c60d14e3e614927d6653103c1",
