@@ -83,3 +83,17 @@ def test_classmo_registered_source_contract_is_non_live_and_pinned():
             "signature": "PASS",
             "runtime": "1.76.2",
         })
+
+
+def test_dormant_live_registration_pins_source_without_enabling_provider():
+    workflow = (ROOT / ".github/workflows/provider-gate-approval-core.yml").read_text()
+    assert workflow.count("source_adapter_blob") == 4
+    assert workflow.count('config["source_adapter_blob"]') == 2
+    assert workflow.count('pinned_path = expected.fetch("runtime_adapter_path")') == 2
+    assert workflow.count('"rev-parse", "--verify"') == 2
+    assert workflow.count("source pin mismatch") == 2
+    assert 'config["ready_for_owner"] == false' in workflow
+    assert 'abort("CLASSMO_P2_OWNER_RUNTIME_NOT_EXECUTABLE")' in workflow
+    assert 'abort("WAFL_G1_OWNER_RUNTIME_NOT_EXECUTABLE")' in workflow
+    # Live is still a separate registration, requiring a different reviewed blob.
+    assert 'config["runtime_adapter_blob"].match?' in workflow
