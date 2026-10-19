@@ -7,6 +7,7 @@ import json
 import os
 import re
 import subprocess
+import tempfile
 from pathlib import Path
 
 from wafl_g1v1v2_preparation_guard import verify_source
@@ -84,9 +85,60 @@ def verify_evidence(data: object, sha: str) -> None:
             "WAFL_G1_NEON_PARITY_CLEANUP_UNVERIFIED")
 
 
+
+def source_preflight(repo: Path, sha: str, ref: str, blob: str) -> str:
+    """Exercise only the pinned SOURCE CLI in a disposable product tmp/ directory.
+
+    WAFL's CLI rejects absolute evidence paths. No credential or Owner approval
+    flag is forwarded to the child, and no source receipt can become LIVE PASS.
+    """
+    adapter = admit(repo, sha, ref, blob)
+    parent = repo / "tmp"
+    created_parent = not parent.exists()
+    if created_parent:
+        parent.mkdir(mode=0o700)
+    require(parent.is_dir() and not parent.is_symlink()
+            and parent.resolve().is_relative_to(repo.resolve()),
+            "WAFL_G1_SOURCE_PROBE_PATH_UNSAFE")
+    try:
+        with tempfile.TemporaryDirectory(prefix=".g1-source-", dir=parent) as folder:
+            relative = f"tmp/{Path(folder).name}/source.json"
+            receipt = Path(folder) / "source.json"
+            try:
+                result = subprocess.run(
+                    ["node", str(adapter), "--source-sha", sha, "--project-ref", ref,
+                     "--evidence", relative],
+                    cwd=repo, env={"PATH": os.environ.get("PATH", ""), "NODE_ENV": "test"},
+                    check=False, timeout=60,
+                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                )
+            except (OSError, subprocess.TimeoutExpired):
+                raise Blocked("WAFL_G1_SOURCE_PROBE_FAILED") from None
+            require(result.returncode == 0 and receipt.is_file()
+                    and not receipt.is_symlink() and receipt.stat().st_size <= 4096,
+                    "WAFL_G1_SOURCE_PROBE_FAILED")
+            try:
+                data = json.loads(receipt.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                raise Blocked("WAFL_G1_SOURCE_PROBE_INVALID") from None
+            require(data == {
+                "sourceSha": sha,
+                "projectRef": ref,
+                "runtime": "NOT_VERIFIED",
+                "neon": "NOT_VERIFIED",
+                "G1_ACCEPT": False,
+            }, "WAFL_G1_SOURCE_RECEIPT_NOT_FAIL_CLOSED")
+    finally:
+        if created_parent:
+            try:
+                parent.rmdir()
+            except OSError:
+                pass  # Never remove an existing or nonempty product tmp directory.
+    return "WAFL_G1_SOURCE_CONTRACT_PASS_LIVE_NOT_RUN"
+
 def execute(repo: Path, sha: str, ref: str, blob: str,
             evidence: Path, approved: bool) -> str:
-    adapter = admit(repo, sha, ref, blob)
+    admit(repo, sha, ref, blob)
     if not approved:
         return "WAFL_G1_ADAPTER_SOURCE_CHECK_ONLY_NOT_LIVE"
     require(os.getenv("GITHUB_ACTIONS") == "true"
@@ -94,27 +146,10 @@ def execute(repo: Path, sha: str, ref: str, blob: str,
             "WAFL_G1_OWNER_NOT_AUTHENTICATED")
     require(bool(os.getenv("WAFL_SUPABASE_ACCESS_TOKEN")),
             "WAFL_G1_DEV_PROVIDER_CONNECTION_NOT_READY")
-    # Real Apple sessions and Neon DB read-only authorization must be supplied
-    # independently to the product adapter, not invented by the Runner.
-    require(not evidence.exists(), "WAFL_G1_RECEIPT_ALREADY_EXISTS")
-    try:
-        result = subprocess.run(
-            ["node", str(adapter), "--source-sha", sha,
-             "--project-ref", ref, "--evidence", str(evidence)],
-            cwd=repo, check=False, timeout=900,
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-        )
-    except (OSError, subprocess.TimeoutExpired):
-        raise Blocked("WAFL_G1_LIVE_ADAPTER_EXECUTION_FAILED") from None
-    require(result.returncode == 0 and evidence.is_file()
-            and not evidence.is_symlink() and evidence.stat().st_size <= 262144,
-            "WAFL_G1_LIVE_RECEIPT_MISSING")
-    try:
-        value = json.loads(evidence.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        raise Blocked("WAFL_G1_LIVE_RECEIPT_INVALID") from None
-    verify_evidence(value, sha)
-    return "WAFL_G1_LIVE_EVIDENCE_PRESENT_G1_ACCEPT_REQUIRES_REVIEW"
+    # Source-only CLI has no trusted in-process Apple/Neon host. Never pass a
+    # LIVE-authorized credential context to that CLI or mistake NOT_VERIFIED for
+    # externally observed runtime evidence. A separately reviewed host is needed.
+    raise Blocked("WAFL_G1_TRUSTED_LIVE_HOST_NOT_REGISTERED")
 
 
 def main() -> int:
@@ -124,12 +159,18 @@ def main() -> int:
     p.add_argument("--project-ref", required=True)
     p.add_argument("--adapter-blob", required=True)
     p.add_argument("--evidence", required=True)
-    p.add_argument("--execute", action="store_true")
+    mode = p.add_mutually_exclusive_group()
+    mode.add_argument("--execute", action="store_true")
+    mode.add_argument("--source-preflight", action="store_true")
     args = p.parse_args()
     try:
-        result = execute(Path(args.repo).resolve(), args.source_sha,
-                         args.project_ref, args.adapter_blob,
-                         Path(args.evidence), args.execute)
+        repo = Path(args.repo).resolve()
+        if args.source_preflight:
+            result = source_preflight(repo, args.source_sha, args.project_ref,
+                                      args.adapter_blob)
+        else:
+            result = execute(repo, args.source_sha, args.project_ref,
+                             args.adapter_blob, Path(args.evidence), args.execute)
     except Exception as exc:
         code = str(exc) if isinstance(exc, Blocked) else "WAFL_G1_LIVE_NOT_VERIFIED"
         print("WAFL_G1_LIVE_BLOCKED code=" + code, flush=True)
