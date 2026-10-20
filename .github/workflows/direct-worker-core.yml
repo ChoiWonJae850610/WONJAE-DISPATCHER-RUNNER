@@ -221,12 +221,42 @@ jobs:
             # A failed canonical PR-head CI is authoritative even if local subsets PASS.
             # Never silently proceed with an absent/truncated failure log.
             failure_log="$DW_JOB_ROOT/direct-worker-validation-failure.log"
-            if ! gh run view "$run_id" --repo "$PRODUCT_REPOSITORY" --log-failed > "$failure_log" 2>&1; then
+            umask 077
+            # GitHub CLI can return success and an empty --log-failed stream for
+            # a genuinely failed Windows job. Verify actual failed job identity,
+            # then fetch that specific job log, not a different run or base SHA.
+            if ! gh run view "$run_id" --repo "$PRODUCT_REPOSITORY" --log-failed > "$failure_log" 2>/dev/null; then
+              : > "$failure_log"
+            fi
+            if [ ! -s "$failure_log" ]; then
+              if ! jobs="$(gh api "repos/$PRODUCT_REPOSITORY/actions/runs/$run_id/jobs?filter=latest&per_page=100")"; then
+                echo "::error::RETRY_VALIDATION_JOB_INVENTORY_UNAVAILABLE run=$run_id"
+                exit 1
+              fi
+              if ! job_id="$(printf '%s' "$jobs" | PYTHONPATH="$DW_RUNNER/src" \
+                python -m wonjae_dispatcher_runner.retry_validation_evidence \
+                  --failed-job-run-id "$run_id")"; then
+                echo "::error::RETRY_VALIDATION_FAILED_JOB_UNVERIFIED run=$run_id"
+                exit 1
+              fi
+              if ! gh api -H "Accept: application/vnd.github+json" \
+                "repos/$PRODUCT_REPOSITORY/actions/jobs/$job_id/logs" > "$failure_log" 2>/dev/null; then
+                : > "$failure_log"
+              fi
+              if [ ! -s "$failure_log" ]; then
+                if ! gh run view "$run_id" --repo "$PRODUCT_REPOSITORY" \
+                  --job "$job_id" --log > "$failure_log" 2>/dev/null; then
+                  : > "$failure_log"
+                fi
+              fi
+            fi
+            if [ ! -s "$failure_log" ]; then
               echo "::error::RETRY_VALIDATION_LOG_UNAVAILABLE run=$run_id"
               exit 1
             fi
-            if [ ! -s "$failure_log" ]; then
-              echo "::error::RETRY_VALIDATION_LOG_EMPTY run=$run_id"
+            bytes="$(wc -c < "$failure_log")"
+            if [ "$bytes" -gt 2000000 ]; then
+              echo "::error::RETRY_VALIDATION_LOG_UNBOUNDED run=$run_id"
               exit 1
             fi
             echo "FAILURE_LOG=$failure_log" >> "$GITHUB_ENV"

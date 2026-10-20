@@ -92,23 +92,80 @@ def classify_retry_pr_head(
     return "BLOCKED", latest["id"]
 
 
+def exact_failed_job_id(payload: object, *, run_id: int) -> int:
+    """Select the one started/failed job of an already verified exact failed run.
+
+    A job log may only be read from this run. Multiple failures, pagination or
+    malformed responses are ambiguous and intentionally stop the source retry.
+    """
+    if type(run_id) is not int or run_id <= 0 or not isinstance(payload, dict):
+        raise RetryEvidenceError("invalid failed-run job identity")
+    rows, total = payload.get("jobs"), payload.get("total_count")
+    if (
+        not isinstance(rows, list)
+        or type(total) is not int
+        or total < 1
+        or total > 100
+        or len(rows) != total
+    ):
+        raise RetryEvidenceError("incomplete exact failed-run job inventory")
+
+    ids: set[int] = set()
+    failed: list[int] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            raise RetryEvidenceError("invalid job result")
+        job_id, actual_run_id = row.get("id"), row.get("run_id")
+        if (
+            type(job_id) is not int
+            or job_id <= 0
+            or job_id in ids
+            or actual_run_id != run_id
+            or type(actual_run_id) is not int
+        ):
+            raise RetryEvidenceError("failed job run identity mismatch")
+        ids.add(job_id)
+        if row.get("status") == "completed" and row.get("conclusion") == "failure":
+            steps = row.get("steps")
+            runner_id = row.get("runner_id")
+            if (
+                type(runner_id) is not int
+                or runner_id <= 0
+                or not isinstance(steps, list)
+                or not any(isinstance(x, dict) and x.get("conclusion") == "failure"
+                           for x in steps)
+            ):
+                raise RetryEvidenceError("failed job has no started failed step")
+            failed.append(job_id)
+    if len(failed) != 1:
+        raise RetryEvidenceError("exact failed job is missing or ambiguous")
+    return failed[0]
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--source-sha", required=True)
-    parser.add_argument("--repository", required=True)
-    parser.add_argument("--workflow-file", required=True)
+    parser.add_argument("--source-sha")
+    parser.add_argument("--repository")
+    parser.add_argument("--workflow-file")
+    parser.add_argument("--failed-job-run-id", type=int)
     args = parser.parse_args(argv)
     try:
-        status, run_id = classify_retry_pr_head(
-            json.load(sys.stdin),
-            source_sha=args.source_sha,
-            repository=args.repository,
-            workflow_file=args.workflow_file,
-        )
+        payload = json.load(sys.stdin)
+        if args.failed_job_run_id is not None:
+            if any((args.source_sha, args.repository, args.workflow_file)):
+                raise RetryEvidenceError("ambiguous retry evidence CLI mode")
+            print(exact_failed_job_id(payload, run_id=args.failed_job_run_id))
+        else:
+            if not all((args.source_sha, args.repository, args.workflow_file)):
+                raise RetryEvidenceError("missing exact source identity")
+            status, run_id = classify_retry_pr_head(
+                payload, source_sha=args.source_sha,
+                repository=args.repository, workflow_file=args.workflow_file,
+            )
+            print(f"{status} {run_id}")
     except (RetryEvidenceError, ValueError, TypeError, json.JSONDecodeError):
         print("RETRY_VALIDATION_EVIDENCE_INVALID", file=sys.stderr)
         return 2
-    print(f"{status} {run_id}")
     return 0
 
 
