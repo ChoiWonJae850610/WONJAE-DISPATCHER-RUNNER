@@ -14,6 +14,7 @@ from wonjae_dispatcher_runner.execution_state import ExecutionAction, ProductExe
 from wonjae_dispatcher_runner.retry_validation_evidence import (
     RetryEvidenceError,
     classify_retry_pr_head,
+    exact_failed_job_id,
     main,
 )
 
@@ -161,3 +162,76 @@ def test_retry_prompt_explicitly_includes_canonical_failure_not_only_local_smoke
     assert "returning NO_WORK while that CI is unresolved" in prompt
     assert "Immutable source: tests/old-contract.mjs" in prompt
     assert "do not change or re-advance it" in prompt.lower()
+
+
+def failed_job(id=501, run_id=101, **override):
+    return {
+        "id": id,
+        "run_id": run_id,
+        "status": "completed",
+        "conclusion": "failure",
+        "runner_id": 17,
+        "steps": [{"conclusion": "failure", "name": "Focused source contracts"}],
+        **override,
+    }
+
+
+def test_exact_failed_job_fallback_accepts_one_started_failed_job_only():
+    skipped = [
+        {"id": i, "run_id": 101, "status": "completed",
+         "conclusion": "skipped", "runner_id": 0, "steps": []}
+        for i in (502, 503, 504)
+    ]
+    evidence = {"total_count": 4, "jobs": [*skipped, failed_job()]}
+    assert exact_failed_job_id(evidence, run_id=101) == 501
+
+
+@pytest.mark.parametrize("case", [
+    {"jobs": [failed_job(run_id=102)], "total_count": 1},
+    {"jobs": [failed_job(id=0)], "total_count": 1},
+    {"jobs": [failed_job(id=True)], "total_count": 1},
+    {"jobs": [failed_job(), failed_job()], "total_count": 2},
+    {"jobs": [failed_job(), failed_job(id=505)], "total_count": 2},
+    {"jobs": [failed_job(steps=[])], "total_count": 1},
+    {"jobs": [failed_job(runner_id=0)], "total_count": 1},
+    {"jobs": [failed_job(status="queued", conclusion=None)], "total_count": 1},
+    {"jobs": [failed_job()], "total_count": 2},
+    {"jobs": [], "total_count": 0},
+    {"jobs": [failed_job()], "total_count": 101},
+])
+def test_failed_job_fallback_rejects_drift_ambiguity_and_partial_inventory(case):
+    with pytest.raises(RetryEvidenceError):
+        exact_failed_job_id(case, run_id=101)
+
+
+def test_failed_job_cli_emits_id_only_and_rejects_malformed_identity(monkeypatch, capsys):
+    payload = {"total_count": 1, "jobs": [failed_job()]}
+    monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps(payload)))
+    assert main(["--failed-job-run-id", "101"]) == 0
+    captured = capsys.readouterr()
+    assert captured.out == "501\n"
+    assert captured.err == ""
+
+    monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps(payload)))
+    assert main(["--failed-job-run-id", "999"]) == 2
+    captured = capsys.readouterr()
+    assert "RETRY_VALIDATION_EVIDENCE_INVALID" in captured.err
+    assert "501" not in captured.err
+
+
+def test_workflow_reads_exact_failed_job_log_if_run_log_is_empty():
+    source = Path(".github/workflows/direct-worker-core.yml").read_text()
+    evidence = source.split("      - name: Collect retry validation evidence", 1)[1].split(
+        "      - name: Set up source Node toolchain", 1
+    )[0]
+    assert 'if [ ! -s "$failure_log" ]; then' in evidence
+    assert "actions/runs/$run_id/jobs?filter=latest&per_page=100" in evidence
+    assert '--failed-job-run-id "$run_id"' in evidence
+    assert "actions/jobs/$job_id/logs" in evidence
+    assert '--job "$job_id" --log' in evidence
+    assert 'bytes="$(wc -c < "$failure_log")"' in evidence
+    assert '"$bytes" -gt 2000000' in evidence
+    assert "RETRY_VALIDATION_LOG_UNAVAILABLE" in evidence
+    assert 'echo "FAILURE_LOG=$failure_log" >> "$GITHUB_ENV"' in evidence
+    assert "|| true" not in evidence
+    assert "gh pr merge" not in evidence
