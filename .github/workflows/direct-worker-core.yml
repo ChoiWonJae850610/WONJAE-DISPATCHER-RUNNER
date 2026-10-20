@@ -201,16 +201,37 @@ jobs:
         working-directory: ${{ env.DW_RUNNER }}
         run: |
           set -euo pipefail
-          failure_log="$DW_JOB_ROOT/direct-worker-validation-failure.log"
-          run_id="$(gh api \
-            "repos/$PRODUCT_REPOSITORY/actions/workflows/$VALIDATION_WORKFLOW_FILE/runs?head_sha=$START_HEAD&event=pull_request&per_page=20" \
-            --jq '.workflow_runs | map(select(.status == "completed" and .conclusion != "success")) | sort_by(.created_at) | last | .id // empty')"
-          if [ -n "$run_id" ]; then
-            gh run view "$run_id" --repo "$PRODUCT_REPOSITORY" --log-failed > "$failure_log" 2>&1 || true
+          # Read only the registered canonical PR-head workflow at this exact existing
+          # source-PR SHA. A past failure cannot override a newer exact CI PASS.
+          inventory="$(gh api \
+            "repos/$PRODUCT_REPOSITORY/actions/workflows/$VALIDATION_WORKFLOW_FILE/runs?head_sha=$START_HEAD&event=pull_request&per_page=20")"
+          selection="$(printf '%s' "$inventory" | PYTHONPATH="$DW_RUNNER/src" \
+            python -m wonjae_dispatcher_runner.retry_validation_evidence \
+              --source-sha "$START_HEAD" \
+              --repository "$PRODUCT_REPOSITORY" \
+              --workflow-file "$VALIDATION_WORKFLOW_FILE")"
+          read -r state run_id <<< "$selection"
+          echo "RETRY_VALIDATION_STATE=$state" >> "$GITHUB_ENV"
+          echo "RETRY_VALIDATION_RUN_ID=$run_id" >> "$GITHUB_ENV"
+          if [ "$state" = "BLOCKED" ]; then
+            echo "::error::RETRY_VALIDATION_NOT_REPAIRABLE run=$run_id head=$START_HEAD; latest exact CI is not a completed source failure."
+            exit 1
           fi
-          : > /dev/null
-          echo "FAILURE_LOG=$failure_log" >> "$GITHUB_ENV"
-
+          if [ "$state" = "FAILED" ]; then
+            # A failed canonical PR-head CI is authoritative even if local subsets PASS.
+            # Never silently proceed with an absent/truncated failure log.
+            failure_log="$DW_JOB_ROOT/direct-worker-validation-failure.log"
+            if ! gh run view "$run_id" --repo "$PRODUCT_REPOSITORY" --log-failed > "$failure_log" 2>&1; then
+              echo "::error::RETRY_VALIDATION_LOG_UNAVAILABLE run=$run_id"
+              exit 1
+            fi
+            if [ ! -s "$failure_log" ]; then
+              echo "::error::RETRY_VALIDATION_LOG_EMPTY run=$run_id"
+              exit 1
+            fi
+            echo "FAILURE_LOG=$failure_log" >> "$GITHUB_ENV"
+            echo "RETRY_CANONICAL_FAILURE_EVIDENCE run=$run_id head=$START_HEAD"
+          fi
       - name: Set up source Node toolchain
         uses: actions/setup-node@v6
         with:
@@ -274,6 +295,27 @@ jobs:
           if [ -s "$CODEX_HOME/auth.json" ]; then
             gh secret set CODEX_AUTH_JSON --repo "$GITHUB_REPOSITORY" < "$CODEX_HOME/auth.json"
           fi
+
+      - name: Reject retry NO_WORK with unresolved canonical PR-head CI
+        if: ${{ inputs.command == 'retry' && steps.codex.outputs.status == 'NO_WORK' }}
+        working-directory: ${{ env.DW_RUNNER }}
+        run: |
+          set -euo pipefail
+          case "${RETRY_VALIDATION_STATE:-UNKNOWN}" in
+            NONE|PASS) ;;
+            FAILED)
+              echo "::error::RETRY_NO_WORK_UNRESOLVED_CANONICAL_CI run=${RETRY_VALIDATION_RUN_ID:-unknown} head=$START_HEAD; local checks cannot replace exact failed PR-head CI."
+              {
+                echo "## Direct Worker retry requires source repair"
+                printf -- '- result: `%s`\n' "FAILED"
+                printf -- '- failure_code: `%s`\n' "RETRY_NO_WORK_UNRESOLVED_CANONICAL_CI"
+                printf -- '- failed_validation_run_id: `%s`\n' "$RETRY_VALIDATION_RUN_ID"
+              } >> "$GITHUB_STEP_SUMMARY"
+              exit 1 ;;
+            *)
+              echo "::error::RETRY_NO_WORK_VALIDATION_EVIDENCE_UNCERTAIN"
+              exit 1 ;;
+          esac
 
       - name: Report no-work result
         if: ${{ steps.codex.outputs.status == 'NO_WORK' }}
@@ -554,6 +596,7 @@ jobs:
           GH_TOKEN: ${{ secrets.product_write_token }}
           PRODUCT_REPOSITORY: ${{ steps.route.outputs.repository }}
           CODEX_FAILURE_CODE: ${{ steps.codex.outputs.failure_code }}
+          CODEX_RESULT_STATUS: ${{ steps.codex.outputs.status }}
         working-directory: ${{ env.DW_RUNNER }}
         run: |
           result_file="$DW_JOB_ROOT/direct-worker-failed.md"
@@ -571,6 +614,11 @@ jobs:
                 fi ;;
             esac
             if [ -n "${DIRECT_HEAD:-}" ]; then printf -- '- head_sha: `%s`\n' "$DIRECT_HEAD"; fi
+            if [ "$CODEX_RESULT_STATUS" = "NO_WORK" ] && [ "${RETRY_VALIDATION_STATE:-}" = "FAILED" ]; then
+              printf -- '- failure_code: `%s`\n' "RETRY_NO_WORK_UNRESOLVED_CANONICAL_CI"
+              printf -- '- failed_validation_run_id: `%s`\n' "$RETRY_VALIDATION_RUN_ID"
+              printf -- '- head_sha: `%s`\n' "$START_HEAD"
+            fi
             printf -- '- action: `%s`\n' "Use Direct Worker retry; preserve this PR."
             printf -- '- provider/runtime/device/physical: `%s`\n' "NOT_INFERRED"
           } > "$result_file"
