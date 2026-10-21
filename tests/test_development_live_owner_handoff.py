@@ -90,10 +90,18 @@ def test_classmo_registered_source_contract_is_non_live_and_pinned():
 def test_dormant_live_registration_pins_source_without_enabling_provider():
     workflow = (ROOT / ".github/workflows/provider-gate-approval-core.yml").read_text()
     assert workflow.count("source_adapter_blob") == 4
-    assert workflow.count('config["source_adapter_blob"]') == 2
-    assert workflow.count('pinned_path = expected.fetch("runtime_adapter_path")') == 2
+    # CLASSMO dormant now verifies an exact three-item source map.
+    # WAFL keeps its original single adapter pin. LIVE remains blocked.
+    assert workflow.count('config["source_adapter_blob"]') == 1
+    assert workflow.count('pinned_path = expected.fetch("runtime_adapter_path")') == 1
     assert workflow.count('"rev-parse", "--verify"') == 2
-    assert workflow.count("source pin mismatch") == 2
+    assert workflow.count("source pin mismatch") == 1
+    assert '"source_host_blob" => "scripts/classmo_editorial_p2_live_host.py"' in workflow
+    assert (
+        '"source_edge_client_blob" => '
+        '"apps/mobile/src/presentation/editorial-edge-client.ts"'
+    ) in workflow
+    assert 'abort("CLASSMO P2 dormant source identity changed")' in workflow
     assert 'config["ready_for_owner"] == false' in workflow
     assert 'abort("CLASSMO_P2_OWNER_RUNTIME_NOT_EXECUTABLE")' in workflow
     assert 'abort("WAFL_G1_OWNER_RUNTIME_NOT_EXECUTABLE")' in workflow
