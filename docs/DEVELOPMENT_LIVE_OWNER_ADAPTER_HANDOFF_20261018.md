@@ -1,3 +1,15 @@
+## 2026-10-21 — CLASSMO #161 source identity pin, no LIVE admission
+
+Verified registered CLASSMO branch `cloud-dev-v1 e811fd9f28f56d32110e758907089eef84d9fd6b`, PR #161 MERGED and exact PR-head #39530617643 / integrated #39530708592 SUCCESS; previously accepted P2 read-only Provider #39521361262 SUCCESS is reused without rerun. Existing P2 plan Git blob `2aebbaf9dfa2699c60d14e3e614927d6653103c1` and source adapter blob `aad68952da90ba0040f85fa23e790dcd8ed1a19a` stay fixed.
+
+The **existing** `classmo_editorial_027_p2_live_guard_v1` dormant admission now checks three source Git identities together: source adapter, CLASSMO product LIVE host Git blob `ff91544c59d0422aa9f8d4499b0e728db3f134ff` (`scripts/classmo_editorial_p2_live_host.py`), and Edge client Git blob `513665db7655230d2bba1c605cd28d57b518d145` (`apps/mobile/src/presentation/editorial-edge-client.ts`). The exact blobs reside only as inert `source_*_blob` pins in DEV-CONTROL; they are not signed deployed Edge bytes, runtime adapter acceptance, an independently reviewed signer, licensing or customer QA. The dormant gate must **still abort** `CLASSMO_P2_OWNER_RUNTIME_NOT_EXECUTABLE`. No new Runner/Provider dispatch or generic engine.
+
+**Activation remains separate:** verify a genuinely deployed non-Production Edge 1.76.2 runtime and ImageMagick WASM 0.0.44 asset through independent service readback, bind an unguessable runner challenge to the exact source/deployment and verify the runtime signature against a separately reviewed trusted issuer/root, review genuine server-only original-image/license hashes, validate real owner/operator principals and cross-workspace 108 HTTP/Storage cases, PNG/JPEG-EXIF/WebP normalization receipts and negative uploads, two independent PostgreSQL races, rollback and exact synthetic cleanup/non-owned fingerprint. Only then may a separately reviewed DEV-CONTROL activation PR set `ready_for_owner:true`, replace the `source_contract_only` provider with a genuinely executable Development provider, and provide a usable SANJINWORKS Owner LIVE action. Product Source PASS and Readonly PASS are not that authority.
+
+This PR changes only trusted runner dormant source pin verification, one focused offline test and this guide. It makes no Provider/DB/Auth/Edge/Storage/credential/Production changes or product Runner execution.
+
+---
+
 # CLASSMO / WAFL non-Production Owner LIVE runtime handoff
 
 Status: source PREPARED. Existing gates remain inactive with
