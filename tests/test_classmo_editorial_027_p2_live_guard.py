@@ -109,3 +109,24 @@ def test_dormant_provider_gate_is_explicitly_fail_closed():
     assert 'executor == "classmo_editorial_027_p2_live_guard_v1"' in workflow
     assert 'config["ready_for_owner"] == false' in workflow
     assert 'abort("CLASSMO_P2_OWNER_RUNTIME_NOT_EXECUTABLE")' in workflow
+
+
+def test_dormant_live_gate_pins_161_host_and_edge_client_without_activation():
+    workflow = (
+        Path(__file__).resolve().parents[1]
+        / ".github/workflows/provider-gate-approval-core.yml"
+    ).read_text(encoding="utf-8")
+    segment = workflow.split('elsif executor == "classmo_editorial_027_p2_live_guard_v1"', 1)[1]
+    segment = segment.split('elsif executor == "wafl_g1v1v2_preparation_guard_v1"', 1)[0]
+    assert '"source_host_blob" => "scripts/classmo_editorial_p2_live_host.py"' in segment
+    assert (
+        '"source_edge_client_blob" => '
+        '"apps/mobile/src/presentation/editorial-edge-client.ts"'
+    ) in segment
+    assert 'config["provider"] == "classmo_p2_source_contract_only"' in segment
+    assert 'source_pins.each do |key, path|' in segment
+    assert 'observed == blob' in segment
+    assert 'abort("CLASSMO_P2_OWNER_RUNTIME_NOT_EXECUTABLE")' in segment
+    # The verified source pins must not be treated as runtime deployment trust.
+    assert 'config["ready_for_owner"] == true' in segment
+    assert 'config["provider"] == "supabase_development_live"' in segment
