@@ -418,18 +418,26 @@ jobs:
             if config["ready_for_owner"] == false
               abort("CLASSMO P2 dormant metadata mismatch") unless
                 config["provider"] == "classmo_p2_source_contract_only" &&
-                config.keys.sort == (expected.keys + %w[label executor ready_for_owner provider source_adapter_blob]).sort
-              source_blob = config["source_adapter_blob"]
-              abort("CLASSMO P2 source pin invalid") unless
-                source_blob.is_a?(String) && source_blob.match?(/\A[0-9a-f]{40}\z/)
-              # Private registry pins only the SOURCE artifact; it never grants LIVE execution.
-              pinned_path = expected.fetch("runtime_adapter_path")
-              observed_blob = IO.popen(
-                ["git", "-C", ".approval/product", "rev-parse", "--verify",
-                 "#{ENV.fetch("SOURCE_SHA")}:#{pinned_path}"],
-                err: File::NULL, &:read
-              ).strip
-              abort("CLASSMO P2 source pin mismatch") unless $?.success? && observed_blob == source_blob
+                config.keys.sort == (expected.keys + %w[label executor ready_for_owner provider source_adapter_blob source_host_blob source_edge_client_blob]).sort
+              # These are immutable SOURCE identity pins, never runtime trust,
+              # a deployed Edge signature, license approval or LIVE authority.
+              source_pins = {
+                "source_adapter_blob" => expected.fetch("runtime_adapter_path"),
+                "source_host_blob" => "scripts/classmo_editorial_p2_live_host.py",
+                "source_edge_client_blob" => "apps/mobile/src/presentation/editorial-edge-client.ts"
+              }
+              source_pins.each do |key, path|
+                blob = config[key]
+                abort("CLASSMO P2 dormant source blob invalid") unless
+                  blob.is_a?(String) && blob.match?(/\A[0-9a-f]{40}\z/)
+                observed = IO.popen(
+                  ["git", "-C", ".approval/product", "rev-parse", "--verify",
+                   "#{ENV.fetch("SOURCE_SHA")}:#{path}"],
+                  err: File::NULL, &:read
+                ).strip
+                abort("CLASSMO P2 dormant source identity changed") unless
+                  $?.success? && observed == blob
+              end
               abort("CLASSMO_P2_OWNER_RUNTIME_NOT_EXECUTABLE")
             end
             abort("CLASSMO P2 live adapter not registered") unless
