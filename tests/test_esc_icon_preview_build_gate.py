@@ -35,7 +35,7 @@ def test_esc_build_preflight_checks_icon_eas_identity_and_reuses_guarded_eas_pat
         'env.PROVIDER_EXECUTOR == \'esc_eas_build\'',
         'com.sanjinworks.esc',
         'appVersion',
-        'icon[25] not in (2, 6)',
+        'icon[25] != 2',
         'ESC icon must be 1024x1024',
         'ESC app icon reference mismatch',
         'ESC EAS project ID mismatch',
@@ -50,6 +50,8 @@ def test_esc_build_preflight_checks_icon_eas_identity_and_reuses_guarded_eas_pat
         body = raw.split("name: " + step, 1)[1].split("\n\n", 1)[0]
         assert "env.PROVIDER_EXECUTOR == 'esc_eas_build'" in body
     assert "parse-classmo-build-list" in raw  # exact-version/idempotency helper
+    assert '--app-identifier "${PROVIDER_APP_IDENTIFIER:-com.sanjinworks.classmo}"' in raw
+    assert '"PROVIDER_APP_IDENTIFIER" => "com.sanjinworks.esc"' in raw
     assert "--freeze-credentials" in raw
     assert 'test "$EAS_BUILD_APP_BUILD_VERSION" = "$PROVIDER_BUILD_NUMBER"' in raw
     assert 'test "$EAS_BUILD_ARCHIVE_PRESENT" = "1"' in raw
