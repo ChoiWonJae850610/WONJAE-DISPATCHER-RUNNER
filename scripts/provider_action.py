@@ -794,7 +794,11 @@ def main() -> None:
 
     p = sub.add_parser("parse-classmo-build-list")
     p.add_argument("--input", required=True)
-    p.add_argument("--app-identifier", choices=("com.sanjinworks.classmo", "com.sanjinworks.esc"), default="com.sanjinworks.classmo")
+    p.add_argument(
+        "--app-identifier",
+        choices=("com.sanjinworks.classmo", "com.sanjinworks.esc"),
+        default="com.sanjinworks.classmo",
+    )
     p.add_argument("--phase", required=True, choices=["preflight", "verify"])
     p.add_argument("--source-sha", required=True)
     p.add_argument("--app-version", required=True)
