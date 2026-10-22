@@ -543,6 +543,9 @@ def parse_classmo_build_list(args: argparse.Namespace) -> None:
         fail("invalid exact source SHA")
     if args.phase not in ("preflight", "verify"):
         fail("invalid existing-build readback phase")
+    identifier = getattr(args, "app_identifier", "com.sanjinworks.classmo")
+    if identifier not in ("com.sanjinworks.classmo", "com.sanjinworks.esc"):
+        fail("unregistered EAS iOS application identifier")
     if args.phase == "verify" and not args.expected_id:
         fail("exact existing EAS build ID is required for final verification")
     if args.phase == "preflight" and args.expected_id:
@@ -564,7 +567,7 @@ def parse_classmo_build_list(args: argparse.Namespace) -> None:
         "platform": "IOS",
         "distribution": "INTERNAL",
         "buildProfile": "preview",
-        "appIdentifier": "com.sanjinworks.classmo",
+        "appIdentifier": identifier,
         "gitCommitHash": args.source_sha,
     }
     for key, value in expected.items():
@@ -791,6 +794,11 @@ def main() -> None:
 
     p = sub.add_parser("parse-classmo-build-list")
     p.add_argument("--input", required=True)
+    p.add_argument(
+        "--app-identifier",
+        choices=("com.sanjinworks.classmo", "com.sanjinworks.esc"),
+        default="com.sanjinworks.classmo",
+    )
     p.add_argument("--phase", required=True, choices=["preflight", "verify"])
     p.add_argument("--source-sha", required=True)
     p.add_argument("--app-version", required=True)

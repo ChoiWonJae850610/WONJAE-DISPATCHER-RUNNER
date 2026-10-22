@@ -125,7 +125,7 @@ jobs:
           abort("provider gate is not registered") unless config.is_a?(Hash)
           abort("provider gate approval mode mismatch") unless config["approval_mode"] == "sanjinworks_owner_button"
           executor = config["executor"]
-          abort("provider gate executor is unsupported") unless ["approval_only", "classmo_supabase_migration", "classmo_eas_build", "classmo_eas_update", "wafl_supabase_hardening", "wafl_eas_update", "wafl_eas_build", "wafl_r2_preview_deploy", "wafl_supabase_g1_readonly", "wafl_supabase_g1_schema_apply", "wafl_supabase_g1_006_only_recovery", "classmo_editorial_016_readonly", "classmo_editorial_016_schema_apply", "classmo_editorial_017_storage_apply", "registered_supabase_migration_v1", "registered_development_psql_verify_v1", "registered_development_readiness_v1", "wafl_g1v1v2_preparation_guard_v1", "classmo_editorial_027_p2_live_guard_v1"].include?(executor)
+          abort("provider gate executor is unsupported") unless ["approval_only", "classmo_supabase_migration", "classmo_eas_build", "classmo_eas_update", "wafl_supabase_hardening", "wafl_eas_update", "wafl_eas_build", "esc_eas_build", "wafl_r2_preview_deploy", "wafl_supabase_g1_readonly", "wafl_supabase_g1_schema_apply", "wafl_supabase_g1_006_only_recovery", "classmo_editorial_016_readonly", "classmo_editorial_016_schema_apply", "classmo_editorial_017_storage_apply", "registered_supabase_migration_v1", "registered_development_psql_verify_v1", "registered_development_readiness_v1", "wafl_g1v1v2_preparation_guard_v1", "classmo_editorial_027_p2_live_guard_v1"].include?(executor)
           label = config["label"]
           abort("provider gate label missing") unless label.is_a?(String) && !label.strip.empty?
 
@@ -599,6 +599,35 @@ jobs:
               "PROVIDER_APP_VERSION" => config["app_version"],
               "PROVIDER_ICON_PATH" => config["icon_path"],
             )
+          elsif executor == "esc_eas_build"
+            abort("ESC Preview icon EAS build only") unless project == "ESC" && gate == "preview_ios_build"
+            expected = {
+              "provider" => "eas_build",
+              "working_directory" => "apps/mobile",
+              "platform" => "ios",
+              "profile" => "preview",
+              "environment" => "preview",
+              "channel" => "preview",
+              "app_version" => "0.1.1",
+              "build_number" => "2",
+              "runtime_version" => "0.1.1",
+              "icon_path" => "assets/branding/esc-app-icon.png",
+            }
+            expected.each do |key, value|
+              abort("ESC icon EAS build #{key} mismatch") unless config[key] == value
+            end
+            values.merge!(
+              "PROVIDER_WORKING_DIRECTORY" => config["working_directory"],
+              "PROVIDER_PLATFORM" => config["platform"],
+              "PROVIDER_BUILD_PROFILE" => config["profile"],
+              "PROVIDER_ENVIRONMENT" => config["environment"],
+              "PROVIDER_CHANNEL" => config["channel"],
+              "PROVIDER_RUNTIME_VERSION" => config["runtime_version"],
+              "PROVIDER_APP_VERSION" => config["app_version"],
+              "PROVIDER_BUILD_NUMBER" => config["build_number"],
+              "PROVIDER_ICON_PATH" => config["icon_path"],
+              "PROVIDER_APP_IDENTIFIER" => "com.sanjinworks.esc",
+            )
           elsif executor == "classmo_eas_update"
             abort("CLASSMO EAS update executor routed to another project") unless project == "CLASSMO"
             abort("CLASSMO EAS update provider gate mismatch") unless gate == "preview_ios_ota_update"
@@ -843,7 +872,7 @@ jobs:
             --summary "$GITHUB_STEP_SUMMARY"
 
       - name: EAS · require scoped Expo credential
-        if: env.PROVIDER_EXECUTOR == 'classmo_eas_build' || env.PROVIDER_EXECUTOR == 'classmo_eas_update' || env.PROVIDER_EXECUTOR == 'wafl_eas_update' || env.PROVIDER_EXECUTOR == 'wafl_eas_build'
+        if: env.PROVIDER_EXECUTOR == 'classmo_eas_build' || env.PROVIDER_EXECUTOR == 'classmo_eas_update' || env.PROVIDER_EXECUTOR == 'wafl_eas_update' || env.PROVIDER_EXECUTOR == 'wafl_eas_build' || env.PROVIDER_EXECUTOR == 'esc_eas_build'
         env:
           PROVIDER_EXPO_TOKEN: ${{ secrets.expo_token }}
         shell: bash
@@ -881,6 +910,45 @@ jobs:
               or preview.get("environment") != os.environ["PROVIDER_ENVIRONMENT"] or preview.get("autoIncrement") is not None
               or preview.get("developmentClient") is not False or preview.get("env", {}).get("APP_VARIANT") != "development"):
               raise SystemExit("WAFL preview EAS profile identity/signed-version policy mismatch")
+          PY
+
+      - name: ESC · verify approved pixel-terminal icon source and signed Preview identity
+        if: env.PROVIDER_EXECUTOR == 'esc_eas_build'
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          root = Path(".approval/product") / os.environ["PROVIDER_WORKING_DIRECTORY"]
+          app = json.loads((root / "app.json").read_text(encoding="utf-8"))["expo"]
+          eas = json.loads((root / "eas.json").read_text(encoding="utf-8"))
+          preview = eas.get("build", {}).get("preview", {})
+          if app.get("owner") != "lostab" or app.get("name") != "ESC" or app.get("slug") != "esc":
+              raise SystemExit("ESC Expo project identity mismatch")
+          if app.get("ios", {}).get("bundleIdentifier") != "com.sanjinworks.esc":
+              raise SystemExit("ESC iOS bundle identity mismatch")
+          if app.get("version") != os.environ["PROVIDER_APP_VERSION"] or str(app.get("ios", {}).get("buildNumber")) != os.environ["PROVIDER_BUILD_NUMBER"]:
+              raise SystemExit("ESC signed Preview version/build mismatch")
+          if app.get("runtimeVersion") != {"policy": "appVersion"}:
+              raise SystemExit("ESC appVersion runtime policy mismatch")
+          if app.get("icon") != "./" + os.environ["PROVIDER_ICON_PATH"]:
+              raise SystemExit("ESC app icon reference mismatch")
+          icon = (root / os.environ["PROVIDER_ICON_PATH"]).read_bytes()
+          if icon[:8] != bytes((137, 80, 78, 71, 13, 10, 26, 10)):
+              raise SystemExit("ESC icon must be PNG")
+          if int.from_bytes(icon[16:20], "big") != 1024 or int.from_bytes(icon[20:24], "big") != 1024:
+              raise SystemExit("ESC icon must be 1024x1024")
+          if icon[25] != 2:
+              raise SystemExit("ESC signed app icon must be opaque RGB PNG, not RGBA or palette")
+          if preview.get("distribution") != "internal" or preview.get("channel") != os.environ["PROVIDER_CHANNEL"] or preview.get("environment") != os.environ["PROVIDER_ENVIRONMENT"]:
+              raise SystemExit("ESC internal Preview EAS profile mismatch")
+          if preview.get("ios", {}).get("simulator") is True:
+              raise SystemExit("ESC signed Preview must target real iOS device")
+          if app.get("updates", {}).get("url") != "https://u.expo.dev/f2ef4b3c-5cf9-47b7-a691-7291cab3812f":
+              raise SystemExit("ESC EAS updates target mismatch")
+          if app.get("extra", {}).get("eas", {}).get("projectId") != "f2ef4b3c-5cf9-47b7-a691-7291cab3812f":
+              raise SystemExit("ESC EAS project ID mismatch")
           PY
 
       - name: CLASSMO · verify preview build source contract
@@ -933,13 +1001,13 @@ jobs:
           PY
 
       - name: EAS · set up EAS CLI
-        if: env.PROVIDER_EXECUTOR == 'classmo_eas_build' || env.PROVIDER_EXECUTOR == 'classmo_eas_update' || env.PROVIDER_EXECUTOR == 'wafl_eas_update' || env.PROVIDER_EXECUTOR == 'wafl_eas_build'
+        if: env.PROVIDER_EXECUTOR == 'classmo_eas_build' || env.PROVIDER_EXECUTOR == 'classmo_eas_update' || env.PROVIDER_EXECUTOR == 'wafl_eas_update' || env.PROVIDER_EXECUTOR == 'wafl_eas_build' || env.PROVIDER_EXECUTOR == 'esc_eas_build'
         uses: actions/setup-node@v7
         with:
           node-version: "24"
 
       - name: EAS · install pinned EAS CLI and app dependencies
-        if: env.PROVIDER_EXECUTOR == 'classmo_eas_build' || env.PROVIDER_EXECUTOR == 'classmo_eas_update' || env.PROVIDER_EXECUTOR == 'wafl_eas_update' || env.PROVIDER_EXECUTOR == 'wafl_eas_build'
+        if: env.PROVIDER_EXECUTOR == 'classmo_eas_build' || env.PROVIDER_EXECUTOR == 'classmo_eas_update' || env.PROVIDER_EXECUTOR == 'wafl_eas_update' || env.PROVIDER_EXECUTOR == 'wafl_eas_build' || env.PROVIDER_EXECUTOR == 'esc_eas_build'
         env:
           PROVIDER_EXPO_TOKEN: ${{ secrets.expo_token }}
         shell: bash
@@ -950,7 +1018,7 @@ jobs:
           npm ci --ignore-scripts --no-audit --no-fund
 
       - name: CLASSMO · read-only existing Preview build preflight
-        if: env.PROVIDER_EXECUTOR == 'classmo_eas_build'
+        if: env.PROVIDER_EXECUTOR == 'classmo_eas_build' || env.PROVIDER_EXECUTOR == 'esc_eas_build'
         env:
           EXPO_TOKEN: ${{ secrets.expo_token }}
         shell: bash
@@ -972,13 +1040,14 @@ jobs:
             --input "$RUNNER_TEMP/classmo-build-preflight.json" \
             --source-sha "$SOURCE_SHA" \
             --app-version "$PROVIDER_APP_VERSION" \
+            --app-identifier "${PROVIDER_APP_IDENTIFIER:-com.sanjinworks.classmo}" \
             --build-number "$PROVIDER_BUILD_NUMBER" \
             --runtime-version "$PROVIDER_RUNTIME_VERSION" \
             --channel "$PROVIDER_CHANNEL" \
             --github-env "$GITHUB_ENV"
 
       - name: CLASSMO · build signed internal preview
-        if: env.PROVIDER_EXECUTOR == 'classmo_eas_build'
+        if: env.PROVIDER_EXECUTOR == 'classmo_eas_build' || env.PROVIDER_EXECUTOR == 'esc_eas_build'
         env:
           EXPO_TOKEN: ${{ secrets.expo_token }}
         shell: bash
@@ -1004,7 +1073,7 @@ jobs:
             --github-env "$GITHUB_ENV"
 
       - name: CLASSMO · verify signed preview build result
-        if: env.PROVIDER_EXECUTOR == 'classmo_eas_build'
+        if: env.PROVIDER_EXECUTOR == 'classmo_eas_build' || env.PROVIDER_EXECUTOR == 'esc_eas_build'
         env:
           EXPO_TOKEN: ${{ secrets.expo_token }}
         shell: bash
@@ -1027,6 +1096,7 @@ jobs:
             --input "$RUNNER_TEMP/classmo-eas-build-list.json" \
             --source-sha "$SOURCE_SHA" \
             --app-version "$PROVIDER_APP_VERSION" \
+            --app-identifier "${PROVIDER_APP_IDENTIFIER:-com.sanjinworks.classmo}" \
             --build-number "$PROVIDER_BUILD_NUMBER" \
             --runtime-version "$PROVIDER_RUNTIME_VERSION" \
             --channel "$PROVIDER_CHANNEL" \
