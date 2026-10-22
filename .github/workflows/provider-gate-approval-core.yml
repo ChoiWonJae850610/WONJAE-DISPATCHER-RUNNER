@@ -626,6 +626,7 @@ jobs:
               "PROVIDER_APP_VERSION" => config["app_version"],
               "PROVIDER_BUILD_NUMBER" => config["build_number"],
               "PROVIDER_ICON_PATH" => config["icon_path"],
+              "PROVIDER_APP_IDENTIFIER" => "com.sanjinworks.esc",
             )
           elsif executor == "classmo_eas_update"
             abort("CLASSMO EAS update executor routed to another project") unless project == "CLASSMO"
@@ -1039,6 +1040,7 @@ jobs:
             --input "$RUNNER_TEMP/classmo-build-preflight.json" \
             --source-sha "$SOURCE_SHA" \
             --app-version "$PROVIDER_APP_VERSION" \
+            --app-identifier "${PROVIDER_APP_IDENTIFIER:-com.sanjinworks.classmo}" \
             --build-number "$PROVIDER_BUILD_NUMBER" \
             --runtime-version "$PROVIDER_RUNTIME_VERSION" \
             --channel "$PROVIDER_CHANNEL" \
@@ -1094,6 +1096,7 @@ jobs:
             --input "$RUNNER_TEMP/classmo-eas-build-list.json" \
             --source-sha "$SOURCE_SHA" \
             --app-version "$PROVIDER_APP_VERSION" \
+            --app-identifier "${PROVIDER_APP_IDENTIFIER:-com.sanjinworks.classmo}" \
             --build-number "$PROVIDER_BUILD_NUMBER" \
             --runtime-version "$PROVIDER_RUNTIME_VERSION" \
             --channel "$PROVIDER_CHANNEL" \
