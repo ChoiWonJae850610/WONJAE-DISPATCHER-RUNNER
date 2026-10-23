@@ -93,10 +93,17 @@ def require_activation_host(facts: dict[str, object]) -> None:
 
 
 def safe_command(args: list[str], *, cwd: Path | None = None, timeout: int = 30) -> str:
+    # Child tools need only GH_TOKEN for 'gh'. Do not give downloaded binaries,
+    # tar, sudo or the runner service any Codex or GitHub credential environment.
+    child_env = os.environ.copy()
+    child_env.pop("PRIMARY_CODEX_AUTH", None)
+    child_env.pop("SECONDARY_CODEX_AUTH", None)
+    if not args or args[0] != "gh":
+        child_env.pop("GH_TOKEN", None)
     try:
         result = subprocess.run(
             args, cwd=cwd, check=False, capture_output=True, text=True,
-            timeout=timeout,
+            timeout=timeout, env=child_env,
         )
     except (OSError, subprocess.TimeoutExpired) as exc:
         raise SetupBlocked("SECOND_RUNNER_COMMAND_FAILED") from exc
