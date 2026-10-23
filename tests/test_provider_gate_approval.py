@@ -34,7 +34,7 @@ def test_provider_gate_core_rechecks_identity_validation_and_registered_executor
         '"registered_development_psql_verify_v1", '
         '"registered_development_readiness_v1", '
         '"wafl_g1v1v2_preparation_guard_v1", '
-        '"classmo_editorial_027_p2_live_guard_v1"].include?(executor)' in raw
+        '"classmo_editorial_027_p2_live_guard_v1", "wafl_development_media_probe_v1"].include?(executor)' in raw
     )
     assert 'action["type"] == "PROVIDER_GATE"' in raw
     assert 'action["gate"] == gate' in raw
@@ -236,3 +236,18 @@ def test_psql_g1v_session_pooler_is_exact_ipv4_development_route_only():
     assert '--require-race --execute' in core
     assert 'PSQL_UNREVIEWED_POOLER_TARGET' in core
     assert 'export WONJAE_DEV_PGPORT="6543"' not in core
+
+def test_wafl_development_media_probe_bounded_new_owner_executor():
+    from pathlib import Path
+
+    core = Path(".github/workflows/provider-gate-approval-core.yml").read_text()
+    caller = Path(".github/workflows/provider-gate-approval.yml").read_text()
+    assert 'gate == "development_media_transport_probe"' in core
+    assert 'config["requires_owner_session"] == true' in core
+    assert '"effect_policy" => "single_owned_synthetic_r2_put_get_exact_delete_and_ephemeral_pdf_render"' in core
+    assert "wafl_development_media_probe.py" in core
+    assert "WAFL_PDF_DEV_WORKER_NAME" in caller
+    assert "WAFL_PDF_GENERATOR_TOKEN" in caller
+    assert "WAFL_R2_WORKER_UPLOAD_SECRET" in caller
+    assert "wrangler@4.86.0" in core
+    assert "pdf-generator-worker/src/index.js" in core
