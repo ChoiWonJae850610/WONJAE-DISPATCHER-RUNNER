@@ -21,6 +21,8 @@ on:
         required: true
       codex_auth_json:
         required: true
+      codex_auth_json_secondary:
+        required: false
       secret_rotation_token:
         required: true
 
@@ -267,16 +269,49 @@ jobs:
         with:
           node-version: "24"
 
+      - name: Resolve isolated Codex credential slot
+        id: credential_slot
+        env:
+          DW_PRIMARY_RUNNER_NAME: ${{ vars.DW_PRIMARY_RUNNER_NAME }}
+          DW_SECONDARY_RUNNER_NAME: ${{ vars.DW_SECONDARY_RUNNER_NAME }}
+          DW_ACTUAL_RUNNER_NAME: ${{ runner.name }}
+        working-directory: ${{ env.DW_RUNNER }}
+        run: |
+          set -euo pipefail
+          PYTHONPATH="$DW_RUNNER/src" python -m wonjae_dispatcher_runner.credential_slot \
+            --github-output "$GITHUB_OUTPUT"
+
       - name: Run isolated Codex Direct Worker
         id: codex
         env:
           PRODUCT_TOKEN: ${{ secrets.product_write_token }}
           RUNNER_TOKEN: ${{ github.token }}
           CODEX_HOME: ${{ env.DW_JOB_ROOT }}/auth
-          CODEX_AUTH_JSON: ${{ secrets.codex_auth_json }}
+          CODEX_AUTH_JSON_PRIMARY: ${{ secrets.codex_auth_json }}
+          CODEX_AUTH_JSON_SECONDARY: ${{ secrets.codex_auth_json_secondary }}
+          DW_CREDENTIAL_SLOT: ${{ steps.credential_slot.outputs.slot }}
         working-directory: ${{ env.DW_RUNNER }}
         run: |
           set -euo pipefail
+          # A second runner must never silently reuse the primary refresh session.
+          if [ "$DW_CREDENTIAL_SLOT" != "legacy" ]; then
+            PYTHONPATH="$DW_RUNNER/src" python -m wonjae_dispatcher_runner.credential_slot \
+              --check-auth
+          fi
+          case "$DW_CREDENTIAL_SLOT" in
+            legacy|primary)
+              test -n "${CODEX_AUTH_JSON_PRIMARY:-}" || {
+                echo "::error::CODEX_SLOT_PRIMARY_AUTH_MISSING"; exit 1;
+              }
+              export CODEX_AUTH_JSON="$CODEX_AUTH_JSON_PRIMARY" ;;
+            secondary)
+              test -n "${CODEX_AUTH_JSON_SECONDARY:-}" || {
+                echo "::error::CODEX_SLOT_SECONDARY_AUTH_MISSING"; exit 1;
+              }
+              export CODEX_AUTH_JSON="$CODEX_AUTH_JSON_SECONDARY" ;;
+            *) echo "::error::CODEX_SLOT_INVALID"; exit 1 ;;
+          esac
+          unset CODEX_AUTH_JSON_PRIMARY CODEX_AUTH_JSON_SECONDARY
           mkdir -p "$CODEX_HOME"
           result_file="$DW_JOB_ROOT/direct-worker-result.json"
           args=(
@@ -315,15 +350,22 @@ jobs:
           echo "DIRECT_WORKER_RESULT_END"
 
       - name: Rotate refreshed Codex session
-        if: ${{ always() }}
+        if: ${{ always() && steps.credential_slot.outputs.slot != '' }}
         continue-on-error: true
         env:
           GH_TOKEN: ${{ secrets.secret_rotation_token }}
           CODEX_HOME: ${{ env.DW_JOB_ROOT }}/auth
+          DW_CREDENTIAL_SLOT: ${{ steps.credential_slot.outputs.slot }}
         working-directory: ${{ env.DW_RUNNER }}
         run: |
+          set -euo pipefail
+          case "$DW_CREDENTIAL_SLOT" in
+            legacy|primary) secret_name="CODEX_AUTH_JSON" ;;
+            secondary) secret_name="CODEX_AUTH_JSON_SECONDARY" ;;
+            *) echo "::error::CODEX_SLOT_INVALID"; exit 1 ;;
+          esac
           if [ -s "$CODEX_HOME/auth.json" ]; then
-            gh secret set CODEX_AUTH_JSON --repo "$GITHUB_REPOSITORY" < "$CODEX_HOME/auth.json"
+            gh secret set "$secret_name" --repo "$GITHUB_REPOSITORY" < "$CODEX_HOME/auth.json"
           fi
 
       - name: Reject retry NO_WORK with unresolved canonical PR-head CI
