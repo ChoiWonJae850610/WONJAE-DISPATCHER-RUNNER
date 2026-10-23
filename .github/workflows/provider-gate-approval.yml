@@ -54,6 +54,10 @@ jobs:
       wafl_r2_worker_url: ${{ secrets.WAFL_R2_PREVIEW_WORKER_URL }}
       wafl_images_entitlement_approved: ${{ secrets.WAFL_R2_IMAGES_ENTITLEMENT_APPROVED }}
       wafl_signing_parity_approved: ${{ secrets.WAFL_R2_SIGNING_PARITY_APPROVED }}
+      wafl_r2_upload_signing_secret: ${{ secrets.WAFL_R2_WORKER_UPLOAD_SECRET }}
+      wafl_pdf_dev_worker_name: ${{ secrets.WAFL_PDF_DEV_WORKER_NAME }}
+      wafl_pdf_dev_worker_url: ${{ secrets.WAFL_PDF_DEV_WORKER_URL }}
+      wafl_pdf_generator_token: ${{ secrets.WAFL_PDF_GENERATOR_TOKEN }}
 
   classmo:
     if: ${{ inputs.project == 'CLASSMO' }}
