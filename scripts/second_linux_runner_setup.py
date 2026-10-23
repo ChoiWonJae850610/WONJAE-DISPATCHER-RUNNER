@@ -349,19 +349,26 @@ def set_slot_variables(repository: str, primary: str, secondary: str) -> None:
         raise
 
 
-def verify_second_runner(repository: str, primary: str, secondary: str) -> None:
-    # This path observes only repository Variables and Runner inventory. Report
-    # a fixed non-secret code for each query stage; never print gh output.
+def verify_second_runner(
+    repository: str, primary: str, secondary: str,
+    *, configured_variables: dict[str, str] | None = None,
+) -> None:
+    # Owner workflow verify uses trusted GitHub Actions vars directly: no
+    # gh variable list read is needed. Keep the original API variable read for
+    # the separately authorized activation path and its post-install readback.
     if not shutil.which("gh"):
         raise SetupBlocked("SECOND_RUNNER_VERIFY_GH_CLI_MISSING")
     if not os.environ.get("GH_TOKEN"):
         raise SetupBlocked("SECOND_RUNNER_GITHUB_AUTH_MISSING")
-    try:
-        variables = git_variables(repository)
-    except SetupBlocked as exc:
-        if str(exc) == "SECOND_RUNNER_COMMAND_FAILED":
-            raise SetupBlocked("SECOND_RUNNER_VERIFY_VARIABLES_QUERY_FAILED") from None
-        raise
+    if configured_variables is None:
+        try:
+            variables = git_variables(repository)
+        except SetupBlocked as exc:
+            if str(exc) == "SECOND_RUNNER_COMMAND_FAILED":
+                raise SetupBlocked("SECOND_RUNNER_VERIFY_VARIABLES_QUERY_FAILED") from None
+            raise
+    else:
+        variables = configured_variables
     if (variables.get("DW_PRIMARY_RUNNER_NAME") != primary
             or variables.get("DW_SECONDARY_RUNNER_NAME") != secondary):
         raise SetupBlocked("SECOND_RUNNER_VARIABLES_NOT_READY")
@@ -465,7 +472,16 @@ def main() -> int:
             }, sort_keys=True))
             print("SECOND_RUNNER_INSPECT_ONLY_NO_MUTATION")
         elif args.operation == "verify":
-            verify_second_runner(repository, primary, secondary)
+            # Missing repository vars become empty strings and fail closed.
+            # Avoid gh variable list; gh api Runner inventory is still required.
+            configured_variables = {
+                "DW_PRIMARY_RUNNER_NAME": os.environ.get("DW_VERIFY_PRIMARY_NAME", ""),
+                "DW_SECONDARY_RUNNER_NAME": os.environ.get("DW_VERIFY_SECONDARY_NAME", ""),
+            }
+            verify_second_runner(
+                repository, primary, secondary,
+                configured_variables=configured_variables,
+            )
             print("SECOND_RUNNER_VERIFY_PASS")
         else:
             activate(repository, primary, secondary)
