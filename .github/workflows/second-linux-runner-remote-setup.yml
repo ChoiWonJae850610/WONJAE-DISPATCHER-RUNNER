@@ -39,7 +39,6 @@ jobs:
     env:
       DW_PRIMARY_NAME: ${{ inputs.primary_runner_name }}
       DW_SECONDARY_NAME: ${{ inputs.secondary_runner_name }}
-      RUNNER_NAME: ${{ runner.name }}
     steps:
       - name: Checkout exact trusted main
         uses: actions/checkout@v6
@@ -50,6 +49,8 @@ jobs:
       - name: Inspect home WSL2 host without any mutation
         if: ${{ inputs.operation == 'inspect' }}
         shell: bash
+        env:
+          RUNNER_NAME: ${{ runner.name }}
         run: |
           set -euo pipefail
           PYTHONPATH=src python3 scripts/second_linux_runner_setup.py --operation inspect
@@ -59,6 +60,7 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.OWNER_GITHUB_TOKEN }}
+          RUNNER_NAME: ${{ runner.name }}
         run: |
           set -euo pipefail
           PYTHONPATH=src python3 scripts/second_linux_runner_setup.py --operation verify
@@ -70,6 +72,7 @@ jobs:
           GH_TOKEN: ${{ secrets.OWNER_GITHUB_TOKEN }}
           PRIMARY_CODEX_AUTH: ${{ secrets.CODEX_AUTH_JSON }}
           SECONDARY_CODEX_AUTH: ${{ secrets.CODEX_AUTH_JSON_SECONDARY }}
+          RUNNER_NAME: ${{ runner.name }}
         run: |
           set -euo pipefail
           # This path requires a *separate* Owner workflow_dispatch activation.
