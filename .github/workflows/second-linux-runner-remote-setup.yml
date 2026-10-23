@@ -61,6 +61,8 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.OWNER_GITHUB_TOKEN }}
           RUNNER_NAME: ${{ runner.name }}
+          DW_VERIFY_PRIMARY_NAME: ${{ vars.DW_PRIMARY_RUNNER_NAME }}
+          DW_VERIFY_SECONDARY_NAME: ${{ vars.DW_SECONDARY_RUNNER_NAME }}
         run: |
           set -euo pipefail
           PYTHONPATH=src python3 scripts/second_linux_runner_setup.py --operation verify
