@@ -182,3 +182,74 @@ GitHub Actions workflows. Neither is dispatched or enabled by the PR itself:
   any unfinished runner setup; no chat button is a product run authorization.
 
 **Current execution status: CODE/POLICY PREPARED ONLY — NOT RUN.**
+
+## Follow-up: read-only sudo-free user service preflight (2026-10-23)
+
+Observed, exact GitHub Actions evidence:
+[Second Linux Runner inspect #39904948974](https://github.com/ChoiWonJae850610/WONJAE-DISPATCHER-RUNNER/actions/runs/39904948974)
+at integrated SHA `b9aa14a55bdf8b851bb541d3e3a4b313802b5278`:
+`wsl2=true`, `systemd=true`, `capacity_ok=true`,
+`memory_gib=14`, `disk_gib=952`, `target_unused=true`, but
+`sudo_noninteractive=false`. The existing **system-level** installer would
+fail its sudo admission. This does not establish that **user-level** services
+are unavailable.
+
+This PR extends the existing **read-only** `operation=inspect` only;
+it does NOT create an install method, change `operation=activate`, dispatch
+a workflow, enable lingering or modify the host:
+
+- `loginctl show-user <current-uid> --property=Linger --value`
+  reports `yes`, `no` or `unknown` (a read-only query).
+- `systemctl --user is-system-running` tests the **same Unix user's**
+  active user manager; `running` and `degraded` are accepted as reachable.
+  Any command error, absent trusted `/run/user/<uid>` directory, unknown
+  manager, or privileged/root process is recorded as a **blocker**, not PASS.
+- Only static enums, booleans and capacity numbers are output:
+  `user_linger`, `user_systemd_manager`, `user_runtime_dir_owned`,
+  `user_systemd_accessible`, `user_service_candidate`,
+  `user_service_blocker`. No login name, token, systemd environment,
+  bus output, logs or secret values are copied into the result.
+- Query subprocesses use argument arrays, no shell and a bounded timeout.
+  They cannot run `loginctl enable-linger` or `systemctl --user enable/start`.
+  `inspect` is safe to rerun ONLY after this PR is separately merged to
+  trusted `main`, and after the Owner manually starts the already-known
+  read-only workflow.
+
+### Decision gate after a fresh host inspect (not yet observed)
+
+| Observation | Bounded result |
+| --- | --- |
+| `user_service_candidate=true`, `user_linger=yes`, manager `running` or `degraded` | **CANDIDATE ONLY.** Prepare a subsequent reviewed, Owner-gated rootless `systemd --user` installation implementation. Do not infer persistence or install today. |
+| `USER_LINGER_DISABLED` | User-manager services may stop after the last session. `loginctl enable-linger` is a separate, mutating, potentially privileged Owner decision; **never** run it from inspect. |
+| `USER_LINGER_UNVERIFIED`, `USER_MANAGER_UNAVAILABLE`, `USER_RUNTIME_DIR_UNVERIFIED` or `USER_SERVICE_NONROOT_REQUIRED` | **BLOCKED / NOT PROVEN** for rootless persistent service. Keep the original runner; investigate a separately authorized privileged setup or real host evidence, not a blind retry. |
+
+### Proposed sudo-free installation contract — DESIGN ONLY
+
+After **successful fresh user-service preflight** and **separate Owner approval**,
+a future narrow implementation could register the independently authenticated
+second Runner in its own `$HOME/wonjae-direct-worker-secondary` directory,
+then install a **per-user** unit under
+`~/.config/systemd/user/<separate-second-runner>.service` with
+`ExecStart=<second-runner-root>/runsvc.sh` and the separate Runner working
+directory, using `systemctl --user daemon-reload` and
+`systemctl --user enable --now <exact-unit>`. GitHub explicitly requires
+custom Linux Runner services to start via `runsvc.sh`, not `run.sh`.
+These are **future mutating operations**, absent from the current script and PR.
+
+The later Owner-only installer must independently check exact GitHub Runner
+identity, repository Administration/Variables permissions, offline release digest,
+unique worktree/credential isolation, configured `runsvc.sh`, trusted user-manager
+runtime access and lack of same-project writes. It must not replace, restart or
+uninstall the first Runner or change `CODEX_AUTH_JSON`. Any partial config/
+registration failure is reported for bounded recovery, not auto-cleaned.
+
+**WSL2 limitation:** even with user lingering enabled, a systemd service does
+**not** keep the whole WSL instance alive. The existing Windows/WSL startup path
+remains an independent operational prerequisite; never claim reboot-autostart
+from `user_linger=yes` alone.
+
+**Current authority remains unchanged:** existing `activate` still explicitly
+requires `sudo_noninteractive=true`. No new install route is authorized by
+these three file changes; no Secret, GitHub Variable, privilege, Runner
+registration/start or product execution has been performed. Static CI cannot
+prove the home-PC user service until a future read-only `inspect` is run.
