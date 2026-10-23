@@ -24,13 +24,21 @@ from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 if __package__:
     from .wafl_r2_preview_gate import (
-        GateError, command_json, deployment_version, require_bindings,
-        require_dev_name, require_worker_origin,
+        GateError,
+        command_json,
+        deployment_version,
+        require_bindings,
+        require_dev_name,
+        require_worker_origin,
     )
 else:
     from wafl_r2_preview_gate import (
-        GateError, command_json, deployment_version, require_bindings,
-        require_dev_name, require_worker_origin,
+        GateError,
+        command_json,
+        deployment_version,
+        require_bindings,
+        require_dev_name,
+        require_worker_origin,
     )
 
 PNG = base64.b64decode(
