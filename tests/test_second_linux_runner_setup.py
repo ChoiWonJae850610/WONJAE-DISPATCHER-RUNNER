@@ -268,6 +268,114 @@ def test_rootless_probe_is_never_reused_as_automatic_activation_authority(monkey
         setup.require_activation_host(facts)
 
 
+
+def test_verify_missing_gh_cli_has_distinct_nonsecret_failure(monkeypatch):
+    monkeypatch.setattr(setup.shutil, "which", lambda name: None)
+    monkeypatch.setattr(
+        setup, "git_variables", lambda _repo: pytest.fail("must not query variables"),
+    )
+    with pytest.raises(
+        setup.SetupBlocked, match="^SECOND_RUNNER_VERIFY_GH_CLI_MISSING$",
+    ):
+        setup.verify_second_runner("example/repo", "runner-a", "runner-b")
+
+
+def test_verify_missing_github_token_has_distinct_failure(monkeypatch):
+    monkeypatch.setattr(setup.shutil, "which", lambda name: "/usr/bin/gh")
+    monkeypatch.delenv("GH_TOKEN", raising=False)
+    monkeypatch.setattr(
+        setup, "git_variables", lambda _repo: pytest.fail("must not query variables"),
+    )
+    with pytest.raises(
+        setup.SetupBlocked, match="^SECOND_RUNNER_GITHUB_AUTH_MISSING$",
+    ):
+        setup.verify_second_runner("example/repo", "runner-a", "runner-b")
+
+
+def test_verify_variables_command_failure_never_exposes_gh_output(
+    monkeypatch, capsys,
+):
+    monkeypatch.setattr(setup.shutil, "which", lambda name: "/usr/bin/gh")
+    monkeypatch.setenv("GH_TOKEN", "test-private-token")
+
+    def reject_variables_command(args, **kwargs):
+        assert args[:3] == ["gh", "variable", "list"]
+        return SimpleNamespace(
+            returncode=1,
+            stdout="test-private-token",
+            stderr="403 test-private-token",
+        )
+
+    monkeypatch.setattr(setup.subprocess, "run", reject_variables_command)
+    monkeypatch.setattr(
+        setup, "gh_api", lambda _endpoint: pytest.fail("must stop before runners"),
+    )
+    with pytest.raises(
+        setup.SetupBlocked, match="^SECOND_RUNNER_VERIFY_VARIABLES_QUERY_FAILED$",
+    ) as exc:
+        setup.verify_second_runner("example/repo", "runner-a", "runner-b")
+    assert "test-private-token" not in str(exc.value)
+    assert capsys.readouterr().out == ""
+
+
+def test_verify_runners_api_failure_identified_after_matching_variables(
+    monkeypatch, capsys,
+):
+    monkeypatch.setattr(setup.shutil, "which", lambda name: "/usr/bin/gh")
+    monkeypatch.setenv("GH_TOKEN", "test-private-token")
+    monkeypatch.setattr(
+        setup, "git_variables", lambda _repo: {
+            "DW_PRIMARY_RUNNER_NAME": "runner-a",
+            "DW_SECONDARY_RUNNER_NAME": "runner-b",
+        },
+    )
+    seen = []
+
+    def reject_runner_api(endpoint):
+        seen.append(endpoint)
+        raise setup.SetupBlocked("SECOND_RUNNER_COMMAND_FAILED")
+
+    monkeypatch.setattr(setup, "gh_api", reject_runner_api)
+    with pytest.raises(
+        setup.SetupBlocked, match="^SECOND_RUNNER_VERIFY_RUNNERS_API_FAILED$",
+    ) as exc:
+        setup.verify_second_runner("example/repo", "runner-a", "runner-b")
+    assert seen == ["repos/example/repo/actions/runners?per_page=100"]
+    assert "test-private-token" not in str(exc.value)
+    assert capsys.readouterr().out == ""
+
+
+def test_verify_existing_variable_and_inventory_guards_remain(monkeypatch):
+    monkeypatch.setattr(setup.shutil, "which", lambda name: "/usr/bin/gh")
+    monkeypatch.setenv("GH_TOKEN", "test-private-token")
+    monkeypatch.setattr(
+        setup, "git_variables", lambda _repo: {
+            "DW_PRIMARY_RUNNER_NAME": "runner-a",
+            "DW_SECONDARY_RUNNER_NAME": "runner-b",
+        },
+    )
+    monkeypatch.setattr(
+        setup, "gh_api", lambda _endpoint: {
+            "total_count": 2,
+            "runners": [fake_runner("runner-a"), fake_runner("runner-b")],
+        },
+    )
+    assert setup.verify_second_runner("example/repo", "runner-a", "runner-b") is None
+    with pytest.raises(setup.SetupBlocked, match="SECOND_RUNNER_VARIABLES_NOT_READY"):
+        setup.verify_second_runner("example/repo", "runner-a", "wrong-b")
+
+
+def test_verify_invalid_variables_response_keeps_existing_error(monkeypatch):
+    monkeypatch.setattr(setup.shutil, "which", lambda name: "/usr/bin/gh")
+    monkeypatch.setenv("GH_TOKEN", "test-private-token")
+
+    def invalid_variables(_repo):
+        raise setup.SetupBlocked("SECOND_RUNNER_VARIABLES_INVALID")
+
+    monkeypatch.setattr(setup, "git_variables", invalid_variables)
+    with pytest.raises(setup.SetupBlocked, match="^SECOND_RUNNER_VARIABLES_INVALID$"):
+        setup.verify_second_runner("example/repo", "runner-a", "runner-b")
+
 def test_inspection_source_contains_no_linger_mutation_or_rootless_service_start():
     source = (
         Path(__file__).resolve().parents[1] / "scripts" / "second_linux_runner_setup.py"
