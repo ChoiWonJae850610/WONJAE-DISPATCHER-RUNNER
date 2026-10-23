@@ -189,7 +189,8 @@ def test_workflow_is_scoped_to_registered_nonproduction_gate():
         '"registered_development_psql_verify_v1", '
         '"registered_development_readiness_v1", '
         '"wafl_g1v1v2_preparation_guard_v1", '
-        '"classmo_editorial_027_p2_live_guard_v1"].include?(executor)' in workflow
+        '"classmo_editorial_027_p2_live_guard_v1", '
+        '"wafl_development_media_probe_v1"].include?(executor)' in workflow
     )
     for needle in (
         'config["environment"] == "development"',
