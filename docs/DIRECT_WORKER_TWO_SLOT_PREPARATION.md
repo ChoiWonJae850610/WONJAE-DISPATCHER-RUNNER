@@ -253,3 +253,37 @@ requires `sudo_noninteractive=true`. No new install route is authorized by
 these three file changes; no Secret, GitHub Variable, privilege, Runner
 registration/start or product execution has been performed. Static CI cannot
 prove the home-PC user service until a future read-only `inspect` is run.
+
+## Read-only verification failure classification (2026-10-23)
+
+[Second Linux Runner verify #39914027755](https://github.com/ChoiWonJae850610/WONJAE-DISPATCHER-RUNNER/actions/runs/39914027755)
+ran on `WONJAE-HOME-DIRECT-WORKER-2` at trusted `main` SHA
+`4616e71b6a3e2e438e8e513e360acf68c74fee30`, but exited from the
+`verify` step with the **generic** `SECOND_RUNNER_COMMAND_FAILED`.
+This is evidence that a CLI read failed, **not** evidence of missing token
+permissions, broken Codex authentication or a nonfunctional second Runner.
+The original log intentionally suppressed stdout/stderr; the precise
+failed command cannot be reconstructed retrospectively.
+
+The small `verify_second_runner` change reports these bounded **non-secret
+codes** at the next separately authorized, trusted-main read-only `verify`:
+
+| Code | Evidence established (no secrets or API error bodies exposed) |
+| --- | --- |
+| `SECOND_RUNNER_VERIFY_GH_CLI_MISSING` | `gh` executable unavailable on the assigned Runner's PATH |
+| `SECOND_RUNNER_GITHUB_AUTH_MISSING` | Protected `GH_TOKEN` input absent or empty (never output its value) |
+| `SECOND_RUNNER_VERIFY_VARIABLES_QUERY_FAILED` | `gh variable list` command failed; cause may be authorization, network, CLI/runtime or repository issue and is **not** presumed |
+| `SECOND_RUNNER_VARIABLES_INVALID` | Variables response invalid JSON/shape |
+| `SECOND_RUNNER_VARIABLES_NOT_READY` | Both exact Runner-name Variables did not match the requested names |
+| `SECOND_RUNNER_VERIFY_RUNNERS_API_FAILED` | Runner inventory `gh api` command failed after Variables had matched |
+| `SECOND_RUNNER_GITHUB_RESPONSE_INVALID` | GitHub Runner API response not valid JSON/shape |
+| Existing `SECOND_RUNNER_REQUIRED_HOST_NOT_ONLINE` / `SECOND_RUNNER_LABELS_MISMATCH` / `SECOND_RUNNER_INVENTORY_*` | API read succeeded but Runner identity, labels, status or completeness failed the original gate |
+| `SECOND_RUNNER_VERIFY_PASS` | Exact Variables and registered online Runner labels observed; neither live Codex dual-run nor reboot persistence has been validated |
+
+The `verify` checks do **not** list credential content, start jobs, change
+GitHub Variables, require privilege changes, re-register a Runner, inspect
+Codex secrets or modify either systemd service. The generic command helper
+keeps its existing sanitized behavior for `activate`, and `inspect`
+is unaffected. A successful PR-head CI is static/offline only; the new codes
+become runtime evidence **only after a separate Owner-approved main merge and
+read-only workflow_dispatch**, neither of which is part of this preparation.

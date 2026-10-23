@@ -350,11 +350,27 @@ def set_slot_variables(repository: str, primary: str, secondary: str) -> None:
 
 
 def verify_second_runner(repository: str, primary: str, secondary: str) -> None:
-    variables = git_variables(repository)
+    # This path observes only repository Variables and Runner inventory. Report
+    # a fixed non-secret code for each query stage; never print gh output.
+    if not shutil.which("gh"):
+        raise SetupBlocked("SECOND_RUNNER_VERIFY_GH_CLI_MISSING")
+    if not os.environ.get("GH_TOKEN"):
+        raise SetupBlocked("SECOND_RUNNER_GITHUB_AUTH_MISSING")
+    try:
+        variables = git_variables(repository)
+    except SetupBlocked as exc:
+        if str(exc) == "SECOND_RUNNER_COMMAND_FAILED":
+            raise SetupBlocked("SECOND_RUNNER_VERIFY_VARIABLES_QUERY_FAILED") from None
+        raise
     if (variables.get("DW_PRIMARY_RUNNER_NAME") != primary
             or variables.get("DW_SECONDARY_RUNNER_NAME") != secondary):
         raise SetupBlocked("SECOND_RUNNER_VARIABLES_NOT_READY")
-    inventory = gh_api(f"repos/{repository}/actions/runners?per_page=100")
+    try:
+        inventory = gh_api(f"repos/{repository}/actions/runners?per_page=100")
+    except SetupBlocked as exc:
+        if str(exc) == "SECOND_RUNNER_COMMAND_FAILED":
+            raise SetupBlocked("SECOND_RUNNER_VERIFY_RUNNERS_API_FAILED") from None
+        raise
     runner_inventory(inventory, primary, secondary, require_secondary=True)
 
 
