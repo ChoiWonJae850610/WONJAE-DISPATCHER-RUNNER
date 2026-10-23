@@ -21,7 +21,7 @@ import time
 from pathlib import Path
 from urllib.parse import urlparse
 
-from wonjae_dispatcher_runner.credential_slot import require_independent_auth
+from wonjae_dispatcher_runner.credential_slot import CredentialSlotError, require_independent_auth
 
 NAME_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 SHA_RE = re.compile(r"^[0-9a-f]{64}$")
@@ -273,10 +273,13 @@ def activate(repository: str, primary: str, secondary: str) -> None:
     require_idle_direct_worker(repository)
     inventory = gh_api(f"repos/{repository}/actions/runners?per_page=100")
     runner_inventory(inventory, primary, secondary, require_secondary=False)
-    require_independent_auth(
-        os.environ.get("PRIMARY_CODEX_AUTH", ""),
-        os.environ.get("SECONDARY_CODEX_AUTH", ""),
-    )
+    try:
+        require_independent_auth(
+            os.environ.get("PRIMARY_CODEX_AUTH", ""),
+            os.environ.get("SECONDARY_CODEX_AUTH", ""),
+        )
+    except CredentialSlotError:
+        raise SetupBlocked("SECOND_RUNNER_CODEX_AUTH_NOT_INDEPENDENT") from None
     if not shutil.which("gh") or not shutil.which("curl") or not shutil.which("tar"):
         raise SetupBlocked("SECOND_RUNNER_TOOLS_MISSING")
     release = gh_api("repos/actions/runner/releases/latest")
