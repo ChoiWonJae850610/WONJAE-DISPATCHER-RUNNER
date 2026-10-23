@@ -15,6 +15,7 @@ import platform
 import pwd
 import re
 import shutil
+import stat
 import subprocess
 import tempfile
 import time
@@ -85,6 +86,99 @@ def host_facts(home: Path) -> dict[str, object]:
         "capacity_ok": available >= MIN_AVAILABLE_MEMORY and disk >= MIN_AVAILABLE_DISK,
     }
 
+
+
+def _readonly_systemd_query(
+    command: list[str], *, env: dict[str, str], allow_degraded: bool = False,
+) -> str | None:
+    """Read a fixed systemd state only; ignore stderr and never run a shell."""
+    try:
+        result = subprocess.run(
+            command, check=False, capture_output=True, text=True,
+            timeout=5, env=env,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if result.returncode != 0 and not (allow_degraded and result.returncode == 1):
+        return None
+    return result.stdout.strip().lower()
+
+
+def user_service_blocker(
+    *, nonroot: bool, runtime_owned: bool, linger: str, manager: str,
+) -> str:
+    """Pure readiness classification; a candidate is NOT installation authority."""
+    if not nonroot:
+        return "USER_SERVICE_NONROOT_REQUIRED"
+    if not runtime_owned:
+        return "USER_RUNTIME_DIR_UNVERIFIED"
+    if linger == "no":
+        return "USER_LINGER_DISABLED"
+    if linger != "yes":
+        return "USER_LINGER_UNVERIFIED"
+    if manager not in {"running", "degraded"}:
+        return "USER_MANAGER_UNAVAILABLE"
+    return "NONE"
+
+
+def inspect_user_systemd() -> dict[str, object]:
+    """Read-only per-user systemd/lingering check with no sudo or account edits.
+
+    Only invoke 'loginctl show-user' and 'systemctl --user is-system-running'.
+    The runtime directory is derived from the real uid; no caller-supplied path.
+    """
+    uid = os.getuid()
+    runtime = Path("/run/user") / str(uid)
+    try:
+        st = runtime.lstat()
+        runtime_owned = (
+            stat.S_ISDIR(st.st_mode)
+            and st.st_uid == uid
+            and stat.S_IMODE(st.st_mode) & 0o077 == 0
+        )
+    except OSError:
+        runtime_owned = False
+
+    # Do not forward GitHub/Codex credential environment to these system probes.
+    env = {
+        "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
+        "LANG": "C",
+        "XDG_RUNTIME_DIR": str(runtime),
+    }
+    if runtime_owned:
+        bus = runtime / "bus"
+        try:
+            if stat.S_ISSOCK(bus.lstat().st_mode):
+                env["DBUS_SESSION_BUS_ADDRESS"] = "unix:path=" + str(bus)
+        except OSError:
+            pass
+
+    linger_raw = _readonly_systemd_query(
+        ["loginctl", "show-user", str(uid), "--property=Linger", "--value"],
+        env=env,
+    )
+    linger = linger_raw if linger_raw in {"yes", "no"} else "unknown"
+    manager_raw = (
+        _readonly_systemd_query(
+            ["systemctl", "--user", "is-system-running"],
+            env=env, allow_degraded=True,
+        ) if runtime_owned else None
+    )
+    manager = manager_raw if manager_raw in {"running", "degraded"} else "unavailable"
+    blocker = user_service_blocker(
+        nonroot=uid != 0,
+        runtime_owned=runtime_owned,
+        linger=linger,
+        manager=manager,
+    )
+    return {
+        "user_runtime_dir_owned": runtime_owned,
+        "user_linger": linger,
+        "user_systemd_manager": manager,
+        "user_systemd_accessible": manager in {"running", "degraded"},
+        "user_service_candidate": blocker == "NONE",
+        "user_service_blocker": blocker,
+    }
 
 def require_activation_host(facts: dict[str, object]) -> None:
     for key in ("linux", "wsl2", "systemd", "sudo_noninteractive", "capacity_ok"):
@@ -347,6 +441,7 @@ def main() -> int:
             raise SetupBlocked("SECOND_RUNNER_REPOSITORY_INVALID")
         if args.operation == "inspect":
             facts = host_facts(Path.home())
+            facts.update(inspect_user_systemd())
             root = Path.home() / RUNNER_SUBDIR
             print("SECOND_RUNNER_INSPECTION=" + json.dumps({
                 **facts,
