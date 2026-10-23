@@ -87,7 +87,6 @@ def host_facts(home: Path) -> dict[str, object]:
     }
 
 
-
 def _readonly_systemd_query(
     command: list[str], *, env: dict[str, str], allow_degraded: bool = False,
 ) -> str | None:
@@ -179,6 +178,7 @@ def inspect_user_systemd() -> dict[str, object]:
         "user_service_candidate": blocker == "NONE",
         "user_service_blocker": blocker,
     }
+
 
 def require_activation_host(facts: dict[str, object]) -> None:
     for key in ("linux", "wsl2", "systemd", "sudo_noninteractive", "capacity_ok"):
