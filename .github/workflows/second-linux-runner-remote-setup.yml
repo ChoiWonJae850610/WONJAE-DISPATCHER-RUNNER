@@ -1,0 +1,77 @@
+# Explicit Owner workflow only: inspect first, then separately authorize activation.
+# Never invoked from a product Direct Worker or repository pull_request/push.
+name: Second Linux Runner Remote Setup
+run-name: Second Linux Runner ${{ inputs.operation }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: Inspect (read-only), activate (register/install/start), or verify (read-only)
+        required: true
+        type: choice
+        default: inspect
+        options:
+          - inspect
+          - activate
+          - verify
+      primary_runner_name:
+        description: Exact existing GitHub Linux runner name (verify in repository Settings)
+        required: true
+        type: string
+      secondary_runner_name:
+        description: Distinct requested second Linux runner name
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: second-linux-runner-remote-setup
+  cancel-in-progress: false
+
+jobs:
+  remote-setup:
+    if: ${{ github.ref == 'refs/heads/main' && github.actor == github.repository_owner }}
+    runs-on: [self-hosted, Linux, X64, direct-worker]
+    timeout-minutes: 30
+    env:
+      DW_PRIMARY_NAME: ${{ inputs.primary_runner_name }}
+      DW_SECONDARY_NAME: ${{ inputs.secondary_runner_name }}
+      RUNNER_NAME: ${{ runner.name }}
+    steps:
+      - name: Checkout exact trusted main
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Inspect home WSL2 host without any mutation
+        if: ${{ inputs.operation == 'inspect' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          PYTHONPATH=src python3 scripts/second_linux_runner_setup.py --operation inspect
+
+      - name: Verify existing runner identities and repository variables
+        if: ${{ inputs.operation == 'verify' }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.OWNER_GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          PYTHONPATH=src python3 scripts/second_linux_runner_setup.py --operation verify
+
+      - name: Activate second service after independent Owner approval
+        if: ${{ inputs.operation == 'activate' }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.OWNER_GITHUB_TOKEN }}
+          PRIMARY_CODEX_AUTH: ${{ secrets.CODEX_AUTH_JSON }}
+          SECONDARY_CODEX_AUTH: ${{ secrets.CODEX_AUTH_JSON_SECONDARY }}
+        run: |
+          set -euo pipefail
+          # This path requires a *separate* Owner workflow_dispatch activation.
+          # Missing sudo/systemd/Administration:write/independent auth fails closed.
+          PYTHONPATH=src python3 scripts/second_linux_runner_setup.py --operation activate
