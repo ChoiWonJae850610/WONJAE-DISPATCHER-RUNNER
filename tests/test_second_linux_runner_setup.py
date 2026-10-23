@@ -128,6 +128,16 @@ def test_inspect_path_is_read_only_even_without_credentials(monkeypatch, capsys)
             "disk_gib": 30, "capacity_ok": True,
         },
     )
+    monkeypatch.setattr(
+        setup, "inspect_user_systemd", lambda: {
+            "user_runtime_dir_owned": True,
+            "user_linger": "yes",
+            "user_systemd_manager": "running",
+            "user_systemd_accessible": True,
+            "user_service_candidate": True,
+            "user_service_blocker": "NONE",
+        },
+    )
     monkeypatch.setattr(sys, "argv", ["setup", "--operation", "inspect"])
     assert setup.main() == 0
     printed = capsys.readouterr().out
@@ -169,3 +179,103 @@ def test_workflows_keep_owner_only_manual_activation_and_primary_secret_immutabl
         "$"+"{{ secrets.CODEX_AUTH_JSON_SECONDARY }}"
     )
     assert all(step["name"] != "Start product Direct Worker" for step in steps)
+
+
+@pytest.mark.parametrize(
+    ("nonroot", "runtime_owned", "linger", "manager", "expected"),
+    [
+        (True, True, "yes", "running", "NONE"),
+        (True, True, "yes", "degraded", "NONE"),
+        (True, True, "no", "running", "USER_LINGER_DISABLED"),
+        (True, True, "unknown", "running", "USER_LINGER_UNVERIFIED"),
+        (True, True, "yes", "unavailable", "USER_MANAGER_UNAVAILABLE"),
+        (True, False, "yes", "running", "USER_RUNTIME_DIR_UNVERIFIED"),
+        (False, True, "yes", "running", "USER_SERVICE_NONROOT_REQUIRED"),
+    ],
+)
+def test_user_service_gate_is_separate_from_sudo_and_fails_closed(
+    nonroot, runtime_owned, linger, manager, expected,
+):
+    assert setup.user_service_blocker(
+        nonroot=nonroot, runtime_owned=runtime_owned,
+        linger=linger, manager=manager,
+    ) == expected
+
+
+def test_user_service_read_only_systemd_commands_never_mutate(monkeypatch):
+    calls = []
+
+    def fake_run(args, **kwargs):
+        calls.append((args, kwargs))
+        output = "yes\n" if args[0] == "loginctl" else "degraded\n"
+        return SimpleNamespace(
+            stdout=output, returncode=0 if args[0] == "loginctl" else 1,
+        )
+
+    monkeypatch.setattr(setup.subprocess, "run", fake_run)
+    env = {"PATH": "/usr/bin:/bin", "LANG": "C", "XDG_RUNTIME_DIR": "/run/user/1000"}
+    assert setup._readonly_systemd_query(
+        ["loginctl", "show-user", "1000", "--property=Linger", "--value"],
+        env=env,
+    ) == "yes"
+    assert setup._readonly_systemd_query(
+        ["systemctl", "--user", "is-system-running"],
+        env=env, allow_degraded=True,
+    ) == "degraded"
+    assert [x[0] for x in calls] == [
+        ["loginctl", "show-user", "1000", "--property=Linger", "--value"],
+        ["systemctl", "--user", "is-system-running"],
+    ]
+    for _, kwargs in calls:
+        assert kwargs["timeout"] == 5
+        assert kwargs["capture_output"] is True
+        assert kwargs["check"] is False
+        assert kwargs["env"] == env
+        assert "shell" not in kwargs
+    assert not any(
+        command in args
+        for args, _ in calls
+        for command in ("enable-linger", "daemon-reload", "start", "enable")
+    )
+
+
+def test_systemd_probe_handles_unavailable_bus_and_timeout(monkeypatch):
+    def failed(*args, **kwargs):
+        raise setup.subprocess.TimeoutExpired(["systemctl"], timeout=5)
+
+    monkeypatch.setattr(setup.subprocess, "run", failed)
+    assert setup._readonly_systemd_query(
+        ["systemctl", "--user", "is-system-running"],
+        env={"PATH": "/usr/bin:/bin"},
+        allow_degraded=True,
+    ) is None
+
+
+def test_rootless_probe_is_never_reused_as_automatic_activation_authority(monkeypatch):
+    # The old install path must remain explicitly gated by sudo; a successful
+    # user-service candidate is only a diagnostic until a separate trusted PR.
+    facts = {
+        "linux": True,
+        "wsl2": True,
+        "systemd": True,
+        "sudo_noninteractive": False,
+        "capacity_ok": True,
+        "user_linger": "yes",
+        "user_systemd_accessible": True,
+        "user_service_candidate": True,
+    }
+    with pytest.raises(setup.SetupBlocked, match="SECOND_RUNNER_HOST_BLOCKED_SUDO_NONINTERACTIVE"):
+        setup.require_activation_host(facts)
+
+
+def test_inspection_source_contains_no_linger_mutation_or_rootless_service_start():
+    source = (
+        Path(__file__).resolve().parents[1] / "scripts" / "second_linux_runner_setup.py"
+    ).read_text(encoding="utf-8")
+    assert "loginctl" in source
+    assert '"show-user"' in source
+    assert '"--property=Linger"' in source
+    assert '"is-system-running"' in source
+    assert "enable-linger" not in source
+    assert "systemctl --user enable" not in source
+    assert "systemctl --user start" not in source
