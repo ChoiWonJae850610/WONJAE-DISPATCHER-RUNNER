@@ -173,6 +173,14 @@ def test_workflows_keep_owner_only_manual_activation_and_primary_secret_immutabl
     assert "DW_SECONDARY_NAME" in job["env"]
     steps = job["steps"]
     assert len(steps) == 4
+    assert steps[2]["env"]["DW_VERIFY_PRIMARY_NAME"] == (
+        "$"+"{{ vars.DW_PRIMARY_RUNNER_NAME }}"
+    )
+    assert steps[2]["env"]["DW_VERIFY_SECONDARY_NAME"] == (
+        "$"+"{{ vars.DW_SECONDARY_RUNNER_NAME }}"
+    )
+    assert "DW_VERIFY_PRIMARY_NAME" not in job["env"]
+    assert "DW_VERIFY_SECONDARY_NAME" not in steps[3]["env"]
     assert "PRIMARY_CODEX_AUTH" not in str(steps[1])
     assert "SECONDARY_CODEX_AUTH" not in str(steps[1])
     assert steps[3]["env"]["SECONDARY_CODEX_AUTH"] == (
@@ -374,6 +382,95 @@ def test_verify_invalid_variables_response_keeps_existing_error(monkeypatch):
     monkeypatch.setattr(setup, "git_variables", invalid_variables)
     with pytest.raises(setup.SetupBlocked, match="^SECOND_RUNNER_VARIABLES_INVALID$"):
         setup.verify_second_runner("example/repo", "runner-a", "runner-b")
+
+
+@pytest.mark.parametrize(
+    ("configured_primary", "configured_secondary"),
+    [
+        ("", ""),
+        ("runner-a", ""),
+        ("", "runner-b"),
+        ("runner-b", "runner-a"),
+        ("runner-a", "runner-a"),
+        ("runner-a ", "runner-b"),
+    ],
+)
+def test_verify_actions_vars_missing_or_mismatched_fails_before_api(
+    monkeypatch, configured_primary, configured_secondary,
+):
+    monkeypatch.setattr(setup.shutil, "which", lambda _name: "/usr/bin/gh")
+    monkeypatch.setenv("GH_TOKEN", "test-placeholder-not-real")
+    monkeypatch.setattr(
+        setup, "git_variables", lambda _repo: pytest.fail("must not list Variables"),
+    )
+    monkeypatch.setattr(
+        setup, "gh_api", lambda _url: pytest.fail("must not query Runner API"),
+    )
+    with pytest.raises(
+        setup.SetupBlocked, match="^SECOND_RUNNER_VARIABLES_NOT_READY$",
+    ):
+        setup.verify_second_runner(
+            "example/repo", "runner-a", "runner-b",
+            configured_variables={
+                "DW_PRIMARY_RUNNER_NAME": configured_primary,
+                "DW_SECONDARY_RUNNER_NAME": configured_secondary,
+            },
+        )
+
+
+def test_main_verify_uses_workflow_actions_vars_and_only_runner_api(
+    monkeypatch, capsys,
+):
+    monkeypatch.setattr(setup.shutil, "which", lambda _name: "/usr/bin/gh")
+    monkeypatch.setenv("GH_TOKEN", "test-placeholder-not-real")
+    monkeypatch.setenv("DW_PRIMARY_NAME", "runner-a")
+    monkeypatch.setenv("DW_SECONDARY_NAME", "runner-b")
+    monkeypatch.setenv("RUNNER_NAME", "runner-b")
+    monkeypatch.setenv("GITHUB_REPOSITORY", "example/repo")
+    monkeypatch.setenv("DW_VERIFY_PRIMARY_NAME", "runner-a")
+    monkeypatch.setenv("DW_VERIFY_SECONDARY_NAME", "runner-b")
+    monkeypatch.setattr(
+        setup, "git_variables", lambda _repo: pytest.fail("gh variable list forbidden"),
+    )
+    endpoints = []
+
+    def fake_api(endpoint):
+        endpoints.append(endpoint)
+        return {
+            "total_count": 2,
+            "runners": [fake_runner("runner-a"), fake_runner("runner-b")],
+        }
+
+    monkeypatch.setattr(setup, "gh_api", fake_api)
+    monkeypatch.setattr(sys, "argv", ["setup", "--operation", "verify"])
+    assert setup.main() == 0
+    assert capsys.readouterr().out == "SECOND_RUNNER_VERIFY_PASS\n"
+    assert endpoints == ["repos/example/repo/actions/runners?per_page=100"]
+
+
+def test_verify_workflow_vars_preserves_runner_api_failure_sanitization(
+    monkeypatch,
+):
+    monkeypatch.setattr(setup.shutil, "which", lambda _name: "/usr/bin/gh")
+    monkeypatch.setenv("GH_TOKEN", "test-placeholder-not-real")
+    monkeypatch.setattr(
+        setup, "git_variables", lambda _repo: pytest.fail("do not use CLI Variables"),
+    )
+
+    def fail_runner_api(_endpoint):
+        raise setup.SetupBlocked("SECOND_RUNNER_COMMAND_FAILED")
+
+    monkeypatch.setattr(setup, "gh_api", fail_runner_api)
+    with pytest.raises(
+        setup.SetupBlocked, match="^SECOND_RUNNER_VERIFY_RUNNERS_API_FAILED$",
+    ):
+        setup.verify_second_runner(
+            "example/repo", "runner-a", "runner-b",
+            configured_variables={
+                "DW_PRIMARY_RUNNER_NAME": "runner-a",
+                "DW_SECONDARY_RUNNER_NAME": "runner-b",
+            },
+        )
 
 
 def test_inspection_source_contains_no_linger_mutation_or_rootless_service_start():
