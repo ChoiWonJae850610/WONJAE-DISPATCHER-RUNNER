@@ -268,7 +268,6 @@ def test_rootless_probe_is_never_reused_as_automatic_activation_authority(monkey
         setup.require_activation_host(facts)
 
 
-
 def test_verify_missing_gh_cli_has_distinct_nonsecret_failure(monkeypatch):
     monkeypatch.setattr(setup.shutil, "which", lambda name: None)
     monkeypatch.setattr(
@@ -375,6 +374,7 @@ def test_verify_invalid_variables_response_keeps_existing_error(monkeypatch):
     monkeypatch.setattr(setup, "git_variables", invalid_variables)
     with pytest.raises(setup.SetupBlocked, match="^SECOND_RUNNER_VARIABLES_INVALID$"):
         setup.verify_second_runner("example/repo", "runner-a", "runner-b")
+
 
 def test_inspection_source_contains_no_linger_mutation_or_rootless_service_start():
     source = (
