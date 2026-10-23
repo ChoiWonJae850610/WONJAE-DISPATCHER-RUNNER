@@ -1,0 +1,96 @@
+# Owner-only hosted bootstrap for the SECOND, independent Codex session.
+# Existing bootstrap-codex-auth.yml and CODEX_AUTH_JSON remain untouched.
+name: Bootstrap Secondary Codex Auth
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: bootstrap-secondary-codex-auth
+  cancel-in-progress: false
+
+jobs:
+  bootstrap-secondary:
+    if: ${{ github.ref == 'refs/heads/main' && github.actor == github.repository_owner }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      PYTHONUNBUFFERED: "1"
+    steps:
+      - name: Verify dedicated first-time bootstrap authority
+        env:
+          GH_TOKEN: ${{ secrets.OWNER_GITHUB_TOKEN }}
+          PRIMARY_AUTH: ${{ secrets.CODEX_AUTH_JSON }}
+        run: |
+          set -euo pipefail
+          test -n "$GH_TOKEN" || { echo "::error::OWNER_TOKEN_MISSING"; exit 1; }
+          test -n "$PRIMARY_AUTH" || { echo "::error::PRIMARY_CODEX_AUTH_MISSING"; exit 1; }
+          existing="$(gh secret list --repo "$GITHUB_REPOSITORY" --json name --jq '.[].name')"
+          if printf '%s\n' "$existing" | grep -Fxq CODEX_AUTH_JSON_SECONDARY; then
+            echo "::error::SECONDARY_CODEX_AUTH_ALREADY_EXISTS"
+            exit 1
+          fi
+
+      - name: Checkout trusted main
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Initialize isolated ephemeral credential path
+        run: |
+          set -euo pipefail
+          echo "CODEX_HOME=$RUNNER_TEMP/secondary-codex-$GITHUB_RUN_ID" >> "$GITHUB_ENV"
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install trusted runner package
+        run: python -m pip install .
+
+      - name: Authorize independent ChatGPT device login
+        run: python scripts/bootstrap_codex_auth.py
+
+      - name: Reject a shared refresh session without printing credentials
+        env:
+          PRIMARY_AUTH: ${{ secrets.CODEX_AUTH_JSON }}
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import os
+          from pathlib import Path
+
+          from wonjae_dispatcher_runner.auth_store import load_auth_json_for_rotation
+          from wonjae_dispatcher_runner.credential_slot import require_independent_auth
+
+          candidate = load_auth_json_for_rotation(Path(os.environ["CODEX_HOME"]))
+          require_independent_auth(os.environ["PRIMARY_AUTH"], candidate)
+          print("SECONDARY_CODEX_AUTH_INDEPENDENT_SHAPE=true")
+          PY
+
+      - name: Save only secondary protected credential
+        env:
+          GH_TOKEN: ${{ secrets.OWNER_GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          test -s "$CODEX_HOME/auth.json"
+          existing="$(gh secret list --repo "$GITHUB_REPOSITORY" --json name --jq '.[].name')"
+          if printf '%s\n' "$existing" | grep -Fxq CODEX_AUTH_JSON_SECONDARY; then
+            echo "::error::SECONDARY_CODEX_AUTH_RACE"
+            exit 1
+          fi
+          gh secret set CODEX_AUTH_JSON_SECONDARY --repo "$GITHUB_REPOSITORY" < "$CODEX_HOME/auth.json"
+          echo "SECONDARY_CODEX_AUTH_STORED=true"
+
+      - name: Delete ephemeral credential files
+        if: ${{ always() }}
+        run: |
+          if [ -n "${CODEX_HOME:-}" ] && [ -d "$CODEX_HOME" ]; then
+            rm -rf -- "$CODEX_HOME"
+          fi
