@@ -113,43 +113,43 @@ This incremental change proposes two **manual, Owner-only, trusted-main**
 GitHub Actions workflows. Neither is dispatched or enabled by the PR itself:
 
 1. **Bootstrap Secondary Codex Auth** (GitHub-hosted Ubuntu):
-   workflow \`.github/workflows/bootstrap-secondary-codex-auth.yml\`.
-   On a separately authorized Owner \`workflow_dispatch\` it reuses the
-   existing, bounded device-code login helper in a *fresh hosted* \`CODEX_HOME\`.
+   workflow `.github/workflows/bootstrap-secondary-codex-auth.yml`.
+   On a separately authorized Owner `workflow_dispatch` it reuses the
+   existing, bounded device-code login helper in a *fresh hosted* `CODEX_HOME`.
    The verification URL and one-time user code appear in the protected job
    output; the Owner can authorize them in a browser from outside the home PC.
    Before writing, the job checks that the second Secret does not already
    exist and that the new refresh token differs from the primary session.
-   **Only** \`CODEX_AUTH_JSON_SECONDARY\` may be created. Existing
-   \`bootstrap-codex-auth.yml\` and \`CODEX_AUTH_JSON\` are untouched.
+   **Only** `CODEX_AUTH_JSON_SECONDARY` may be created. Existing
+   `bootstrap-codex-auth.yml` and `CODEX_AUTH_JSON` are untouched.
    Login on the same ChatGPT account does not guarantee independent refresh
    longevity until later live parallel smoke acceptance.
 2. **Second Linux Runner Remote Setup**:
-   workflow \`.github/workflows/second-linux-runner-remote-setup.yml\`.
-   It uses the already-registered \`[self-hosted, Linux, X64, direct-worker]\`
-   home Runner only after a separate Owner \`workflow_dispatch\`. The Owner
+   workflow `.github/workflows/second-linux-runner-remote-setup.yml`.
+   It uses the already-registered `[self-hosted, Linux, X64, direct-worker]`
+   home Runner only after a separate Owner `workflow_dispatch`. The Owner
    supplies the **exact existing primary runner name** from GitHub Settings
    and a **distinct requested secondary runner name**. The default operation
-   is \`inspect\`; there is no automatic install on checkout, PR or merge.
-   - \`inspect\` is read-only: confirm Linux/WSL2, \`systemd\`, non-interactive
-     \`sudo\`, available memory/disk and target directory availability.
+   is `inspect`; there is no automatic install on checkout, PR or merge.
+   - `inspect` is read-only: confirm Linux/WSL2, `systemd`, non-interactive
+     `sudo`, available memory/disk and target directory availability.
      It requires the job to be allocated to the expected *primary* runner.
      It does not read or write Codex/GitHub credential values.
-   - \`activate\` is a later, separately authorized mutating Owner action.
+   - `activate` is a later, separately authorized mutating Owner action.
      It requires two distinct stored Codex refresh sessions, a confirmed
      primary online with exact labels, no queued/in-progress product Direct
-     Worker, WSL2+\`systemd\`+\`sudo -n\`, free space/memory, and GitHub
+     Worker, WSL2+`systemd`+`sudo -n`, free space/memory, and GitHub
      API permissions. It obtains a short-lived **repository Runner registration
-     token** using the existing \`OWNER_GITHUB_TOKEN\`, downloads the official
-     \`actions/runner\` release with SHA-256 verification, writes only into
-     \`$HOME/wonjae-direct-worker-secondary\`, sets the two non-secret
-     \`DW_*_RUNNER_NAME\` Variables, registers a **new, distinct** Linux Runner
-     without \`--replace\`, and installs/starts its separate \`systemd\`
+     token** using the existing `OWNER_GITHUB_TOKEN`, downloads the official
+     `actions/runner` release with SHA-256 verification, writes only into
+     `$HOME/wonjae-direct-worker-secondary`, sets the two non-secret
+     `DW_*_RUNNER_NAME` Variables, registers a **new, distinct** Linux Runner
+     without `--replace`, and installs/starts its separate `systemd`
      service. It never starts a product job or changes Codex Secrets.
      Any missing dependency fails closed; a partial installation requires
      explicit Owner inspection, not blind reruns, forced reset or deletion.
-   - \`verify\` is read-only for host/repository state: both exact runner
-     names and the four registered labels must be observed as \`online\`,
+   - `verify` is read-only for host/repository state: both exact runner
+     names and the four registered labels must be observed as `online`,
      with expected GitHub Variable readback. This is **not** evidence
      that actual Codex parallel source jobs succeed.
 
@@ -162,16 +162,16 @@ GitHub Actions workflows. Neither is dispatched or enabled by the PR itself:
   **UNVERIFIED**: never silently widen it or create a new PAT. If the bounded
   setup fails due to privileges, stop and request separate Owner action.
 - The existing WSL2 Runner must be **online** to receive a remote inspection or
-  activation job. Local \`systemd\` support, non-interactive \`sudo\` for
-  \`svc.sh install/start\`, 6 GiB available Linux memory and 12 GiB disk
+  activation job. Local `systemd` support, non-interactive `sudo` for
+  `svc.sh install/start`, 6 GiB available Linux memory and 12 GiB disk
   are **UNVERIFIED until the inspect run**. GitHub-hosted bootstrap does not
   depend on home Runner availability.
 - GitHub Variables are written in an authenticated separate Owner activation
   only. No Variable, Secret, registration token, runner installation,
-  local \`.wslconfig\`, Production or product state is changed during PR
+  local `.wslconfig`, Production or product state is changed during PR
   preparation or CI. A non-atomic API write may leave one variable changed
   if remote access fails; the installer attempts to roll back only newly
-  created names, and reports \`MANUAL_REQUIRED\` if rollback cannot be
+  created names, and reports `MANUAL_REQUIRED` if rollback cannot be
   proven. If setup fails after both Variables are set, the existing
   primary Runner remains the named primary but recheck before source resumes.
 - The existing Linux Runner service, product Windows Runner services and
