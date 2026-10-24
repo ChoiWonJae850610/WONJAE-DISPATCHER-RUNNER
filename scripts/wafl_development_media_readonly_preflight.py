@@ -16,18 +16,18 @@ from pathlib import Path
 
 if __package__:
     from .wafl_development_media_bootstrap import (
-        BootstrapBlocked,
         RUNNER_REPOSITORY,
         SECRET_NAMES,
+        BootstrapBlocked,
         cloudflare_inventory,
         require,
         source_identity,
     )
 else:
     from wafl_development_media_bootstrap import (
-        BootstrapBlocked,
         RUNNER_REPOSITORY,
         SECRET_NAMES,
+        BootstrapBlocked,
         cloudflare_inventory,
         require,
         source_identity,
