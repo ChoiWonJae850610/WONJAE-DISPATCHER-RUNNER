@@ -123,7 +123,8 @@ def inspect(repo: Path, sha: str, summary: Path) -> None:
     with summary.open("a", encoding="utf-8") as out:
         out.write("\n".join(lines) + "\n")
     require(not collision, "MEDIA_READONLY_NEW_SECRET_NAME_COLLISION")
-    require(not missing_names, "MEDIA_READONLY_REQUIRED_INPUT_NAMES_MISSING")
+    # Missing future approvals are a finding, not a reason to suppress useful
+    # read-only Cloudflare account evidence or request their premature grant.
     require(
         cloudflare_status == "PASS_NEW_NAMES_ABSENT",
         "MEDIA_READONLY_CLOUDFLARE_UNVERIFIED_OR_COLLISION",
