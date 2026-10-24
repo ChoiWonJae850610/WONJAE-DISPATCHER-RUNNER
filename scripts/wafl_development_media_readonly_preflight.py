@@ -14,14 +14,24 @@ import re
 import subprocess
 from pathlib import Path
 
-from wafl_development_media_bootstrap import (
-    BootstrapBlocked,
-    RUNNER_REPOSITORY,
-    SECRET_NAMES,
-    cloudflare_inventory,
-    require,
-    source_identity,
-)
+if __package__:
+    from .wafl_development_media_bootstrap import (
+        BootstrapBlocked,
+        RUNNER_REPOSITORY,
+        SECRET_NAMES,
+        cloudflare_inventory,
+        require,
+        source_identity,
+    )
+else:
+    from wafl_development_media_bootstrap import (
+        BootstrapBlocked,
+        RUNNER_REPOSITORY,
+        SECRET_NAMES,
+        cloudflare_inventory,
+        require,
+        source_identity,
+    )
 
 REQUIRED_INPUT_NAMES = (
     "OWNER_GITHUB_TOKEN",
