@@ -148,9 +148,15 @@ def cloudflare_inventory(env: dict[str, str]) -> str:
     require(isinstance(scripts_response, dict), "BOOTSTRAP_WORKER_LIST_UNVERIFIED")
     scripts = scripts_response.get("result")
     info = scripts_response.get("result_info")
-    require(isinstance(scripts, list) and isinstance(info, dict)
-            and info.get("total_pages") == 1,
-            "BOOTSTRAP_WORKER_LIST_PAGINATED_OR_AMBIGUOUS")
+    # Cloudflare's Workers scripts list is not paginated in its documented
+    # response schema; unlike R2 it may have no result_info at all. Never
+    # accept an explicit pagination indicator that announces hidden pages.
+    require(
+        isinstance(scripts, list)
+        and (info is None or (isinstance(info, dict) and info.get("total_pages") == 1))
+        and len(scripts) < 100,
+        "BOOTSTRAP_WORKER_LIST_PAGINATED_OR_AMBIGUOUS",
+    )
     names = {x.get("id") for x in scripts if isinstance(x, dict)}
     require(IMAGE_WORKER not in names and PDF_WORKER not in names,
             "BOOTSTRAP_TARGET_WORKER_ALREADY_EXISTS")
@@ -161,8 +167,15 @@ def cloudflare_inventory(env: dict[str, str]) -> str:
     buckets = bucket_response["result"]
     require(isinstance(buckets.get("buckets"), list),
             "BOOTSTRAP_BUCKET_LIST_UNVERIFIED")
-    require(not buckets.get("cursor") and len(buckets["buckets"]) < 100,
-            "BOOTSTRAP_BUCKET_LIST_PAGINATED_OR_AMBIGUOUS")
+    # R2 pagination lives at response.result_info.cursor, not result.cursor.
+    bucket_page = bucket_response.get("result_info")
+    require(
+        isinstance(bucket_page, dict)
+        and not bucket_page.get("cursor")
+        and bucket_page.get("total_count") == len(buckets["buckets"])
+        and len(buckets["buckets"]) < 100,
+        "BOOTSTRAP_BUCKET_LIST_PAGINATED_OR_AMBIGUOUS",
+    )
     require(BUCKET not in {x.get("name") for x in buckets["buckets"]
                            if isinstance(x, dict)},
             "BOOTSTRAP_TARGET_BUCKET_ALREADY_EXISTS")

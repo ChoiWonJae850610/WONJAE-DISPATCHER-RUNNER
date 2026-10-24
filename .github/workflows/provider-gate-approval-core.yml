@@ -137,7 +137,7 @@ jobs:
           abort("provider gate is not registered") unless config.is_a?(Hash)
           abort("provider gate approval mode mismatch") unless config["approval_mode"] == "sanjinworks_owner_button"
           executor = config["executor"]
-          abort("provider gate executor is unsupported") unless ["approval_only", "classmo_supabase_migration", "classmo_eas_build", "classmo_eas_update", "wafl_supabase_hardening", "wafl_eas_update", "wafl_eas_build", "esc_eas_build", "wafl_r2_preview_deploy", "wafl_supabase_g1_readonly", "wafl_supabase_g1_schema_apply", "wafl_supabase_g1_006_only_recovery", "classmo_editorial_016_readonly", "classmo_editorial_016_schema_apply", "classmo_editorial_017_storage_apply", "registered_supabase_migration_v1", "registered_development_psql_verify_v1", "registered_development_readiness_v1", "wafl_g1v1v2_preparation_guard_v1", "classmo_editorial_027_p2_live_guard_v1", "wafl_development_media_probe_v1", "wafl_development_media_bootstrap_v1"].include?(executor)
+          abort("provider gate executor is unsupported") unless ["approval_only", "classmo_supabase_migration", "classmo_eas_build", "classmo_eas_update", "wafl_supabase_hardening", "wafl_eas_update", "wafl_eas_build", "esc_eas_build", "wafl_r2_preview_deploy", "wafl_supabase_g1_readonly", "wafl_supabase_g1_schema_apply", "wafl_supabase_g1_006_only_recovery", "classmo_editorial_016_readonly", "classmo_editorial_016_schema_apply", "classmo_editorial_017_storage_apply", "registered_supabase_migration_v1", "registered_development_psql_verify_v1", "registered_development_readiness_v1", "wafl_g1v1v2_preparation_guard_v1", "classmo_editorial_027_p2_live_guard_v1", "wafl_development_media_probe_v1", "wafl_development_media_bootstrap_v1", "wafl_development_media_readonly_preflight_v1"].include?(executor)
           label = config["label"]
           abort("provider gate label missing") unless label.is_a?(String) && !label.strip.empty?
 
@@ -215,6 +215,31 @@ jobs:
               "PROVIDER_W006_005_BLOB" => config["migration_005_blob"],
               "PROVIDER_W006_006_BLOB" => config["migration_006_blob"],
             )
+          elsif executor == "wafl_development_media_readonly_preflight_v1"
+            abort("WAFL media read-only preflight is not the exact Owner route") unless
+              project == "WAFL" && gate == "development_media_preflight"
+            expected = {
+              "approval_mode" => "sanjinworks_owner_button",
+              "provider" => "cloudflare_development_media_readonly",
+              "environment" => "development",
+              "project_ref" => "aqqarddfmdfyzeonfgwl",
+              "bucket_name" => "wafl-media-dev",
+              "r2_worker_name" => "wafl-r2-dev",
+              "pdf_worker_name" => "wafl-pdf-dev",
+              "effect_policy" => "account_resource_and_credential_metadata_get_only",
+              "ready_for_owner" => true,
+              "requires_owner_session" => true,
+              "production" => false,
+              "destructive" => false,
+              "credential_mutation" => false,
+              "device_mutation" => false,
+            }
+            expected.each do |key, value|
+              abort("Unreviewed WAFL media read-only metadata #{key}") unless
+                config[key] == value
+            end
+            abort("Unreviewed WAFL media read-only gate keys") unless
+              config.keys.sort == (expected.keys + %w[label executor]).sort
           elsif executor == "wafl_development_media_bootstrap_v1"
             abort("WAFL isolated media bootstrap route mismatch") unless
               project == "WAFL" && gate == "development_media_bootstrap"
@@ -912,6 +937,20 @@ jobs:
         run: |
           set -euo pipefail
           npm install --global "wrangler@4.86.0" --ignore-scripts --no-audit --no-fund
+
+      - name: WAFL Development · Owner-authenticated media account metadata GET only
+        if: env.PROVIDER_EXECUTOR == 'wafl_development_media_readonly_preflight_v1'
+        env:
+          OWNER_GITHUB_TOKEN: ${{ secrets.product_read_token }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.cloudflare_token }}
+          WAFL_CLOUDFLARE_ACCOUNT_ID: ${{ secrets.cloudflare_account_id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python scripts/wafl_development_media_readonly_preflight.py \
+            --repo "$GITHUB_WORKSPACE/.approval/product" \
+            --source-sha "$SOURCE_SHA" \
+            --summary "$GITHUB_STEP_SUMMARY"
 
       - name: WAFL Development · isolated first Worker/bucket/secret setup (future Owner only)
         if: env.PROVIDER_EXECUTOR == 'wafl_development_media_bootstrap_v1'
