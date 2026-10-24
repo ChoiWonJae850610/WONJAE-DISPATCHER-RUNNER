@@ -103,13 +103,15 @@ def inspect(repo: Path, sha: str, summary: Path) -> None:
         cloudflare_status = "PASS_NEW_NAMES_ABSENT"
     except BootstrapBlocked as exc:
         cloudflare_status = exc.args[0]
+    collision_status = "BLOCKED" if collision else "PASS_NONE"
+    inputs_status = "MISSING_NAMES" if missing_names else "PRESENT_NOT_VALUE_VERIFIED"
     lines = [
         "## WAFL isolated Development media — read-only account preflight",
         "- GitHub Actions Secrets metadata GET: PASS",
         "- Current trusted Owner token Secrets **read** access: PASS",
         "- Current trusted Owner token Secrets **write** access: NOT_VERIFIED (no write allowed)",
-        f"- Exact new-only Runner Secret name collisions: {'BLOCKED' if collision else 'PASS_NONE'}",
-        f"- Required input Secret *names* present: {'MISSING_NAMES' if missing_names else 'PRESENT_NOT_VALUE_VERIFIED'}",
+        f"- Exact new-only Runner Secret name collisions: {collision_status}",
+        f"- Required input Secret *names* present: {inputs_status}",
         f"- Cloudflare account API and new Worker/R2 names: {cloudflare_status}",
         "- Cloudflare Images entitlement / actual Worker transform: NOT_VERIFIED",
         "- Cloudflare Browser Run entitlement / actual PDF bytes: NOT_VERIFIED",
