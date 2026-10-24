@@ -26,12 +26,14 @@ PDF_WORKER = "wafl-pdf-dev"
 LEGACY_NAMES = frozenset(
     ("peacebypiece-r2-upload", "peacebypiece-files", "waflow-pdf-generator")
 )
+# Names that this isolated bootstrap may CREATE (and must first prove absent).
+# Owner approval/entitlement inputs are separately REQUIRED to exist in
+# safe_configuration(); they must never be created or overwritten by this run.
 SECRET_NAMES = (
     "WAFL_R2_PREVIEW_WORKER_NAME", "WAFL_R2_PREVIEW_BUCKET_NAME",
     "WAFL_R2_PREVIEW_WORKER_URL", "WAFL_R2_WORKER_UPLOAD_SECRET",
     "WAFL_PDF_DEV_WORKER_NAME", "WAFL_PDF_DEV_WORKER_URL",
-    "WAFL_PDF_GENERATOR_TOKEN", "WAFL_R2_IMAGES_ENTITLEMENT_APPROVED",
-    "WAFL_R2_SIGNING_PARITY_APPROVED",
+    "WAFL_PDF_GENERATOR_TOKEN", "WAFL_R2_SIGNING_PARITY_APPROVED",
 )
 
 
@@ -258,7 +260,6 @@ def bootstrap(repo: Path, sha: str, summary: Path) -> None:
         "WAFL_PDF_DEV_WORKER_NAME": PDF_WORKER,
         "WAFL_PDF_DEV_WORKER_URL": f"https://{PDF_WORKER}.{domain}.workers.dev",
         "WAFL_PDF_GENERATOR_TOKEN": pdf_key,
-        "WAFL_R2_IMAGES_ENTITLEMENT_APPROVED": "yes",
         "WAFL_R2_SIGNING_PARITY_APPROVED": "yes",
     }
     cf_env = dict(os.environ)
