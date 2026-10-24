@@ -114,3 +114,11 @@ Codex authentication or service responsiveness remains `NOT_RUN`.
 Only after independently verified live diagnostic evidence should a
 separate Owner consider whether to adjust transport/SDK handling or
 prepare smaller product work. No source retry follows from this PR.
+
+## WAFL 013 one-shot synthetic Owner diagnostic — proposed, not running (2026-10-25)
+
+Runner candidate `.github/workflows/direct-worker-codex-diagnostic.yml` and `scripts/wafl_013_codex_diagnostic.py` reuse the previously inert `probe_injected_sdk`. The independent Owner route is to be prepared in SANJINWORKS. **No PR-head CI calls Codex.** Until both common-system PRs are separately approved and integrated (and SANJINWORKS is independently deployed by the Owner), there is **no live Owner button**.
+
+Admission checks current Runner/DEV-CONTROL/WAFL SHAs, the registered 013 SOURCE_READY identity, failed WAFL Direct Worker #40103585962, WAFL recovery PR #120, previous same-SHA diagnostic runs and active source-run conflicts. Existing Runner `OWNER_GITHUB_TOKEN` is read only for preflight; existing `CODEX_AUTH_JSON` is restored to a private temporary folder and scrubbed before the SDK starts, with no rotation or secret writeback. One fixed `OK` synthetic prompt, no product content, read-only sandbox, deny-all approvals, web search disabled, no persisted history, 120-second whole-stream deadline, zero retries. Only fixed outcome/phase flags leave the process; no model text or credential fields are logged.
+
+Synthetic stream PASS does **not** prove the large WAFL source task can complete or justify direct source replay. A diagnostic timeout remains a recorded failure. WAFL source, PR #120 merge, Developer Cloudflare/R2/Provider, EAS/OTA/Production and credentials are unchanged. Actual model traffic and Cloudflare deployment: **NOT_RUN**.
