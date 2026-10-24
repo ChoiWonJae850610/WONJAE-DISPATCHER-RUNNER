@@ -191,9 +191,7 @@ def worker_config(path: Path, repo: Path, *, image: bool) -> None:
 
 def readback(env: dict[str, str]) -> None:
     # Reuse reviewed exact binding validator. It rejects plaintext Variable secrets.
-    from wafl_r2_preview_gate import (
-        command_json, deployment_version, require_bindings,
-    )
+    from wafl_r2_preview_gate import command_json, deployment_version, require_bindings
     wrangler_env = dict(os.environ)
     wrangler_env["CLOUDFLARE_API_TOKEN"] = env["CLOUDFLARE_API_TOKEN"]
     wrangler_env["CLOUDFLARE_ACCOUNT_ID"] = env["CLOUDFLARE_ACCOUNT_ID"]
