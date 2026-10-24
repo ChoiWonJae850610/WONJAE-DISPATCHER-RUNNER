@@ -85,7 +85,7 @@ def test_preexisting_images_entitlement_does_not_collide(monkeypatch):
         seen.append(args)
         return SimpleNamespace(
             returncode=0,
-            stdout="WAFL_R2_IMAGES_ENTITLEMENT_APPROVED\\n",
+            stdout="WAFL_R2_IMAGES_ENTITLEMENT_APPROVED\n",
         )
 
     monkeypatch.setattr(module.subprocess, "run", fake_run)
