@@ -119,7 +119,7 @@ def api(url: str, token: str) -> object:
         raise BootstrapBlocked("BOOTSTRAP_PROVIDER_JSON_INVALID") from None
     require(isinstance(data, dict) and data.get("success") is True,
             "BOOTSTRAP_PROVIDER_READBACK_UNVERIFIED")
-    return data.get("result")
+    return data
 
 
 def github_secret_inventory(env: dict[str, str]) -> None:
@@ -142,22 +142,33 @@ def github_secret_inventory(env: dict[str, str]) -> None:
 def cloudflare_inventory(env: dict[str, str]) -> str:
     account = env["CLOUDFLARE_ACCOUNT_ID"]
     token = env["CLOUDFLARE_API_TOKEN"]
-    scripts = api(f"{ACCOUNT_HOST}/accounts/{account}/workers/scripts", token)
-    require(isinstance(scripts, list), "BOOTSTRAP_WORKER_LIST_UNVERIFIED")
-    # A truncated inventory must never authorize creation of a colliding Worker.
-    require(len(scripts) < 100, "BOOTSTRAP_WORKER_LIST_PAGINATED_OR_AMBIGUOUS")
+    scripts_response = api(f"{ACCOUNT_HOST}/accounts/{account}/workers/scripts", token)
+    require(isinstance(scripts_response, dict), "BOOTSTRAP_WORKER_LIST_UNVERIFIED")
+    scripts = scripts_response.get("result")
+    info = scripts_response.get("result_info")
+    require(isinstance(scripts, list) and isinstance(info, dict)
+            and info.get("total_pages") == 1,
+            "BOOTSTRAP_WORKER_LIST_PAGINATED_OR_AMBIGUOUS")
     names = {x.get("id") for x in scripts if isinstance(x, dict)}
     require(IMAGE_WORKER not in names and PDF_WORKER not in names,
             "BOOTSTRAP_TARGET_WORKER_ALREADY_EXISTS")
-    buckets = api(f"{ACCOUNT_HOST}/accounts/{account}/r2/buckets", token)
-    require(isinstance(buckets, dict) and isinstance(buckets.get("buckets"), list),
+    bucket_response = api(f"{ACCOUNT_HOST}/accounts/{account}/r2/buckets", token)
+    require(isinstance(bucket_response, dict)
+            and isinstance(bucket_response.get("result"), dict),
             "BOOTSTRAP_BUCKET_LIST_UNVERIFIED")
-    require(len(buckets["buckets"]) < 100, "BOOTSTRAP_BUCKET_LIST_PAGINATED_OR_AMBIGUOUS")
+    buckets = bucket_response["result"]
+    require(isinstance(buckets.get("buckets"), list),
+            "BOOTSTRAP_BUCKET_LIST_UNVERIFIED")
+    require(not buckets.get("cursor") and len(buckets["buckets"]) < 100,
+            "BOOTSTRAP_BUCKET_LIST_PAGINATED_OR_AMBIGUOUS")
     require(BUCKET not in {x.get("name") for x in buckets["buckets"]
                            if isinstance(x, dict)},
             "BOOTSTRAP_TARGET_BUCKET_ALREADY_EXISTS")
-    sub = api(f"{ACCOUNT_HOST}/accounts/{account}/workers/subdomain", token)
-    require(isinstance(sub, dict), "BOOTSTRAP_WORKERS_SUBDOMAIN_UNVERIFIED")
+    sub_response = api(f"{ACCOUNT_HOST}/accounts/{account}/workers/subdomain", token)
+    require(isinstance(sub_response, dict)
+            and isinstance(sub_response.get("result"), dict),
+            "BOOTSTRAP_WORKERS_SUBDOMAIN_UNVERIFIED")
+    sub = sub_response["result"]
     domain = sub.get("subdomain")
     require(isinstance(domain, str)
             and re.fullmatch(r"[a-z0-9-]{3,63}", domain) is not None,
