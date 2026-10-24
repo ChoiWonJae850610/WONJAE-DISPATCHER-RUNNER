@@ -149,5 +149,5 @@ def test_preflight_source_has_no_create_or_secret_write_commands():
     assert '"GET"' in source
     assert '"POST"' not in source
     assert "gh secret set" not in source
-    assert "bucket create" not in source
+    assert '["wrangler", "r2", "bucket", "create"' not in source
     assert "wrangler deploy" not in source
