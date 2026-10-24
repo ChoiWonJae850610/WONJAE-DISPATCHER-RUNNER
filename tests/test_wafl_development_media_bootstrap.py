@@ -112,7 +112,10 @@ def test_existing_bucket_blocks_pre_resource_creation(monkeypatch):
     def fake_api(url, token):
         if url.endswith("/workers/scripts"):
             return {"result": [], "result_info": {"total_pages": 1}}
-        return {"result": {"buckets": [{"name": module.BUCKET}]}}
+        return {
+            "result": {"buckets": [{"name": module.BUCKET}]},
+            "result_info": {"total_count": 1},
+        }
     monkeypatch.setattr(module, "api", fake_api)
     with pytest.raises(module.BootstrapBlocked, match="BUCKET_ALREADY_EXISTS"):
         module.cloudflare_inventory({
@@ -133,6 +136,45 @@ def test_ambiguous_paginated_worker_inventory_never_allows_creation(monkeypatch)
         module.cloudflare_inventory({
             "CLOUDFLARE_ACCOUNT_ID": "a" * 32,
             "CLOUDFLARE_API_TOKEN": "redacted",
+        })
+
+
+def test_documented_unpaginated_worker_list_and_complete_r2_inventory(monkeypatch):
+    def fake_api(url, token):
+        if url.endswith("/workers/scripts"):
+            return {"result": [{"id": "unrelated-existing-worker"}]}
+        if url.endswith("/r2/buckets"):
+            return {
+                "result": {"buckets": [{"name": "peacebypiece-files"}]},
+                "result_info": {"total_count": 1},
+            }
+        if url.endswith("/workers/subdomain"):
+            return {"result": {"subdomain": "example-owner"}}
+        raise AssertionError("unexpected endpoint")
+
+    monkeypatch.setattr(module, "api", fake_api)
+    assert module.cloudflare_inventory({
+        "CLOUDFLARE_ACCOUNT_ID": "a" * 32,
+        "CLOUDFLARE_API_TOKEN": "synthetic",
+    }) == "example-owner"
+
+
+def test_r2_next_page_cursor_is_blocked_even_if_first_page_has_no_collision(
+    monkeypatch,
+):
+    def fake_api(url, token):
+        if url.endswith("/workers/scripts"):
+            return {"result": []}
+        return {
+            "result": {"buckets": [{"name": "old-bucket"}]},
+            "result_info": {"total_count": 2, "cursor": "next-page"},
+        }
+
+    monkeypatch.setattr(module, "api", fake_api)
+    with pytest.raises(module.BootstrapBlocked, match="BUCKET_LIST_PAGINATED"):
+        module.cloudflare_inventory({
+            "CLOUDFLARE_ACCOUNT_ID": "a" * 32,
+            "CLOUDFLARE_API_TOKEN": "synthetic",
         })
 
 
