@@ -76,7 +76,7 @@ def test_existing_r2_worker_blocks_pre_resource_creation(monkeypatch):
 
     def fake_api(url, token):
         calls.append(url)
-        return [{"id": module.IMAGE_WORKER}]
+        return {"result": [{"id": module.IMAGE_WORKER}], "result_info": {"total_pages": 1}}
     monkeypatch.setattr(module, "api", fake_api)
     with pytest.raises(module.BootstrapBlocked, match="WORKER_ALREADY_EXISTS"):
         module.cloudflare_inventory({
@@ -89,10 +89,25 @@ def test_existing_r2_worker_blocks_pre_resource_creation(monkeypatch):
 def test_existing_bucket_blocks_pre_resource_creation(monkeypatch):
     def fake_api(url, token):
         if url.endswith("/workers/scripts"):
-            return []
-        return {"buckets": [{"name": module.BUCKET}]}
+            return {"result": [], "result_info": {"total_pages": 1}}
+        return {"result": {"buckets": [{"name": module.BUCKET}]}}
     monkeypatch.setattr(module, "api", fake_api)
     with pytest.raises(module.BootstrapBlocked, match="BUCKET_ALREADY_EXISTS"):
+        module.cloudflare_inventory({
+            "CLOUDFLARE_ACCOUNT_ID": "a" * 32,
+            "CLOUDFLARE_API_TOKEN": "redacted",
+        })
+
+
+def test_ambiguous_paginated_worker_inventory_never_allows_creation(monkeypatch):
+    monkeypatch.setattr(
+        module, "api",
+        lambda *_: {
+            "result": [{"id": "other-worker"}],
+            "result_info": {"total_pages": 2},
+        },
+    )
+    with pytest.raises(module.BootstrapBlocked, match="PAGINATED"):
         module.cloudflare_inventory({
             "CLOUDFLARE_ACCOUNT_ID": "a" * 32,
             "CLOUDFLARE_API_TOKEN": "redacted",
