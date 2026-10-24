@@ -27,6 +27,13 @@ def test_static_owner_scope_exact_and_nonlegacy():
     assert "WAFL_PDF_GENERATOR_TOKEN" in module.SECRET_NAMES
 
 
+def test_images_owner_entitlement_is_required_but_never_bootstrap_created():
+    # Owner supplied an existing approval. A provisioner must neither reject
+    # it as a collision nor manufacture its value as part of new-only setup.
+    assert "WAFL_R2_IMAGES_ENTITLEMENT_APPROVED" not in module.SECRET_NAMES
+    assert "WAFL_R2_SIGNING_PARITY_APPROVED" in module.SECRET_NAMES
+
+
 def test_absent_owner_credential_and_approval_fail_before_network(monkeypatch):
     for key in (
         "CLOUDFLARE_API_TOKEN", "CLOUDFLARE_ACCOUNT_ID", "OWNER_GITHUB_TOKEN",
@@ -69,6 +76,21 @@ def test_existing_github_secret_blocks_without_writes(monkeypatch):
     monkeypatch.setattr(module.subprocess, "run", fake_run)
     with pytest.raises(module.BootstrapBlocked, match="EXISTING_GITHUB_SECRET"):
         module.github_secret_inventory({"OWNER_GITHUB_TOKEN": "redacted"})
+
+
+def test_preexisting_images_entitlement_does_not_collide(monkeypatch):
+    seen = []
+
+    def fake_run(args, **kwargs):
+        seen.append(args)
+        return SimpleNamespace(
+            returncode=0,
+            stdout="WAFL_R2_IMAGES_ENTITLEMENT_APPROVED\n",
+        )
+
+    monkeypatch.setattr(module.subprocess, "run", fake_run)
+    module.github_secret_inventory({"OWNER_GITHUB_TOKEN": "redacted"})
+    assert len(seen) == 1
 
 
 def test_existing_r2_worker_blocks_pre_resource_creation(monkeypatch):
@@ -156,6 +178,9 @@ def test_no_cloudflare_resources_before_scoped_secret_write(tmp_path, monkeypatc
     monkeypatch.setattr(module, "command", fake_command)
     output = tmp_path / "summary"
     module.bootstrap(repo, "a" * 40, output)
+    secret_payload = next(x[1] for x in events if x[0] == "secrets")
+    assert "WAFL_R2_IMAGES_ENTITLEMENT_APPROVED" not in secret_payload
+    assert set(secret_payload) == set(module.SECRET_NAMES)
     secret_idx = next(i for i, x in enumerate(events) if x[0] == "secrets")
     bucket_idx = next(i for i, x in enumerate(events)
                       if x[:4] == ("wrangler", "r2", "bucket", "create"))
