@@ -35,7 +35,8 @@ def test_provider_gate_core_rechecks_identity_validation_and_registered_executor
         '"registered_development_readiness_v1", '
         '"wafl_g1v1v2_preparation_guard_v1", '
         '"classmo_editorial_027_p2_live_guard_v1", '
-        '"wafl_development_media_probe_v1"].include?(executor)' in raw
+        '"wafl_development_media_probe_v1", '
+        '"wafl_development_media_bootstrap_v1"].include?(executor)' in raw
     )
     assert 'action["type"] == "PROVIDER_GATE"' in raw
     assert 'action["gate"] == gate' in raw

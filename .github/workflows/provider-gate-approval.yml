@@ -58,6 +58,8 @@ jobs:
       wafl_pdf_dev_worker_name: ${{ secrets.WAFL_PDF_DEV_WORKER_NAME }}
       wafl_pdf_dev_worker_url: ${{ secrets.WAFL_PDF_DEV_WORKER_URL }}
       wafl_pdf_generator_token: ${{ secrets.WAFL_PDF_GENERATOR_TOKEN }}
+      wafl_pdf_browser_entitlement_approved: ${{ secrets.WAFL_PDF_BROWSER_ENTITLEMENT_APPROVED }}
+      wafl_media_dev_billing_approved: ${{ secrets.WAFL_MEDIA_DEV_BILLING_APPROVED }}
 
   classmo:
     if: ${{ inputs.project == 'CLASSMO' }}
