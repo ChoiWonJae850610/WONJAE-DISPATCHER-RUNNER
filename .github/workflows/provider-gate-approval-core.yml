@@ -57,10 +57,6 @@ on:
         required: false
       wafl_pdf_generator_token:
         required: false
-      wafl_pdf_browser_entitlement_approved:
-        required: false
-      wafl_media_dev_billing_approved:
-        required: false
 
 permissions:
   contents: read
@@ -956,8 +952,6 @@ jobs:
           OWNER_GITHUB_TOKEN: ${{ secrets.product_read_token }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.cloudflare_token }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.cloudflare_account_id }}
-          WAFL_PDF_BROWSER_ENTITLEMENT_APPROVED: ${{ secrets.wafl_pdf_browser_entitlement_approved }}
-          WAFL_MEDIA_DEV_BILLING_APPROVED: ${{ secrets.wafl_media_dev_billing_approved }}
         shell: bash
         run: |
           set -euo pipefail
