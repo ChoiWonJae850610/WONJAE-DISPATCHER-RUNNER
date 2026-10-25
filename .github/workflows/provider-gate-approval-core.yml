@@ -47,7 +47,6 @@ on:
         required: false
       wafl_r2_worker_url:
         required: false
-        required: false
       wafl_signing_parity_approved:
         required: false
       wafl_r2_upload_signing_secret:
