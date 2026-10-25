@@ -13,6 +13,13 @@ sys.path.insert(0, str(ROOT / "scripts"))
 module = importlib.import_module("wafl_development_media_readonly_preflight")
 
 
+def test_native_webp_preflight_does_not_require_images_entitlement_metadata():
+    assert "WAFL_R2_IMAGES_ENTITLEMENT_APPROVED" not in module.REQUIRED_INPUT_NAMES
+    assert "WAFL_PDF_BROWSER_ENTITLEMENT_APPROVED" in module.REQUIRED_INPUT_NAMES
+    assert "WAFL_MEDIA_DEV_BILLING_APPROVED" in module.REQUIRED_INPUT_NAMES
+
+
+
 def test_rejects_untrusted_workflow_before_credential_use(monkeypatch):
     for name in (
         "GITHUB_REPOSITORY", "GITHUB_REF", "GITHUB_EVENT_NAME",

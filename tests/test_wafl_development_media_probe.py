@@ -19,6 +19,7 @@ def test_dev_only_names_and_secrets_before_network(monkeypatch):
     for key in media.ENV_NAMES:
         if key != "CLOUDFLARE_ACCOUNT_ID":
             monkeypatch.setenv(key, "yes")
+    monkeypatch.setenv("WAFL_R2_IMAGES_ENTITLEMENT_APPROVED", "no")
     monkeypatch.setenv("WAFL_R2_PREVIEW_WORKER_NAME", "wafl-preview-worker")
     monkeypatch.setenv("WAFL_R2_PREVIEW_BUCKET_NAME", "wafl-r2-dev")
     monkeypatch.setenv("WAFL_R2_PREVIEW_WORKER_URL",
@@ -35,14 +36,16 @@ def test_dev_only_names_and_secrets_before_network(monkeypatch):
 
 def test_signed_canary_put_payload_size_bound():
     origin = "https://wafl-r2-dev.owner.workers.dev"
-    key = "companies/a/workorders/b/design/c.png"
-    url = media.signed_url(origin, "PUT", key, "private", size=31)
+    key = "companies/a/workorders/b/design/c.webp"
+    url = media.signed_url(origin, "PUT", key, "private", size=31, content_type="image/webp")
     query = parse_qs(urlsplit(url).query)
-    payload = "\n".join(("PUT", key, "image/png", query["expires"][0],
+    payload = "\n".join(("PUT", key, "image/webp", query["expires"][0],
                          "size-v1", "31"))
     expected = hmac.new(b"private", payload.encode(), hashlib.sha256).hexdigest()
     assert query["signature"] == [expected]
     assert query["fileSize"] == ["31"]
+    assert media.WEBP.startswith(b"RIFF") and media.WEBP[8:12] == b"WEBP"
+    assert len(media.WEBP) >= 20
     for method in ("PATCH", "POST"):
         with pytest.raises(media.MediaBlocked, match="METHOD"):
             media.signed_url(origin, method, key, "private")
@@ -72,11 +75,11 @@ def test_r2_synthetic_only_absent_upload_read_and_exact_cleanup(monkeypatch):
     def fake_request(url, *, method="GET", data=None, headers=None, limit=None):
         query = parse_qs(urlsplit(url).query)
         key = query["key"][0]
-        assert "/design/" in key and key.endswith(".png")
+        assert "/design/" in key and key.endswith(".webp")
         assert query["signature"][0]
         methods.append(method)
         if method == "PUT":
-            assert "fileSize" in query and data == media.PNG
+            assert "fileSize" in query and data == media.WEBP
             assert key not in observed
             observed[key] = data
             return 200, {}, b'{"ok":true}'
@@ -84,7 +87,7 @@ def test_r2_synthetic_only_absent_upload_read_and_exact_cleanup(monkeypatch):
             del observed[key]
             return 200, {}, b'{"ok":true}'
         if key in observed:
-            return 200, {"Content-Type": "image/png"}, observed[key]
+            return 200, {"Content-Type": "image/webp"}, observed[key]
         return 404, {}, b""
     monkeypatch.setattr(media, "request_bytes", fake_request)
     media.canary_r2({
@@ -98,7 +101,6 @@ def test_r2_synthetic_only_absent_upload_read_and_exact_cleanup(monkeypatch):
 def test_missing_browser_binding_blocks_before_live_canary(monkeypatch):
     data = {"resources": {"bindings": [
         {"name": "R2_BUCKET", "type": "r2_bucket", "bucket_name": "wafl-r2-dev"},
-        {"name": "IMAGES", "type": "images"},
         {"name": "R2_WORKER_UPLOAD_SECRET", "type": "secret_text"},
     ]}}
     def fake_worker(name, env):

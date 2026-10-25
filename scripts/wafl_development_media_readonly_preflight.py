@@ -37,7 +37,6 @@ REQUIRED_INPUT_NAMES = (
     "OWNER_GITHUB_TOKEN",
     "CLOUDFLARE_API_TOKEN",
     "WAFL_CLOUDFLARE_ACCOUNT_ID",
-    "WAFL_R2_IMAGES_ENTITLEMENT_APPROVED",
     "WAFL_PDF_BROWSER_ENTITLEMENT_APPROVED",
     "WAFL_MEDIA_DEV_BILLING_APPROVED",
 )
@@ -101,8 +100,8 @@ def inspect(repo: Path, sha: str, summary: Path) -> None:
     config = protected_runtime()
     existing = secret_metadata_read(config["OWNER_GITHUB_TOKEN"])
     collision = sorted(set(SECRET_NAMES) & existing)
-    # Never manufacture approval from a screenshot, plan, or a Secret's mere
-    # presence. Billing, Images and Browser authority are NOT_VERIFIED here.
+    # Never manufacture a Secret value or a billing/Browser approval.
+    # WAFL native-WebP/R2 does not need Cloudflare Images entitlement.
     missing_names = sorted(set(REQUIRED_INPUT_NAMES) - existing)
     cloudflare_config = {
         "CLOUDFLARE_ACCOUNT_ID": config["WAFL_CLOUDFLARE_ACCOUNT_ID"],
@@ -123,7 +122,7 @@ def inspect(repo: Path, sha: str, summary: Path) -> None:
         f"- Exact new-only Runner Secret name collisions: {collision_status}",
         f"- Required input Secret *names* present: {inputs_status}",
         f"- Cloudflare account API and new Worker/R2 names: {cloudflare_status}",
-        "- Cloudflare Images entitlement / actual Worker transform: NOT_VERIFIED",
+        "- Cloudflare Images transform entitlement: NOT_REQUIRED (iPhone WebP)",
         "- Cloudflare Browser Run entitlement / actual PDF bytes: NOT_VERIFIED",
         "- Account-specific billing/possible charges: NOT_VERIFIED",
         "- Worker/bucket create or deploy, Secrets write, PDF/image calls: NOT_RUN",

@@ -47,8 +47,6 @@ on:
         required: false
       wafl_r2_worker_url:
         required: false
-      wafl_images_entitlement_approved:
-        required: false
       wafl_signing_parity_approved:
         required: false
       wafl_r2_upload_signing_secret:
@@ -958,7 +956,6 @@ jobs:
           OWNER_GITHUB_TOKEN: ${{ secrets.product_read_token }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.cloudflare_token }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.cloudflare_account_id }}
-          WAFL_R2_IMAGES_ENTITLEMENT_APPROVED: ${{ secrets.wafl_images_entitlement_approved }}
           WAFL_PDF_BROWSER_ENTITLEMENT_APPROVED: ${{ secrets.wafl_pdf_browser_entitlement_approved }}
           WAFL_MEDIA_DEV_BILLING_APPROVED: ${{ secrets.wafl_media_dev_billing_approved }}
         shell: bash
@@ -977,7 +974,6 @@ jobs:
           WAFL_R2_PREVIEW_WORKER_NAME: ${{ secrets.wafl_r2_worker_name }}
           WAFL_R2_PREVIEW_BUCKET_NAME: ${{ secrets.wafl_r2_bucket_name }}
           WAFL_R2_PREVIEW_WORKER_URL: ${{ secrets.wafl_r2_worker_url }}
-          WAFL_R2_IMAGES_ENTITLEMENT_APPROVED: ${{ secrets.wafl_images_entitlement_approved }}
           WAFL_R2_SIGNING_PARITY_APPROVED: ${{ secrets.wafl_signing_parity_approved }}
         shell: bash
         run: |
@@ -995,7 +991,6 @@ jobs:
           WAFL_R2_PREVIEW_WORKER_NAME: ${{ secrets.wafl_r2_worker_name }}
           WAFL_R2_PREVIEW_BUCKET_NAME: ${{ secrets.wafl_r2_bucket_name }}
           WAFL_R2_PREVIEW_WORKER_URL: ${{ secrets.wafl_r2_worker_url }}
-          WAFL_R2_IMAGES_ENTITLEMENT_APPROVED: ${{ secrets.wafl_images_entitlement_approved }}
           WAFL_R2_SIGNING_PARITY_APPROVED: ${{ secrets.wafl_signing_parity_approved }}
           WAFL_R2_WORKER_UPLOAD_SECRET: ${{ secrets.wafl_r2_upload_signing_secret }}
           WAFL_PDF_DEV_WORKER_NAME: ${{ secrets.wafl_pdf_dev_worker_name }}

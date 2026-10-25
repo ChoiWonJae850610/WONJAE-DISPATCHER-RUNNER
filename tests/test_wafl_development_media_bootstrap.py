@@ -27,9 +27,8 @@ def test_static_owner_scope_exact_and_nonlegacy():
     assert "WAFL_PDF_GENERATOR_TOKEN" in module.SECRET_NAMES
 
 
-def test_images_owner_entitlement_is_required_but_never_bootstrap_created():
-    # Owner supplied an existing approval. A provisioner must neither reject
-    # it as a collision nor manufacture its value as part of new-only setup.
+def test_native_webp_bootstrap_has_no_images_entitlement_input_or_output():
+    # Legacy approval must never be used or created for native-WebP storage.
     assert "WAFL_R2_IMAGES_ENTITLEMENT_APPROVED" not in module.SECRET_NAMES
     assert "WAFL_R2_SIGNING_PARITY_APPROVED" in module.SECRET_NAMES
 
@@ -37,7 +36,6 @@ def test_images_owner_entitlement_is_required_but_never_bootstrap_created():
 def test_absent_owner_credential_and_approval_fail_before_network(monkeypatch):
     for key in (
         "CLOUDFLARE_API_TOKEN", "CLOUDFLARE_ACCOUNT_ID", "OWNER_GITHUB_TOKEN",
-        "WAFL_R2_IMAGES_ENTITLEMENT_APPROVED",
         "WAFL_PDF_BROWSER_ENTITLEMENT_APPROVED", "WAFL_MEDIA_DEV_BILLING_APPROVED",
     ):
         monkeypatch.delenv(key, raising=False)
@@ -50,7 +48,6 @@ def test_owner_pinned_workflow_and_entitlement_gate(monkeypatch):
         "CLOUDFLARE_API_TOKEN": "redacted",
         "CLOUDFLARE_ACCOUNT_ID": "a" * 32,
         "OWNER_GITHUB_TOKEN": "redacted",
-        "WAFL_R2_IMAGES_ENTITLEMENT_APPROVED": "yes",
         "WAFL_PDF_BROWSER_ENTITLEMENT_APPROVED": "yes",
         "WAFL_MEDIA_DEV_BILLING_APPROVED": "yes",
         "GITHUB_REPOSITORY": module.RUNNER_REPOSITORY,
@@ -60,6 +57,9 @@ def test_owner_pinned_workflow_and_entitlement_gate(monkeypatch):
     for key, value in values.items():
         monkeypatch.setenv(key, value)
     assert module.safe_configuration()["WAFL_MEDIA_DEV_BILLING_APPROVED"] == "yes"
+    # A legacy Cloudflare Images opt-out is no longer a provisioning blocker.
+    monkeypatch.setenv("WAFL_R2_IMAGES_ENTITLEMENT_APPROVED", "no")
+    assert module.safe_configuration()["WAFL_PDF_BROWSER_ENTITLEMENT_APPROVED"] == "yes"
     monkeypatch.setenv("WAFL_MEDIA_DEV_BILLING_APPROVED", "no")
     with pytest.raises(module.BootstrapBlocked, match="BILLING"):
         module.safe_configuration()
@@ -189,7 +189,9 @@ def test_wrangler_configs_never_use_incumbent_worker_or_bucket(tmp_path):
     r2, pdf = r2_cfg.read_text(), pdf_cfg.read_text()
     assert 'name = "wafl-r2-dev"' in r2
     assert 'bucket_name = "wafl-media-dev"' in r2
-    assert 'binding = "IMAGES"' in r2
+    assert 'binding = "IMAGES"' not in r2
+    assert "[images]" not in r2
+    assert 'binding = "R2_BUCKET"' in r2
     assert 'name = "wafl-pdf-dev"' in pdf
     assert 'binding = "BROWSER"' in pdf
     assert all(s not in r2 + pdf for s in module.LEGACY_NAMES)
