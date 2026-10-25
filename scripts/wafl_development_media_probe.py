@@ -185,6 +185,13 @@ def signed_url(origin: str, method: str, key: str, secret: str,
     return origin.rstrip("/") + "/?" + urlencode(params)
 
 
+def r2_absence_failure_code(status: object) -> str:
+    """Report only a bounded HTTP status, never URL, key, body or secret."""
+    if type(status) is int and 100 <= status <= 599:
+        return f"MEDIA_R2_CANARY_NOT_VERIFIED_ABSENT_HTTP_{status}"
+    return "MEDIA_R2_CANARY_NOT_VERIFIED_ABSENT_HTTP_UNVERIFIED"
+
+
 def canary_r2(config: dict[str, str]) -> None:
     key = (f"companies/{uuid.uuid4()}/workorders/{uuid.uuid4()}/"
            f"design/{uuid.uuid4()}.webp")
@@ -202,7 +209,8 @@ def canary_r2(config: dict[str, str]) -> None:
         )
 
     status, _, _ = call("GET")
-    ensure(status == 404, "MEDIA_R2_CANARY_NOT_VERIFIED_ABSENT")
+    if status != 404:
+        raise MediaBlocked(r2_absence_failure_code(status))
     attempted_put = False
     error: MediaBlocked | None = None
     try:
