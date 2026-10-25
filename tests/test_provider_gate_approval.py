@@ -176,8 +176,16 @@ def test_wafl_r2_existing_worker_gate_is_disabled_without_separate_owner_activat
         assert key in caller
     assert "WAFL_R2_IMAGES_ENTITLEMENT_APPROVED" not in caller
     assert "WAFL_R2_IMAGES_ENTITLEMENT_APPROVED" not in core
-    assert "WAFL_PDF_BROWSER_ENTITLEMENT_APPROVED" in caller
-    assert "WAFL_MEDIA_DEV_BILLING_APPROVED" in caller
+    for obsolete in (
+        "WAFL_PDF_BROWSER_ENTITLEMENT_APPROVED",
+        "WAFL_MEDIA_DEV_BILLING_APPROVED",
+        "wafl_pdf_browser_entitlement_approved",
+        "wafl_media_dev_billing_approved",
+    ):
+        assert obsolete not in caller and obsolete not in core
+    # PDF signing is a real credential/binding, not a paid-plan acknowledgement.
+    assert "wafl_pdf_generator_token" in caller
+    assert "wafl_pdf_generator_token" in core
     assert 'gate == "r2_preview_worker_delivery"' in core
     assert 'config["ready_for_owner"] == true' in core
     assert '"deployment_policy" => "existing_nonproduction_worker_only"' in core

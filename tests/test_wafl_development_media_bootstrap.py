@@ -36,38 +36,41 @@ def test_native_webp_bootstrap_has_no_images_entitlement_input_or_output():
 def test_absent_owner_credential_and_approval_fail_before_network(monkeypatch):
     for key in (
         "CLOUDFLARE_API_TOKEN", "CLOUDFLARE_ACCOUNT_ID", "OWNER_GITHUB_TOKEN",
-        "WAFL_PDF_BROWSER_ENTITLEMENT_APPROVED", "WAFL_MEDIA_DEV_BILLING_APPROVED",
     ):
         monkeypatch.delenv(key, raising=False)
     with pytest.raises(module.BootstrapBlocked, match="MISSING"):
         module.safe_configuration()
 
 
-def test_owner_pinned_workflow_and_entitlement_gate(monkeypatch):
+def test_owner_pinned_workflow_and_free_first_configuration(monkeypatch):
     values = {
-        "CLOUDFLARE_API_TOKEN": "redacted",
+        "CLOUDFLARE_API_TOKEN": "synthetic-cloudflare",
         "CLOUDFLARE_ACCOUNT_ID": "a" * 32,
-        "OWNER_GITHUB_TOKEN": "redacted",
-        "WAFL_PDF_BROWSER_ENTITLEMENT_APPROVED": "yes",
-        "WAFL_MEDIA_DEV_BILLING_APPROVED": "yes",
+        "OWNER_GITHUB_TOKEN": "synthetic-owner",
         "GITHUB_REPOSITORY": module.RUNNER_REPOSITORY,
         "GITHUB_REF": "refs/heads/main",
         "GITHUB_EVENT_NAME": "workflow_dispatch",
     }
     for key, value in values.items():
         monkeypatch.setenv(key, value)
-    assert module.safe_configuration()["WAFL_MEDIA_DEV_BILLING_APPROVED"] == "yes"
-    # A legacy Cloudflare Images opt-out is no longer a provisioning blocker.
-    monkeypatch.setenv("WAFL_R2_IMAGES_ENTITLEMENT_APPROVED", "no")
-    assert module.safe_configuration()["WAFL_PDF_BROWSER_ENTITLEMENT_APPROVED"] == "yes"
-    monkeypatch.setenv("WAFL_MEDIA_DEV_BILLING_APPROVED", "no")
-    with pytest.raises(module.BootstrapBlocked, match="BILLING"):
+
+    # Missing or explicitly negative historical approvals are not entitlement
+    # evidence and must not block an Owner's already-approved free-first scope.
+    for value in ("", "no"):
+        monkeypatch.setenv("WAFL_PDF_BROWSER_ENTITLEMENT_APPROVED", value)
+        monkeypatch.setenv("WAFL_MEDIA_DEV_BILLING_APPROVED", value)
+        assert set(module.safe_configuration()) == {
+            "CLOUDFLARE_API_TOKEN", "CLOUDFLARE_ACCOUNT_ID", "OWNER_GITHUB_TOKEN",
+        }
+
+    # Authenticated workflow, account identity and credential checks remain.
+    monkeypatch.setenv("CLOUDFLARE_ACCOUNT_ID", "invalid")
+    with pytest.raises(module.BootstrapBlocked, match="ACCOUNT_UNVERIFIED"):
         module.safe_configuration()
-    monkeypatch.setenv("WAFL_MEDIA_DEV_BILLING_APPROVED", "yes")
+    monkeypatch.setenv("CLOUDFLARE_ACCOUNT_ID", "a" * 32)
     monkeypatch.setenv("GITHUB_REF", "refs/pull/335/merge")
     with pytest.raises(module.BootstrapBlocked, match="TRUSTED"):
         module.safe_configuration()
-
 
 def test_existing_github_secret_blocks_without_writes(monkeypatch):
     def fake_run(args, **kwargs):

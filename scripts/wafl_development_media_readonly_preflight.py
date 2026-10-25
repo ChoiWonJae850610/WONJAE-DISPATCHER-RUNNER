@@ -37,8 +37,6 @@ REQUIRED_INPUT_NAMES = (
     "OWNER_GITHUB_TOKEN",
     "CLOUDFLARE_API_TOKEN",
     "WAFL_CLOUDFLARE_ACCOUNT_ID",
-    "WAFL_PDF_BROWSER_ENTITLEMENT_APPROVED",
-    "WAFL_MEDIA_DEV_BILLING_APPROVED",
 )
 
 
@@ -100,8 +98,8 @@ def inspect(repo: Path, sha: str, summary: Path) -> None:
     config = protected_runtime()
     existing = secret_metadata_read(config["OWNER_GITHUB_TOKEN"])
     collision = sorted(set(SECRET_NAMES) & existing)
-    # Never manufacture a Secret value or a billing/Browser approval.
-    # WAFL native-WebP/R2 does not need Cloudflare Images entitlement.
+    # A static Secret name is not a paid-plan approval or runtime capability.
+    # Record actual GET readiness separately from Browser/PDF live validation.
     missing_names = sorted(set(REQUIRED_INPUT_NAMES) - existing)
     cloudflare_config = {
         "CLOUDFLARE_ACCOUNT_ID": config["WAFL_CLOUDFLARE_ACCOUNT_ID"],
