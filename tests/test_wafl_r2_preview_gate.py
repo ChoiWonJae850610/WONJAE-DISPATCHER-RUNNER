@@ -35,13 +35,16 @@ def test_worker_origin_exact_identity():
 def test_binding_readback_requires_matching_existing_bucket_and_secret():
     data = {"resources": {"bindings": [
         {"name": "R2_BUCKET", "type": "r2_bucket", "bucket_name": "wafl-r2-dev"},
-        {"name": "IMAGES", "type": "images"},
         {"name": "R2_WORKER_UPLOAD_SECRET", "type": "secret_text"},
     ]}}
     require_bindings(data, "wafl-r2-dev")
+    # An old optional Images binding may exist, but must not be a prerequisite.
+    require_bindings({"resources": {"bindings": [
+        *data["resources"]["bindings"], {"name": "IMAGES", "type": "images"},
+    ]}}, "wafl-r2-dev")
     for changed in (
         {"resources": {}},
-        {"resources": {"bindings": data["resources"]["bindings"][:2]}},
+        {"resources": {"bindings": data["resources"]["bindings"][:1]}},
         {"resources": {"bindings": [
             {"name": "R2_BUCKET", "type": "r2_bucket", "bucket_name": "wafl-r2-prod"},
             *data["resources"]["bindings"][1:],
@@ -63,8 +66,26 @@ def test_deployment_readback_no_ambiguous_or_unregistered_version():
 def test_missing_credentials_and_entitlement_fail_before_provider_calls(monkeypatch):
     for key in ("CLOUDFLARE_API_TOKEN", "CLOUDFLARE_ACCOUNT_ID",
                 "WAFL_R2_PREVIEW_WORKER_NAME", "WAFL_R2_PREVIEW_BUCKET_NAME",
-                "WAFL_R2_PREVIEW_WORKER_URL", "WAFL_R2_IMAGES_ENTITLEMENT_APPROVED",
+                "WAFL_R2_PREVIEW_WORKER_URL",
                 "WAFL_R2_SIGNING_PARITY_APPROVED"):
         monkeypatch.delenv(key, raising=False)
     with pytest.raises(GateError, match="MISSING"):
+        required_environment()
+
+
+def test_images_approval_not_needed_but_signing_attestation_required(monkeypatch):
+    values = {
+        "CLOUDFLARE_API_TOKEN": "synthetic",
+        "CLOUDFLARE_ACCOUNT_ID": "a" * 32,
+        "WAFL_R2_PREVIEW_WORKER_NAME": "wafl-r2-dev",
+        "WAFL_R2_PREVIEW_BUCKET_NAME": "wafl-media-dev",
+        "WAFL_R2_PREVIEW_WORKER_URL": "https://wafl-r2-dev.owner.workers.dev",
+        "WAFL_R2_SIGNING_PARITY_APPROVED": "yes",
+        "WAFL_R2_IMAGES_ENTITLEMENT_APPROVED": "no",
+    }
+    for name, value in values.items():
+        monkeypatch.setenv(name, value)
+    assert required_environment()["WAFL_R2_SIGNING_PARITY_APPROVED"] == "yes"
+    monkeypatch.setenv("WAFL_R2_SIGNING_PARITY_APPROVED", "no")
+    with pytest.raises(GateError, match="SIGNING_PARITY"):
         required_environment()
