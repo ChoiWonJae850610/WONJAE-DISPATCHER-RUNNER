@@ -61,14 +61,14 @@ def command(args: list[str], *, env: dict[str, str], cwd: Path | None = None,
 def safe_configuration() -> dict[str, str]:
     keys = (
         "CLOUDFLARE_API_TOKEN", "CLOUDFLARE_ACCOUNT_ID", "OWNER_GITHUB_TOKEN",
-        "WAFL_R2_IMAGES_ENTITLEMENT_APPROVED",
         "WAFL_PDF_BROWSER_ENTITLEMENT_APPROVED", "WAFL_MEDIA_DEV_BILLING_APPROVED",
     )
     data = {key: os.getenv(key, "").strip() for key in keys}
     require(all(data.values()), "BOOTSTRAP_SCOPED_OWNER_CREDENTIAL_OR_APPROVAL_MISSING")
     require(re.fullmatch(r"[a-fA-F0-9]{32}", data["CLOUDFLARE_ACCOUNT_ID"]) is not None,
             "BOOTSTRAP_CLOUDFLARE_ACCOUNT_UNVERIFIED")
-    for name in keys[-3:]:
+    # Browser Rendering and possible R2/Workers billing remain distinct approvals.
+    for name in keys[-2:]:
         require(data[name] == "yes", "BOOTSTRAP_ENTITLEMENT_OR_BILLING_NOT_APPROVED")
     require(os.getenv("GITHUB_REPOSITORY") == RUNNER_REPOSITORY
             and os.getenv("GITHUB_REF") == "refs/heads/main"
@@ -196,8 +196,8 @@ def worker_config(path: Path, repo: Path, *, image: bool) -> None:
     if image:
         name = IMAGE_WORKER
         entry = repo / "cloudflare/r2-upload-worker.js"
-        bindings = ("[images]\nbinding = \"IMAGES\"\n"
-                    "[[r2_buckets]]\nbinding = \"R2_BUCKET\"\n"
+        # iPhone builds WebP derivatives; only signed R2 storage is required.
+        bindings = ("[[r2_buckets]]\nbinding = \"R2_BUCKET\"\n"
                     f"bucket_name = \"{BUCKET}\"\n")
     else:
         name = PDF_WORKER
