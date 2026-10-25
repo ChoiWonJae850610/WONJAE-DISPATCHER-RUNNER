@@ -131,9 +131,15 @@ def test_inspect_is_readonly_and_owner_apply_writes_one_batch(monkeypatch):
             for item in written[0]
         ], "hiddenProductionEnvCount": 0}
     monkeypatch.setattr(module, "http_json", fake)
-    assert module.bridge(sample_env(module), execute=False) == "WAFL_VERCEL_PREVIEW_READ_ONLY_ELIGIBLE"
+    assert (
+        module.bridge(sample_env(module), execute=False)
+        == "WAFL_VERCEL_PREVIEW_READ_ONLY_ELIGIBLE"
+    )
     assert written == []
-    assert module.bridge(sample_env(module), execute=True) == "WAFL_VERCEL_PREVIEW_FOUR_ENV_METADATA_PASS"
+    assert (
+        module.bridge(sample_env(module), execute=True)
+        == "WAFL_VERCEL_PREVIEW_FOUR_ENV_METADATA_PASS"
+    )
     assert len(written) == 1 and len(written[0]) == 4
     assert methods == ["GET", "GET", "GET", "GET", "POST", "GET"]
     assert all(item["target"] == ["preview"] for item in written[0])
