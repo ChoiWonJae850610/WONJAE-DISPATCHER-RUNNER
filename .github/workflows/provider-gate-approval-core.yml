@@ -57,6 +57,8 @@ on:
         required: false
       wafl_pdf_generator_token:
         required: false
+      wafl_vercel_token:
+        required: false
 
 permissions:
   contents: read
@@ -131,7 +133,7 @@ jobs:
           abort("provider gate is not registered") unless config.is_a?(Hash)
           abort("provider gate approval mode mismatch") unless config["approval_mode"] == "sanjinworks_owner_button"
           executor = config["executor"]
-          abort("provider gate executor is unsupported") unless ["approval_only", "classmo_supabase_migration", "classmo_eas_build", "classmo_eas_update", "wafl_supabase_hardening", "wafl_eas_update", "wafl_eas_build", "esc_eas_build", "wafl_r2_preview_deploy", "wafl_supabase_g1_readonly", "wafl_supabase_g1_schema_apply", "wafl_supabase_g1_006_only_recovery", "classmo_editorial_016_readonly", "classmo_editorial_016_schema_apply", "classmo_editorial_017_storage_apply", "registered_supabase_migration_v1", "registered_development_psql_verify_v1", "registered_development_readiness_v1", "wafl_g1v1v2_preparation_guard_v1", "classmo_editorial_027_p2_live_guard_v1", "wafl_development_media_probe_v1", "wafl_development_media_bootstrap_v1", "wafl_development_media_readonly_preflight_v1"].include?(executor)
+          abort("provider gate executor is unsupported") unless ["approval_only", "classmo_supabase_migration", "classmo_eas_build", "classmo_eas_update", "wafl_supabase_hardening", "wafl_eas_update", "wafl_eas_build", "esc_eas_build", "wafl_r2_preview_deploy", "wafl_supabase_g1_readonly", "wafl_supabase_g1_schema_apply", "wafl_supabase_g1_006_only_recovery", "classmo_editorial_016_readonly", "classmo_editorial_016_schema_apply", "classmo_editorial_017_storage_apply", "registered_supabase_migration_v1", "registered_development_psql_verify_v1", "registered_development_readiness_v1", "wafl_g1v1v2_preparation_guard_v1", "classmo_editorial_027_p2_live_guard_v1", "wafl_development_media_probe_v1", "wafl_development_media_bootstrap_v1", "wafl_development_media_readonly_preflight_v1", "wafl_vercel_preview_env_bridge_v1"].include?(executor)
           label = config["label"]
           abort("provider gate label missing") unless label.is_a?(String) && !label.strip.empty?
 
@@ -259,6 +261,29 @@ jobs:
               abort("WAFL bootstrap metadata #{key} mismatch") unless config[key] == value
             end
             abort("WAFL bootstrap metadata has unreviewed keys") unless
+              config.keys.sort == (expected.keys + %w[label executor]).sort
+          elsif executor == "wafl_vercel_preview_env_bridge_v1"
+            abort("WAFL Vercel Preview exact Owner route mismatch") unless
+              project == "WAFL" && gate == "development_preview_env_bridge"
+            expected = {
+              "approval_mode" => "sanjinworks_owner_button",
+              "provider" => "vercel_project_preview_env",
+              "environment" => "preview",
+              "vercel_project_id" => "prj_vJ4cfeJtdoDBSm9QWEo9mvPT9xK4",
+              "vercel_team_id" => "team_v4qmE9VlvZnnT0gpesukVJSj",
+              "git_branch" => "cloud-dev-v1",
+              "effect_policy" => "create_only_four_new_branch_scoped_preview_env_names",
+              "ready_for_owner" => true,
+              "requires_owner_session" => true,
+              "production" => false,
+              "destructive" => false,
+              "credential_mutation" => true,
+              "device_mutation" => false,
+            }
+            expected.each do |key, value|
+              abort("Unreviewed WAFL Vercel Owner metadata #{key}") unless config[key] == value
+            end
+            abort("Unreviewed WAFL Vercel Owner gate keys") unless
               config.keys.sort == (expected.keys + %w[label executor]).sort
           elsif executor == "wafl_development_media_probe_v1"
             abort("WAFL media probe route mismatch") unless project == "WAFL" &&
@@ -959,6 +984,20 @@ jobs:
             --repo "$GITHUB_WORKSPACE/.approval/product" \
             --source-sha "$SOURCE_SHA" \
             --summary "$GITHUB_STEP_SUMMARY"
+
+      - name: WAFL Preview · Owner-only create four protected Vercel variables
+        if: env.PROVIDER_EXECUTOR == 'wafl_vercel_preview_env_bridge_v1'
+        env:
+          WAFL_VERCEL_TOKEN: ${{ secrets.wafl_vercel_token }}
+          WAFL_R2_PREVIEW_WORKER_URL: ${{ secrets.wafl_r2_worker_url }}
+          WAFL_R2_WORKER_UPLOAD_SECRET: ${{ secrets.wafl_r2_upload_signing_secret }}
+          WAFL_PDF_DEV_WORKER_URL: ${{ secrets.wafl_pdf_dev_worker_url }}
+          WAFL_PDF_GENERATOR_TOKEN: ${{ secrets.wafl_pdf_generator_token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python scripts/wafl_vercel_preview_env_bridge.py --apply
+          echo '- Vercel Preview env metadata: four exact names (no deployment or bytes tested)' >> "$GITHUB_STEP_SUMMARY"
 
       - name: WAFL R2 · existing Development Worker guarded deploy and readback
         if: env.PROVIDER_EXECUTOR == 'wafl_r2_preview_deploy'

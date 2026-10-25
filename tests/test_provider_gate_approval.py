@@ -37,7 +37,8 @@ def test_provider_gate_core_rechecks_identity_validation_and_registered_executor
         '"classmo_editorial_027_p2_live_guard_v1", '
         '"wafl_development_media_probe_v1", '
         '"wafl_development_media_bootstrap_v1", '
-        '"wafl_development_media_readonly_preflight_v1"].include?(executor)' in raw
+        '"wafl_development_media_readonly_preflight_v1", '
+        '"wafl_vercel_preview_env_bridge_v1"].include?(executor)' in raw
     )
     assert 'action["type"] == "PROVIDER_GATE"' in raw
     assert 'action["gate"] == gate' in raw
@@ -270,3 +271,17 @@ def test_wafl_development_media_probe_bounded_new_owner_executor():
     assert "WAFL_R2_WORKER_UPLOAD_SECRET" in caller
     assert "wrangler@4.86.0" in core
     assert "pdf-generator-worker/src/index.js" in core
+
+
+def test_wafl_vercel_preview_bridge_is_owner_only_and_dormant_without_registered_gate():
+    from pathlib import Path
+    core = Path(".github/workflows/provider-gate-approval-core.yml").read_text()
+    caller = Path(".github/workflows/provider-gate-approval.yml").read_text()
+    assert 'executor == "wafl_vercel_preview_env_bridge_v1"' in core
+    assert 'gate == "development_preview_env_bridge"' in core
+    assert '"credential_mutation" => true' in core
+    assert '"ready_for_owner" => true' in core
+    assert 'WAFL_VERCEL_TOKEN: ${{ secrets.wafl_vercel_token }}' in core
+    assert 'wafl_vercel_token: ${{ secrets.WAFL_VERCEL_TOKEN }}' in caller
+    assert 'python scripts/wafl_vercel_preview_env_bridge.py --apply' in core
+    assert 'vercel deploy' not in core
