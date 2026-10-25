@@ -52,6 +52,12 @@ WEBP = base64.b64decode(
     "UklGRh4AAABXRUJQVlA4TBEAAAAvAAAAAAfQ//73v/+BiOh/AAA="
 )
 MAX_PDF = 10 * 1024 * 1024
+PDF_ERROR_BODY_LIMIT = 1024
+PDF_WORKER_ERRORS = frozenset((
+    "INVALID_JSON_PAYLOAD", "HTML_REQUIRED", "HTML_TOO_LARGE",
+    "METHOD_NOT_ALLOWED", "UNAUTHORIZED", "INVALID_CONTENT_TYPE",
+    "INPUT_TOO_LARGE", "PDF_RENDER_FAILED",
+))
 MEDIA_PROBE_USER_AGENT = "WAFL-Development-Media-Probe/1.0"
 ENV_NAMES = (
     "CLOUDFLARE_API_TOKEN", "CLOUDFLARE_ACCOUNT_ID",
@@ -224,9 +230,79 @@ def r2_403_failure_code(headers: dict[str, str], origin: str) -> str:
     )
 
 
+def pdf_content_type_category(headers: object) -> str:
+    """Retain only a bounded MIME category, never raw remote header values."""
+    try:
+        if isinstance(headers, dict) and "_pdf_ct" in headers:
+            kind = headers["_pdf_ct"]
+            allowed = ("PDF", "JSON", "HTML", "TEXT", "OTHER", "NONE")
+            return kind if type(kind) is str and kind in allowed else "UNKNOWN"
+        fields = headers.items() if headers is not None else ()
+        value = next(
+            (v for k, v in fields if isinstance(k, str) and k.lower() == "content-type"),
+            None,
+        )
+    except (AttributeError, TypeError, ValueError):
+        return "UNKNOWN"
+    if value is None:
+        return "NONE"
+    if not isinstance(value, str):
+        return "UNKNOWN"
+    media_type = value.split(";", 1)[0].strip().lower()
+    if media_type == "application/pdf":
+        return "PDF"
+    if media_type == "application/json" or media_type.endswith("+json"):
+        return "JSON"
+    if media_type == "text/html":
+        return "HTML"
+    if media_type.startswith("text/"):
+        return "TEXT"
+    return "OTHER"
+
+
+def pdf_worker_error_code(body: object) -> str:
+    """Parse only small JSON, then return a known PDF Worker error enum."""
+    if not isinstance(body, bytes) or len(body) > PDF_ERROR_BODY_LIMIT:
+        return "UNKNOWN"
+    try:
+        parsed = json.loads(body)
+    except (ValueError, TypeError, UnicodeError):
+        return "UNKNOWN"
+    if not isinstance(parsed, dict):
+        return "UNKNOWN"
+    code = parsed.get("error")
+    return code if type(code) is str and code in PDF_WORKER_ERRORS else "UNKNOWN"
+
+
+def pdf_auth_failure_code(
+    status: object, headers: dict[str, str], body: bytes,
+) -> str:
+    """HTTP/status, MIME, allowlisted Worker error, and PDF byte flags only."""
+    http = str(status) if type(status) is int and 100 <= status <= 599 else "UNVERIFIED"
+    kind = pdf_content_type_category(headers)
+    if kind == "JSON":
+        supplied = headers.get("_pdf_error") if isinstance(headers, dict) else None
+        worker_error = (
+            supplied if type(supplied) is str and supplied in PDF_WORKER_ERRORS
+            else pdf_worker_error_code(body)
+        )
+    else:
+        worker_error = "NONE"
+    if status == 200 and type(status) is int and isinstance(body, bytes):
+        start = "YES" if body.startswith(b"%PDF-") else "NO"
+        end = "YES" if b"%%EOF" in body[-2048:] else "NO"
+    else:
+        start = end = "UNVERIFIED"
+    return (
+        f"MEDIA_PDF_AUTH_OR_BYTES_INVALID_HTTP_{http}_CT_{kind}"
+        f"_WORKER_{worker_error}_START_{start}_END_{end}"
+    )
+
+
 def request_bytes(url: str, *, method: str = "GET", data: bytes | None = None,
                   headers: dict[str, str] | None = None,
-                  limit: int = MAX_PDF) -> tuple[int, dict[str, str], bytes]:
+                  limit: int = MAX_PDF,
+                  pdf_error_details: bool = False) -> tuple[int, dict[str, str], bytes]:
     ensure(urlsplit(url).scheme == "https", "MEDIA_HTTPS_REQUIRED")
     try:
         request_headers = dict(headers or {})
@@ -237,7 +313,18 @@ def request_bytes(url: str, *, method: str = "GET", data: bytes | None = None,
             ensure(len(body) <= limit, "MEDIA_RESPONSE_TOO_LARGE")
             return response.status, dict(response.headers.items()), body
     except HTTPError as error:
-        # On 403 only: discard raw headers and error body, retain fixed enums.
+        if pdf_error_details:
+            # Only authenticated PDF POST; never return remote header/body values.
+            kind = pdf_content_type_category(error.headers)
+            worker_error = "NONE"
+            if kind == "JSON":
+                try:
+                    response = error.read(PDF_ERROR_BODY_LIMIT + 1)
+                except (OSError, AttributeError, TypeError, ValueError):
+                    response = b""
+                worker_error = pdf_worker_error_code(response)
+            return error.code, {"_pdf_ct": kind, "_pdf_error": worker_error}, b""
+        # R2 keeps its prior bounded 403 classification; all other bodies drop.
         safe = safe_403_response_metadata(error.headers) if error.code == 403 else {}
         return error.code, safe, b""
     except (URLError, OSError, TimeoutError, ValueError):
@@ -356,8 +443,10 @@ def canary_pdf(config: dict[str, str]) -> None:
             "Authorization": "Bearer " + config["WAFLOW_PDF_GENERATOR_TOKEN"],
             "Accept": "application/pdf",
         },
+        pdf_error_details=True,
     )
-    ensure(pdf_bytes_ok(status, headers, pdf), "MEDIA_PDF_AUTH_OR_BYTES_INVALID")
+    if not pdf_bytes_ok(status, headers, pdf):
+        raise MediaBlocked(pdf_auth_failure_code(status, headers, pdf))
 
 
 def execute(repo: Path, sha: str, summary: Path) -> None:
