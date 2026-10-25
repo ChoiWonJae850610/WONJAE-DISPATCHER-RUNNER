@@ -170,10 +170,14 @@ def test_wafl_r2_existing_worker_gate_is_disabled_without_separate_owner_activat
     for key in (
         "CLOUDFLARE_API_TOKEN", "WAFL_CLOUDFLARE_ACCOUNT_ID",
         "WAFL_R2_PREVIEW_WORKER_NAME", "WAFL_R2_PREVIEW_BUCKET_NAME",
-        "WAFL_R2_PREVIEW_WORKER_URL", "WAFL_R2_IMAGES_ENTITLEMENT_APPROVED",
+        "WAFL_R2_PREVIEW_WORKER_URL",
         "WAFL_R2_SIGNING_PARITY_APPROVED",
     ):
         assert key in caller
+    assert "WAFL_R2_IMAGES_ENTITLEMENT_APPROVED" not in caller
+    assert "WAFL_R2_IMAGES_ENTITLEMENT_APPROVED" not in core
+    assert "WAFL_PDF_BROWSER_ENTITLEMENT_APPROVED" in caller
+    assert "WAFL_MEDIA_DEV_BILLING_APPROVED" in caller
     assert 'gate == "r2_preview_worker_delivery"' in core
     assert 'config["ready_for_owner"] == true' in core
     assert '"deployment_policy" => "existing_nonproduction_worker_only"' in core
