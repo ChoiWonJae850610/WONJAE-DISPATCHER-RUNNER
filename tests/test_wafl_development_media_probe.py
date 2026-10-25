@@ -116,3 +116,34 @@ def test_missing_browser_binding_blocks_before_live_canary(monkeypatch):
             "WAFL_R2_PREVIEW_BUCKET_NAME": "wafl-r2-dev",
             "WAFL_PDF_DEV_WORKER_NAME": "waflow-pdf-dev",
         })
+
+
+@pytest.mark.parametrize("status", [200, 301, 401, 403, 500, 503])
+def test_r2_precheck_reports_only_http_status_without_mutation(
+    monkeypatch, capsys, status,
+):
+    methods = []
+
+    def fake_request(_url, *, method="GET", data=None, headers=None, limit=None):
+        methods.append(method)
+        return status, {"X-Private-Test": "private-header"}, b"private-body"
+
+    monkeypatch.setattr(media, "request_bytes", fake_request)
+    with pytest.raises(media.MediaBlocked) as failure:
+        media.canary_r2({
+            "WAFL_R2_PREVIEW_WORKER_URL": "https://wafl-r2-dev.test.workers.dev",
+            "WAFL_R2_WORKER_UPLOAD_SECRET": "synthetic-secret",
+        })
+    assert str(failure.value) == (
+        f"MEDIA_R2_CANARY_NOT_VERIFIED_ABSENT_HTTP_{status}"
+    )
+    assert methods == ["GET"]
+    captured = capsys.readouterr()
+    assert captured.out == "" and captured.err == ""
+
+
+@pytest.mark.parametrize("status", [None, "401", True, 0, 99, 600])
+def test_r2_precheck_unknown_status_never_reflects_untrusted_text(status):
+    assert media.r2_absence_failure_code(status) == (
+        "MEDIA_R2_CANARY_NOT_VERIFIED_ABSENT_HTTP_UNVERIFIED"
+    )
