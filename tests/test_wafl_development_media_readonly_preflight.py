@@ -13,10 +13,17 @@ sys.path.insert(0, str(ROOT / "scripts"))
 module = importlib.import_module("wafl_development_media_readonly_preflight")
 
 
-def test_native_webp_preflight_does_not_require_images_entitlement_metadata():
-    assert "WAFL_R2_IMAGES_ENTITLEMENT_APPROVED" not in module.REQUIRED_INPUT_NAMES
-    assert "WAFL_PDF_BROWSER_ENTITLEMENT_APPROVED" in module.REQUIRED_INPUT_NAMES
-    assert "WAFL_MEDIA_DEV_BILLING_APPROVED" in module.REQUIRED_INPUT_NAMES
+def test_free_first_preflight_requires_only_actual_scoped_credential_names():
+    assert set(module.REQUIRED_INPUT_NAMES) == {
+        "OWNER_GITHUB_TOKEN", "CLOUDFLARE_API_TOKEN",
+        "WAFL_CLOUDFLARE_ACCOUNT_ID",
+    }
+    for redundant_approval in (
+        "WAFL_R2_IMAGES_ENTITLEMENT_APPROVED",
+        "WAFL_PDF_BROWSER_ENTITLEMENT_APPROVED",
+        "WAFL_MEDIA_DEV_BILLING_APPROVED",
+    ):
+        assert redundant_approval not in module.REQUIRED_INPUT_NAMES
 
 
 
