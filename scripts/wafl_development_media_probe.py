@@ -52,6 +52,7 @@ WEBP = base64.b64decode(
     "UklGRh4AAABXRUJQVlA4TBEAAAAvAAAAAAfQ//73v/+BiOh/AAA="
 )
 MAX_PDF = 10 * 1024 * 1024
+MEDIA_PROBE_USER_AGENT = "WAFL-Development-Media-Probe/1.0"
 ENV_NAMES = (
     "CLOUDFLARE_API_TOKEN", "CLOUDFLARE_ACCOUNT_ID",
     "WAFL_R2_PREVIEW_WORKER_NAME", "WAFL_R2_PREVIEW_BUCKET_NAME",
@@ -228,7 +229,9 @@ def request_bytes(url: str, *, method: str = "GET", data: bytes | None = None,
                   limit: int = MAX_PDF) -> tuple[int, dict[str, str], bytes]:
     ensure(urlsplit(url).scheme == "https", "MEDIA_HTTPS_REQUIRED")
     try:
-        req = Request(url, data=data, headers=headers or {}, method=method)
+        request_headers = dict(headers or {})
+        request_headers["User-Agent"] = MEDIA_PROBE_USER_AGENT
+        req = Request(url, data=data, headers=request_headers, method=method)
         with build_opener(NoRedirect()).open(req, timeout=35) as response:
             body = response.read(limit + 1)
             ensure(len(body) <= limit, "MEDIA_RESPONSE_TOO_LARGE")

@@ -196,6 +196,8 @@ def test_real_http_error_403_discards_raw_headers_and_body(monkeypatch, capsys):
 
     class DeniedOpener:
         def open(self, request, timeout):
+            headers = {k.lower(): v for k, v in request.header_items()}
+            assert headers["user-agent"] == media.MEDIA_PROBE_USER_AGENT
             raise HTTPError(request.full_url, 403, "private-message", incoming, None)
 
     monkeypatch.setattr(media, "build_opener", lambda *_: DeniedOpener())
@@ -270,3 +272,64 @@ def test_safe_403_malformed_headers_are_bounded():
     assert media.safe_403_response_metadata(BrokenHeaders()) == {
         "_ct": "UNKNOWN", "_cf_chl": "UNKNOWN", "_cf_err": "UNKNOWN",
     }
+
+
+@pytest.mark.parametrize("method,payload,request_headers", [
+    ("GET", None, {}),
+    ("PUT", media.WEBP, {"Content-Type": "image/webp"}),
+    ("DELETE", None, {}),
+    ("POST", b"{}", {
+        "Content-Type": "application/json",
+        "Authorization": "Bearer synthetic-private-token",
+    }),
+])
+def test_worker_requests_use_fixed_service_user_agent_and_preserve_auth(
+    monkeypatch, capsys, method, payload, request_headers,
+):
+    observed = []
+
+    class FakeResponse:
+        status = 200
+        headers = Message()
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, _kind, _value, _traceback):
+            return False
+
+        def read(self, _limit):
+            return b"ok"
+
+    class FakeOpener:
+        def open(self, request, timeout):
+            observed.append({
+                "method": request.get_method(),
+                "headers": {k.lower(): v for k, v in request.header_items()},
+                "body": request.data,
+                "url": request.full_url,
+                "timeout": timeout,
+            })
+            return FakeResponse()
+
+    monkeypatch.setattr(media, "build_opener", lambda *_: FakeOpener())
+    url = ("https://wafl-r2-dev.example.workers.dev/"
+           "?key=synthetic&signature=synthetic-private-signature")
+    status, headers, body = media.request_bytes(
+        url, method=method, data=payload, headers=request_headers,
+    )
+
+    assert media.MEDIA_PROBE_USER_AGENT == "WAFL-Development-Media-Probe/1.0"
+    assert status == 200 and body == b"ok" and headers == {}
+    assert len(observed) == 1
+    actual = observed[0]
+    assert actual["url"] == url
+    assert actual["method"] == method
+    assert actual["body"] == payload
+    assert actual["timeout"] == 35
+    assert actual["headers"]["user-agent"] == media.MEDIA_PROBE_USER_AGENT
+    for key, value in request_headers.items():
+        assert actual["headers"][key.lower()] == value
+
+    captured = capsys.readouterr()
+    assert captured.out == "" and captured.err == ""
