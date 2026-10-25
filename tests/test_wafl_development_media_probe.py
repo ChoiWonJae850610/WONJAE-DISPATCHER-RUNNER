@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+from email.message import Message
+from urllib.error import HTTPError
 from urllib.parse import parse_qs, urlsplit
 
 import pytest
@@ -129,14 +131,16 @@ def test_r2_precheck_reports_only_http_status_without_mutation(
         return status, {"X-Private-Test": "private-header"}, b"private-body"
 
     monkeypatch.setattr(media, "request_bytes", fake_request)
+    monkeypatch.setattr(media, "getproxies", lambda: {})
     with pytest.raises(media.MediaBlocked) as failure:
         media.canary_r2({
             "WAFL_R2_PREVIEW_WORKER_URL": "https://wafl-r2-dev.test.workers.dev",
             "WAFL_R2_WORKER_UPLOAD_SECRET": "synthetic-secret",
         })
-    assert str(failure.value) == (
-        f"MEDIA_R2_CANARY_NOT_VERIFIED_ABSENT_HTTP_{status}"
-    )
+    expected = f"MEDIA_R2_CANARY_NOT_VERIFIED_ABSENT_HTTP_{status}"
+    if status == 403:
+        expected += "_CT_UNKNOWN_CF_CHL_UNKNOWN_CF_ERR_UNKNOWN_HTTPS_PXY_NONE"
+    assert str(failure.value) == expected
     assert methods == ["GET"]
     captured = capsys.readouterr()
     assert captured.out == "" and captured.err == ""
@@ -147,3 +151,122 @@ def test_r2_precheck_unknown_status_never_reflects_untrusted_text(status):
     assert media.r2_absence_failure_code(status) == (
         "MEDIA_R2_CANARY_NOT_VERIFIED_ABSENT_HTTP_UNVERIFIED"
     )
+
+
+@pytest.mark.parametrize("raw,kind", [
+    ("text/html; charset=UTF-8", "HTML"),
+    ("application/json", "JSON"),
+    ("application/problem+json", "JSON"),
+    ("text/plain", "TEXT"),
+    ("application/octet-stream", "OTHER"),
+    (None, "NONE"),
+])
+def test_403_header_classification_never_reflects_raw_values(raw, kind):
+    headers = {"Private-Header": "sensitive-private-value"}
+    if raw is not None:
+        headers["CONTENT-Type"] = raw
+    assert media.safe_403_response_metadata(headers) == {
+        "_ct": kind, "_cf_chl": "NO", "_cf_err": "NO",
+    }
+
+
+def test_cloudflare_header_presence_not_waf_block_proof():
+    flags = media.safe_403_response_metadata({
+        "CF-Mitigated": "challenge",
+        "CF-Error-Type": "private-error-code",
+        "Content-Type": "text/html; charset=private-charset",
+        "CF-Ray": "private-ray", "Set-Cookie": "private-cookie",
+    })
+    assert flags == {"_ct": "HTML", "_cf_chl": "YES", "_cf_err": "YES"}
+    assert "private" not in str(flags)
+    assert media.safe_403_response_metadata({
+        "CF-Ray": "private-ray",
+    }) == {"_ct": "NONE", "_cf_chl": "NO", "_cf_err": "NO"}
+    assert media.safe_403_response_metadata({
+        "CF-Chl-Test": "private",
+    })["_cf_chl"] == "YES"
+
+
+def test_real_http_error_403_discards_raw_headers_and_body(monkeypatch, capsys):
+    incoming = Message()
+    incoming["Content-Type"] = "text/html; charset=private"
+    incoming["CF-Mitigated"] = "challenge"
+    incoming["CF-Error-Origin"] = "private-origin"
+    incoming["Set-Cookie"] = "private-cookie"
+
+    class DeniedOpener:
+        def open(self, request, timeout):
+            raise HTTPError(request.full_url, 403, "private-message", incoming, None)
+
+    monkeypatch.setattr(media, "build_opener", lambda *_: DeniedOpener())
+    status, flags, body = media.request_bytes(
+        "https://wafl-r2-dev.test.workers.dev/?key=private&signature=private",
+    )
+    assert status == 403 and body == b""
+    assert flags == {"_ct": "HTML", "_cf_chl": "YES", "_cf_err": "YES"}
+    assert "private" not in str(flags)
+    captured = capsys.readouterr()
+    assert captured.out == "" and captured.err == ""
+
+
+@pytest.mark.parametrize("configured,bypass,expected", [
+    (None, False, "NONE"),
+    ("http://private-proxy.example:8080", False, "CONFIGURED"),
+    ("http://private-proxy.example:8080", True, "BYPASS"),
+])
+def test_https_proxy_detection_reports_only_enum(
+    monkeypatch, configured, bypass, expected,
+):
+    monkeypatch.setattr(media, "getproxies",
+                        lambda: {"https": configured} if configured else {})
+    monkeypatch.setattr(media, "proxy_bypass", lambda _host: bypass)
+    outcome = media.https_proxy_hint("https://wafl-r2-dev.test.workers.dev/")
+    assert outcome == expected
+    assert "private" not in outcome
+
+
+def test_https_proxy_detection_failure_is_unknown(monkeypatch):
+    monkeypatch.setattr(media, "getproxies", lambda: {"https": "private"})
+    def cannot_check(_host):
+        raise OSError("private-url")
+    monkeypatch.setattr(media, "proxy_bypass", cannot_check)
+    assert media.https_proxy_hint(
+        "https://wafl-r2-dev.test.workers.dev/"
+    ) == "UNKNOWN"
+
+
+def test_403_canary_logs_only_whitelisted_flags_never_uploads(
+    monkeypatch, capsys,
+):
+    monkeypatch.setattr(media, "getproxies", lambda: {})
+    methods = []
+
+    def fake_request(_url, *, method="GET", data=None, headers=None, limit=None):
+        methods.append(method)
+        return 403, {
+            "_ct": "sensitive-category", "_cf_chl": "YES",
+            "_cf_err": "NO", "Authorization": "private-token",
+        }, b"private-body"
+
+    monkeypatch.setattr(media, "request_bytes", fake_request)
+    with pytest.raises(media.MediaBlocked) as failure:
+        media.canary_r2({
+            "WAFL_R2_PREVIEW_WORKER_URL": "https://wafl-r2-dev.test.workers.dev",
+            "WAFL_R2_WORKER_UPLOAD_SECRET": "private-secret",
+        })
+    assert str(failure.value) == (
+        "MEDIA_R2_CANARY_NOT_VERIFIED_ABSENT_HTTP_403"
+        "_CT_UNKNOWN_CF_CHL_YES_CF_ERR_NO_HTTPS_PXY_NONE"
+    )
+    assert methods == ["GET"]
+    captured = capsys.readouterr()
+    assert captured.out == "" and captured.err == ""
+
+
+def test_safe_403_malformed_headers_are_bounded():
+    class BrokenHeaders:
+        def items(self):
+            raise ValueError("private-response")
+    assert media.safe_403_response_metadata(BrokenHeaders()) == {
+        "_ct": "UNKNOWN", "_cf_chl": "UNKNOWN", "_cf_err": "UNKNOWN",
+    }
