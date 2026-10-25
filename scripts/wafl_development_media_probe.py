@@ -41,14 +41,15 @@ else:
         require_worker_origin,
     )
 
-PNG = base64.b64decode(
-    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aYWcAAAAASUVORK5CYII="
+# Tiny, valid 1x1 WebP generated offline. Transport verification, not image conversion.
+WEBP = base64.b64decode(
+    "UklGRh4AAABXRUJQVlA4TBEAAAAvAAAAAAfQ//73v/+BiOh/AAA="
 )
 MAX_PDF = 10 * 1024 * 1024
 ENV_NAMES = (
     "CLOUDFLARE_API_TOKEN", "CLOUDFLARE_ACCOUNT_ID",
     "WAFL_R2_PREVIEW_WORKER_NAME", "WAFL_R2_PREVIEW_BUCKET_NAME",
-    "WAFL_R2_PREVIEW_WORKER_URL", "WAFL_R2_IMAGES_ENTITLEMENT_APPROVED",
+    "WAFL_R2_PREVIEW_WORKER_URL",
     "WAFL_R2_SIGNING_PARITY_APPROVED", "WAFL_R2_WORKER_UPLOAD_SECRET",
     "WAFL_PDF_DEV_WORKER_NAME", "WAFL_PDF_DEV_WORKER_URL",
     "WAFLOW_PDF_GENERATOR_TOKEN",
@@ -71,8 +72,7 @@ def environment() -> dict[str, str]:
         re.fullmatch(r"[0-9a-fA-F]{32}", config["CLOUDFLARE_ACCOUNT_ID"]) is not None,
         "MEDIA_ACCOUNT_ID_INVALID",
     )
-    ensure(config["WAFL_R2_IMAGES_ENTITLEMENT_APPROVED"] == "yes"
-           and config["WAFL_R2_SIGNING_PARITY_APPROVED"] == "yes",
+    ensure(config["WAFL_R2_SIGNING_PARITY_APPROVED"] == "yes",
            "MEDIA_EXISTING_R2_OWNER_ATTESTATION_MISSING")
     r2 = config["WAFL_R2_PREVIEW_WORKER_NAME"]
     pdf = config["WAFL_PDF_DEV_WORKER_NAME"]
@@ -187,16 +187,17 @@ def signed_url(origin: str, method: str, key: str, secret: str,
 
 def canary_r2(config: dict[str, str]) -> None:
     key = (f"companies/{uuid.uuid4()}/workorders/{uuid.uuid4()}/"
-           f"design/{uuid.uuid4()}.png")
+           f"design/{uuid.uuid4()}.webp")
     origin = config["WAFL_R2_PREVIEW_WORKER_URL"]
     secret = config["WAFL_R2_WORKER_UPLOAD_SECRET"]
 
     def call(method: str, body: bytes | None = None):
         url = signed_url(origin, method, key, secret,
-                         size=len(body) if method == "PUT" and body else None)
+                         size=len(body) if method == "PUT" and body else None,
+                         content_type="image/webp")
         return request_bytes(
             url, method=method, data=body,
-            headers={"Content-Type": "image/png"} if body else {},
+            headers={"Content-Type": "image/webp"} if body else {},
             limit=4096,
         )
 
@@ -206,15 +207,15 @@ def canary_r2(config: dict[str, str]) -> None:
     error: MediaBlocked | None = None
     try:
         attempted_put = True
-        status, _, result = call("PUT", PNG)
+        status, _, result = call("PUT", WEBP)
         ensure(status == 200 and json.loads(result).get("ok") is True,
                "MEDIA_R2_SIGNED_PUT_FAILED")
         status, headers, value = call("GET")
         content_type = next((v for k, v in headers.items()
                              if k.lower() == "content-type"), "")
-        ensure(status == 200 and content_type.split(";")[0].lower() == "image/png"
+        ensure(status == 200 and content_type.split(";")[0].lower() == "image/webp"
                and hmac.compare_digest(
-                   hashlib.sha256(value).digest(), hashlib.sha256(PNG).digest()),
+                   hashlib.sha256(value).digest(), hashlib.sha256(WEBP).digest()),
                "MEDIA_R2_OBJECT_READBACK_MISMATCH")
     except (ValueError, TypeError):
         error = MediaBlocked("MEDIA_R2_RESPONSE_FORMAT_UNVERIFIED")
