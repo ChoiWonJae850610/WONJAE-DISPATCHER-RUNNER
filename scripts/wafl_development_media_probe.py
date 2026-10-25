@@ -20,7 +20,13 @@ import uuid
 from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode, urlsplit
-from urllib.request import HTTPRedirectHandler, Request, build_opener
+from urllib.request import (
+    HTTPRedirectHandler,
+    Request,
+    build_opener,
+    getproxies,
+    proxy_bypass,
+)
 
 if __package__:
     from .wafl_r2_preview_gate import (
@@ -150,6 +156,73 @@ class NoRedirect(HTTPRedirectHandler):
         return None
 
 
+def safe_403_response_metadata(headers: object) -> dict[str, str]:
+    """Keep only fixed categories, not external header names or values."""
+    ct = None
+    challenge = False
+    cf_error = False
+    try:
+        for key, value in (headers.items() if headers is not None else ()):
+            if not isinstance(key, str):
+                continue
+            key = key.lower()
+            if key == "content-type" and isinstance(value, str):
+                ct = value.split(";", 1)[0].strip().lower()
+            elif key == "cf-mitigated" or key.startswith("cf-chl-"):
+                challenge = True
+            elif key in ("cf-error-type", "cf-error-origin"):
+                cf_error = True
+    except (AttributeError, TypeError, ValueError):
+        return {"_ct": "UNKNOWN", "_cf_chl": "UNKNOWN", "_cf_err": "UNKNOWN"}
+    if ct is None:
+        kind = "NONE"
+    elif ct == "text/html":
+        kind = "HTML"
+    elif ct == "application/json" or ct.endswith("+json"):
+        kind = "JSON"
+    elif ct.startswith("text/"):
+        kind = "TEXT"
+    else:
+        kind = "OTHER"
+    return {
+        "_ct": kind,
+        "_cf_chl": "YES" if challenge else "NO",
+        "_cf_err": "YES" if cf_error else "NO",
+    }
+
+
+def https_proxy_hint(origin: str) -> str:
+    """Infer urllib HTTPS proxy configuration, never the address or IP."""
+    try:
+        proxies = getproxies()
+        if not isinstance(proxies, dict):
+            return "UNKNOWN"
+        if not proxies.get("https"):
+            return "NONE"
+        host = urlsplit(origin).hostname
+        if not host:
+            return "UNKNOWN"
+        return "BYPASS" if proxy_bypass(host) else "CONFIGURED"
+    except (OSError, TypeError, ValueError):
+        return "UNKNOWN"
+
+
+def r2_403_failure_code(headers: dict[str, str], origin: str) -> str:
+    """Fail closed: every emitted value is a fixed allowlisted enum."""
+    def fixed(key: str, allowed: frozenset[str]) -> str:
+        value = headers.get(key) if isinstance(headers, dict) else None
+        return value if isinstance(value, str) and value in allowed else "UNKNOWN"
+
+    ct = fixed("_ct", frozenset(("NONE", "HTML", "JSON", "TEXT", "OTHER")))
+    chl = fixed("_cf_chl", frozenset(("YES", "NO")))
+    err = fixed("_cf_err", frozenset(("YES", "NO")))
+    return (
+        "MEDIA_R2_CANARY_NOT_VERIFIED_ABSENT_HTTP_403"
+        f"_CT_{ct}_CF_CHL_{chl}_CF_ERR_{err}"
+        f"_HTTPS_PXY_{https_proxy_hint(origin)}"
+    )
+
+
 def request_bytes(url: str, *, method: str = "GET", data: bytes | None = None,
                   headers: dict[str, str] | None = None,
                   limit: int = MAX_PDF) -> tuple[int, dict[str, str], bytes]:
@@ -161,7 +234,9 @@ def request_bytes(url: str, *, method: str = "GET", data: bytes | None = None,
             ensure(len(body) <= limit, "MEDIA_RESPONSE_TOO_LARGE")
             return response.status, dict(response.headers.items()), body
     except HTTPError as error:
-        return error.code, {}, b""
+        # On 403 only: discard raw headers and error body, retain fixed enums.
+        safe = safe_403_response_metadata(error.headers) if error.code == 403 else {}
+        return error.code, safe, b""
     except (URLError, OSError, TimeoutError, ValueError):
         raise MediaBlocked("MEDIA_NETWORK_UNVERIFIED") from None
 
@@ -208,8 +283,10 @@ def canary_r2(config: dict[str, str]) -> None:
             limit=4096,
         )
 
-    status, _, _ = call("GET")
+    status, response_flags, _ = call("GET")
     if status != 404:
+        if status == 403:
+            raise MediaBlocked(r2_403_failure_code(response_flags, origin))
         raise MediaBlocked(r2_absence_failure_code(status))
     attempted_put = False
     error: MediaBlocked | None = None
