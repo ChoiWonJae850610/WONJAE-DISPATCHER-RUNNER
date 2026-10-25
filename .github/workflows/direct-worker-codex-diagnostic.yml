@@ -1,0 +1,61 @@
+# Preparation only: PR CI cannot invoke this authenticated Owner workflow.
+name: WAFL 013 Codex Diagnostic
+run-name: Codex Diagnostic WAFL 013 ${{ inputs.source_sha }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_sha:
+        required: true
+        description: Current WAFL cloud-dev-v1 HEAD
+        type: string
+      control_sha:
+        required: true
+        description: Current DEV-CONTROL main HEAD
+        type: string
+
+permissions: {}
+
+concurrency:
+  group: wafl013-codex-diagnostic-${{ inputs.source_sha }}
+  cancel-in-progress: false
+
+jobs:
+  synthetic-probe:
+    if: ${{ github.ref == 'refs/heads/main' && github.actor == 'ChoiWonJae850610' }}
+    runs-on: [self-hosted, Linux, X64, direct-worker]
+    timeout-minutes: 5
+    steps:
+      - name: Checkout trusted Runner only
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Install pinned SDK in temporary environment
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m venv "$RUNNER_TEMP/wafl013-probe-venv"
+          "$RUNNER_TEMP/wafl013-probe-venv/bin/python" -m pip install -e .
+
+      - name: Verify fixed WAFL 013 evidence and run one read-only 120s SDK stream
+        shell: bash
+        env:
+          OWNER_GITHUB_TOKEN: ${{ secrets.OWNER_GITHUB_TOKEN }}
+          CODEX_AUTH_JSON: ${{ secrets.CODEX_AUTH_JSON }}
+          DIAGNOSTIC_SOURCE_SHA: ${{ inputs.source_sha }}
+          DIAGNOSTIC_CONTROL_SHA: ${{ inputs.control_sha }}
+        run: |
+          set -euo pipefail
+          PYTHONDONTWRITEBYTECODE=1 "$RUNNER_TEMP/wafl013-probe-venv/bin/python" \
+            scripts/wafl_013_codex_diagnostic.py
+
+      - name: Remove exact temporary SDK environment
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -d "$RUNNER_TEMP/wafl013-probe-venv" ] && [ ! -L "$RUNNER_TEMP/wafl013-probe-venv" ]; then
+            rm -rf --one-file-system -- "$RUNNER_TEMP/wafl013-probe-venv"
+          fi
