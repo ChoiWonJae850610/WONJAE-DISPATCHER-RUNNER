@@ -4,6 +4,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 from email.message import Message
+from io import BytesIO
 from urllib.error import HTTPError
 from urllib.parse import parse_qs, urlsplit
 
@@ -331,5 +332,195 @@ def test_worker_requests_use_fixed_service_user_agent_and_preserve_auth(
     for key, value in request_headers.items():
         assert actual["headers"][key.lower()] == value
 
+    captured = capsys.readouterr()
+    assert captured.out == "" and captured.err == ""
+
+
+@pytest.mark.parametrize("content_type,category", [
+    ("application/pdf; charset=private-charset", "PDF"),
+    ("application/json", "JSON"),
+    ("application/problem+json", "JSON"),
+    ("text/html", "HTML"),
+    ("text/plain; private=1", "TEXT"),
+    ("application/octet-stream", "OTHER"),
+    (None, "NONE"),
+])
+def test_pdf_content_type_diagnostic_is_category_only(content_type, category):
+    headers = {"X-Private": "private-info"}
+    if content_type is not None:
+        headers["cOnTeNt-TyPe"] = content_type
+    assert media.pdf_content_type_category(headers) == category
+
+
+@pytest.mark.parametrize("code", [
+    "INVALID_JSON_PAYLOAD", "HTML_REQUIRED", "HTML_TOO_LARGE",
+    "METHOD_NOT_ALLOWED", "UNAUTHORIZED", "INVALID_CONTENT_TYPE",
+    "INPUT_TOO_LARGE", "PDF_RENDER_FAILED",
+])
+def test_pdf_worker_error_code_uses_worker_allowlist(code):
+    payload = ('{"error":"' + code + '","details":"private-raw-value"}').encode()
+    assert media.pdf_worker_error_code(payload) == code
+    assert media.pdf_worker_error_code(
+        b'{"error":"PRIVATE_SECRET"}'
+    ) == "UNKNOWN"
+
+
+@pytest.mark.parametrize("value", [
+    b"not-json", b'{"error":123}', b'{"error":"PRIVATE_SECRET"}',
+    b'{"error":"PDF_RENDER_FAILED"}' + b" " * 2000,
+    b'["PDF_RENDER_FAILED"]',
+])
+def test_pdf_worker_error_invalid_untrusted_body_never_reflected(value):
+    assert media.pdf_worker_error_code(value) == "UNKNOWN"
+
+
+@pytest.mark.parametrize("status,ct,body,expected", [
+    (200, "application/pdf", b"%PDF-1.7 private-broken",
+     "HTTP_200_CT_PDF_WORKER_NONE_START_YES_END_NO"),
+    (200, "application/pdf", b"private-content %%EOF",
+     "HTTP_200_CT_PDF_WORKER_NONE_START_NO_END_YES"),
+    (200, "application/json", b'{"error":"PDF_RENDER_FAILED"}',
+     "HTTP_200_CT_JSON_WORKER_PDF_RENDER_FAILED_START_NO_END_NO"),
+    (200, "text/html", b"private-html",
+     "HTTP_200_CT_HTML_WORKER_NONE_START_NO_END_NO"),
+    (503, "text/plain", b"private-error",
+     "HTTP_503_CT_TEXT_WORKER_NONE_START_UNVERIFIED_END_UNVERIFIED"),
+])
+def test_pdf_failure_code_contains_only_fixed_bounded_fields(
+    status, ct, body, expected,
+):
+    result = media.pdf_auth_failure_code(status, {"Content-Type": ct}, body)
+    assert result == "MEDIA_PDF_AUTH_OR_BYTES_INVALID_" + expected
+    assert "private" not in result
+
+
+def test_pdf_failure_code_bad_status_and_spoofed_worker_code_fail_closed():
+    result = media.pdf_auth_failure_code(
+        "500-private-url",
+        {"_pdf_ct": "JSON", "_pdf_error": "PRIVATE_REMOTE_RESPONSE"},
+        b"Bearer private-token",
+    )
+    assert result == (
+        "MEDIA_PDF_AUTH_OR_BYTES_INVALID_HTTP_UNVERIFIED_CT_JSON"
+        "_WORKER_UNKNOWN_START_UNVERIFIED_END_UNVERIFIED"
+    )
+    assert "private" not in result
+
+
+@pytest.mark.parametrize("status,error_code,expected_code", [
+    (500, "PDF_RENDER_FAILED", "PDF_RENDER_FAILED"),
+    (401, "UNAUTHORIZED", "UNAUTHORIZED"),
+    (400, "PRIVATE_REMOTE_ERROR", "UNKNOWN"),
+])
+def test_pdf_http_error_captures_only_bounded_json_error_metadata(
+    monkeypatch, capsys, status, error_code, expected_code,
+):
+    private_url = "https://wafl-pdf-dev.example.workers.dev/"
+    private_token = "private-Bearer-value"
+    private_blob = (
+        '{"error":"' + error_code + '","secret":"private-body"}'
+    ).encode()
+    incoming = Message()
+    incoming["Content-Type"] = "application/json; charset=private"
+    incoming["Set-Cookie"] = "private-cookie"
+
+    class DeniedOpener:
+        def open(self, req, timeout):
+            request_headers = {k.lower(): v for k, v in req.header_items()}
+            assert request_headers["authorization"] == "Bearer " + private_token
+            assert request_headers["user-agent"] == media.MEDIA_PROBE_USER_AGENT
+            raise HTTPError(req.full_url, status, "private-reason",
+                            incoming, BytesIO(private_blob))
+
+    monkeypatch.setattr(media, "build_opener", lambda *_: DeniedOpener())
+    result_status, safe_headers, value = media.request_bytes(
+        private_url, method="POST", data=b"{}",
+        headers={"Authorization": "Bearer " + private_token},
+        pdf_error_details=True,
+    )
+    assert result_status == status
+    assert safe_headers == {
+        "_pdf_ct": "JSON", "_pdf_error": expected_code,
+    }
+    assert value == b""
+    failure = media.pdf_auth_failure_code(result_status, safe_headers, value)
+    assert failure == (
+        "MEDIA_PDF_AUTH_OR_BYTES_INVALID"
+        f"_HTTP_{status}_CT_JSON_WORKER_{expected_code}"
+        "_START_UNVERIFIED_END_UNVERIFIED"
+    )
+    assert "private" not in failure + str(safe_headers)
+    captured = capsys.readouterr()
+    assert captured.out == "" and captured.err == ""
+
+
+def test_pdf_http_error_nonjson_does_not_read_untrusted_body(monkeypatch):
+    incoming = Message()
+    incoming["Content-Type"] = "text/html; charset=private"
+
+    class ReadForbidden:
+        def read(self, _size):
+            raise AssertionError("HTML response body must not be read")
+
+    class DeniedOpener:
+        def open(self, request, timeout):
+            raise HTTPError(request.full_url, 403, "private-error",
+                            incoming, ReadForbidden())
+
+    monkeypatch.setattr(media, "build_opener", lambda *_: DeniedOpener())
+    status, safe, body = media.request_bytes(
+        "https://wafl-pdf-dev.example.workers.dev/",
+        method="POST", data=b"{}", pdf_error_details=True,
+    )
+    assert (status, safe, body) == (
+        403, {"_pdf_ct": "HTML", "_pdf_error": "NONE"}, b"",
+    )
+
+
+def test_pdf_http_error_existing_default_r2_path_unchanged(monkeypatch):
+    headers = Message()
+    headers["Content-Type"] = "text/plain"
+
+    class DeniedOpener:
+        def open(self, request, timeout):
+            raise HTTPError(request.full_url, 500, "private-message",
+                            headers, BytesIO(b"private-body"))
+
+    monkeypatch.setattr(media, "build_opener", lambda *_: DeniedOpener())
+    assert media.request_bytes(
+        "https://wafl-r2-dev.example.workers.dev/?key=private"
+    ) == (500, {}, b"")
+
+
+def test_canary_pdf_diagnoses_authenticated_post_without_leaking(
+    monkeypatch, capsys,
+):
+    seen = []
+    def fake_request(url, *, method="GET", data=None, headers=None,
+                     limit=media.MAX_PDF, pdf_error_details=False):
+        seen.append((method, pdf_error_details, headers or {}))
+        if method == "GET":
+            return 200, {}, b'{"ok":true,"service":"waflow-pdf-generator"}'
+        if not headers.get("Authorization"):
+            assert not pdf_error_details
+            return 401, {}, b""
+        assert pdf_error_details
+        assert headers["Authorization"] == "Bearer private-token"
+        return 500, {"_pdf_ct": "JSON", "_pdf_error": "PDF_RENDER_FAILED"}, b""
+
+    monkeypatch.setattr(media, "request_bytes", fake_request)
+    with pytest.raises(media.MediaBlocked) as err:
+        media.canary_pdf({
+            "WAFL_PDF_DEV_WORKER_URL":
+                "https://wafl-pdf-dev.example.workers.dev",
+            "WAFLOW_PDF_GENERATOR_TOKEN": "private-token",
+        })
+    assert str(err.value) == (
+        "MEDIA_PDF_AUTH_OR_BYTES_INVALID_HTTP_500_CT_JSON"
+        "_WORKER_PDF_RENDER_FAILED_START_UNVERIFIED_END_UNVERIFIED"
+    )
+    assert [(method, inspect) for method, inspect, _ in seen] == [
+        ("GET", False), ("POST", False), ("POST", True),
+    ]
     captured = capsys.readouterr()
     assert captured.out == "" and captured.err == ""
