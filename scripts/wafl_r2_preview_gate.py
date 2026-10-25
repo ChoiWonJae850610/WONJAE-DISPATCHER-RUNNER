@@ -54,10 +54,11 @@ def _bindings(document: dict) -> list[dict]:
 
 
 def require_bindings(document: dict, bucket: str) -> None:
+    # Ignore optional legacy bindings; native image derivation requires only
+    # signed R2 storage and its private Worker secret.
     bindings = _bindings(document)
     expected = {
         "R2_BUCKET": "r2_bucket",
-        "IMAGES": "images",
         "R2_WORKER_UPLOAD_SECRET": "secret_text",
     }
     for name, kind in expected.items():
@@ -116,14 +117,12 @@ def required_environment() -> dict[str, str]:
     names = (
         "CLOUDFLARE_API_TOKEN", "CLOUDFLARE_ACCOUNT_ID",
         "WAFL_R2_PREVIEW_WORKER_NAME", "WAFL_R2_PREVIEW_BUCKET_NAME",
-        "WAFL_R2_PREVIEW_WORKER_URL", "WAFL_R2_IMAGES_ENTITLEMENT_APPROVED",
+        "WAFL_R2_PREVIEW_WORKER_URL",
         "WAFL_R2_SIGNING_PARITY_APPROVED",
     )
     values = {key: os.environ.get(key, "").strip() for key in names}
     if not all(values.values()):
         raise GateError("WAFL_SCOPED_CREDENTIAL_OR_OWNER_READBACK_MISSING")
-    if values["WAFL_R2_IMAGES_ENTITLEMENT_APPROVED"] != "yes":
-        raise GateError("IMAGES_ENTITLEMENT_NOT_APPROVED")
     if values["WAFL_R2_SIGNING_PARITY_APPROVED"] != "yes":
         raise GateError("WORKER_SIGNING_PARITY_NOT_APPROVED")
     account = values["CLOUDFLARE_ACCOUNT_ID"]
@@ -175,7 +174,6 @@ def execute(repo: Path, sha: str, summary: Path) -> None:
             f'main = "{source.as_posix()}"\n'
             'compatibility_date = "2026-08-20"\n'
             'keep_vars = true\n'
-            '[images]\nbinding = "IMAGES"\n'
             '[[r2_buckets]]\n'
             'binding = "R2_BUCKET"\n'
             f'bucket_name = "{bucket}"\n',
