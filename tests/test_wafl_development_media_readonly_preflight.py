@@ -90,7 +90,7 @@ def test_gh_read_denied_fails_before_any_claim(monkeypatch):
         module.secret_metadata_read("synthetic-pat")
 
 
-def test_missing_future_approvals_do_not_block_useful_readonly_evidence(tmp_path, monkeypatch):
+def test_absent_obsolete_approvals_do_not_block_free_first_readonly_evidence(tmp_path, monkeypatch):
     monkeypatch.setattr(module, "source_identity", lambda *_a: None)
     monkeypatch.setattr(module, "protected_runtime", lambda: {
         "OWNER_GITHUB_TOKEN": "synthetic-pat",
@@ -108,7 +108,7 @@ def test_missing_future_approvals_do_not_block_useful_readonly_evidence(tmp_path
     report = tmp_path / "summary"
     module.inspect(tmp_path, "b" * 40, report)
     data = report.read_text()
-    assert "MISSING_NAMES" in data
+    assert "Required input Secret *names* present: PRESENT_NOT_VALUE_VERIFIED" in data
     assert "PASS_NEW_NAMES_ABSENT" in data
     assert "NOT_VERIFIED" in data
     assert "NOT_AUTHORIZED" in data
