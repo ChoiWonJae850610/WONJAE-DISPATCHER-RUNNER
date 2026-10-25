@@ -27,8 +27,8 @@ LEGACY_NAMES = frozenset(
     ("peacebypiece-r2-upload", "peacebypiece-files", "waflow-pdf-generator")
 )
 # Names that this isolated bootstrap may CREATE (and must first prove absent).
-# Owner approval/entitlement inputs are separately REQUIRED to exist in
-# safe_configuration(); they must never be created or overwritten by this run.
+# Uses existing authenticated Owner/Cloudflare credentials only. No billing plan
+# upgrades, Cloudflare Images transformations, or entitlement Secret writes.
 SECRET_NAMES = (
     "WAFL_R2_PREVIEW_WORKER_NAME", "WAFL_R2_PREVIEW_BUCKET_NAME",
     "WAFL_R2_PREVIEW_WORKER_URL", "WAFL_R2_WORKER_UPLOAD_SECRET",
@@ -61,15 +61,14 @@ def command(args: list[str], *, env: dict[str, str], cwd: Path | None = None,
 def safe_configuration() -> dict[str, str]:
     keys = (
         "CLOUDFLARE_API_TOKEN", "CLOUDFLARE_ACCOUNT_ID", "OWNER_GITHUB_TOKEN",
-        "WAFL_PDF_BROWSER_ENTITLEMENT_APPROVED", "WAFL_MEDIA_DEV_BILLING_APPROVED",
     )
     data = {key: os.getenv(key, "").strip() for key in keys}
-    require(all(data.values()), "BOOTSTRAP_SCOPED_OWNER_CREDENTIAL_OR_APPROVAL_MISSING")
+    require(all(data.values()), "BOOTSTRAP_SCOPED_OWNER_CREDENTIAL_MISSING")
     require(re.fullmatch(r"[a-fA-F0-9]{32}", data["CLOUDFLARE_ACCOUNT_ID"]) is not None,
             "BOOTSTRAP_CLOUDFLARE_ACCOUNT_UNVERIFIED")
-    # Browser Rendering and possible R2/Workers billing remain distinct approvals.
-    for name in keys[-2:]:
-        require(data[name] == "yes", "BOOTSTRAP_ENTITLEMENT_OR_BILLING_NOT_APPROVED")
+    # Free-first is the existing Owner policy: account/provider failures and
+    # Worker binding readback remain fail-closed. No paid-plan upgrade is made.
+    # Arbitrary yes/no entitlement flags are not evidence of real availability.
     require(os.getenv("GITHUB_REPOSITORY") == RUNNER_REPOSITORY
             and os.getenv("GITHUB_REF") == "refs/heads/main"
             and os.getenv("GITHUB_EVENT_NAME") == "workflow_dispatch",
