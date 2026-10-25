@@ -57,6 +57,7 @@ jobs:
       wafl_pdf_dev_worker_name: ${{ secrets.WAFL_PDF_DEV_WORKER_NAME }}
       wafl_pdf_dev_worker_url: ${{ secrets.WAFL_PDF_DEV_WORKER_URL }}
       wafl_pdf_generator_token: ${{ secrets.WAFL_PDF_GENERATOR_TOKEN }}
+      wafl_vercel_token: ${{ secrets.WAFL_VERCEL_TOKEN }}
 
   classmo:
     if: ${{ inputs.project == 'CLASSMO' }}
