@@ -41,7 +41,7 @@ def test_wafl_013_no_pre_edit_typecheck_gate_and_real_source_required(tmp_path):
     assert "IMPLEMENT the already authorized source changes first" in prompt
     assert "pre-edit admission gate" in prompt
     assert "missing expo/tsconfig.base" in prompt
-    assert "do not return MANUAL_REQUIRED solely" in prompt.lower()
+    assert "do not return manual_required solely" in prompt.lower()
     assert "Return CHANGED only if actual authorized source files changed" in prompt
     assert "NOT_RUN" in prompt
     assert "never claim local TypeScript PASS" in prompt
