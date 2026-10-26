@@ -193,7 +193,8 @@ def test_workflow_is_scoped_to_registered_nonproduction_gate():
         '"wafl_development_media_probe_v1", '
         '"wafl_development_media_bootstrap_v1", '
         '"wafl_development_media_readonly_preflight_v1", '
-        '"wafl_vercel_preview_env_bridge_v1"].include?(executor)' in workflow
+        '"wafl_vercel_preview_env_bridge_v1", '
+        '"wafl_pdf_dev_worker_only_v1"].include?(executor)' in workflow
     )
     for needle in (
         'config["environment"] == "development"',
