@@ -9,6 +9,7 @@ from pathlib import Path
 
 import pytest
 import yaml
+from test_failure_recovery_document import mixed_capacity_log
 
 from wonjae_dispatcher_runner.failure_recovery_document import (
     RecoveryPreparationError,
@@ -578,3 +579,45 @@ def test_auto_recovery_skips_only_noninitial_manual_gate_not_owner_or_unknown_fa
     assert not prep.safe_skip_noninitial_source_failure(
         event, None, ValueError("bad")
     )
+
+
+
+def test_trusted_publisher_classifies_exact_mixed_capacity_without_new_source():
+    sha = "a" * 40
+    assert prep.classify_initial_failure_log(raw_job_log()) == (
+        sha, "INITIAL_CODEX_TIMEOUT_EXHAUSTED",
+    )
+    assert prep.classify_initial_failure_log(mixed_capacity_log()) == (
+        sha, "INITIAL_CODEX_TIMEOUT_THEN_MODEL_CAPACITY",
+    )
+    publisher = SCRIPT.read_text(encoding="utf-8")
+    assert publisher.index("checked_failure_job(") < publisher.index(
+        "logs = read_job_log(run_id, failed_job, runner_token)"
+    )
+    assert publisher.index("logs = read_job_log(run_id, failed_job, runner_token)") < (
+        publisher.index("classify_initial_failure_log(logs)")
+    )
+    assert "error_code=failure_code" in publisher
+    assert "The already-approved SOURCE_READY scope stays unchanged" in publisher
+
+
+@pytest.mark.parametrize("wrong", [
+    lambda s: s.replace("Selected model is at capacity", "Invalid API key"),
+    lambda s: s.replace("Selected model is at capacity", "Rate limit exceeded"),
+    lambda s: s.replace("FAILED_NOT_RETRYABLE", "SUCCESS"),
+    lambda s: s.replace("source=" + "a" * 40, "source=" + "b" * 40, 1),
+    lambda s: s + s.splitlines()[-2] + "\n",
+])
+def test_publisher_mixed_failure_rejects_auth_quota_tampering_and_duplicate_markers(wrong):
+    with pytest.raises(RecoveryPreparationError, match="initial timeout evidence"):
+        prep.classify_initial_failure_log(wrong(mixed_capacity_log()))
+
+
+def test_publisher_recovery_never_discloses_sdk_failure_or_log_payload():
+    log = mixed_capacity_log() + "synthetic-sensitive-raw-log\n"
+    assert prep.classify_initial_failure_log(log)[1] == (
+        "INITIAL_CODEX_TIMEOUT_THEN_MODEL_CAPACITY"
+    )
+    # Only a fixed enum is retained as PR metadata; untrusted job bytes are
+    # never copied into the prepared document or pushed.
+    assert "source_scope stays unchanged" not in log
