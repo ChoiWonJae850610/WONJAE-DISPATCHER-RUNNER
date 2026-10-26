@@ -1,5 +1,15 @@
 # Direct Worker Codex whole-turn timeout diagnostics
 
+## 2026-10-26 — WAFL SOURCE 022 exact mixed failure, docs-only recovery classification
+
+Owner Direct Worker [#40321915512](https://github.com/ChoiWonJae850610/WONJAE-DISPATCHER-RUNNER/actions/runs/40321915512) started from WAFL \`cloud-dev-v1\` \`87533c03600de6ed47cb5ce05c811572ad8fb2db\`. Its isolated Codex turns reached \`turn_run\`: attempt 1 and attempt 2 each hit the 480-second deadline; attempt 3 terminated with the SDK error \`Selected model is at capacity. Please try a different model.\` and \`INITIAL_TURN attempt=3 outcome=FAILED_NOT_RETRYABLE\`. No source PR or committed product change was published. The automatic docs-only recovery [#40324980272](https://github.com/ChoiWonJae850610/WONJAE-DISPATCHER-RUNNER/actions/runs/40324980272) stopped at \`TIMEOUT_MARKERS\` because the existing parser permitted only three timeouts.
+
+The new **classification-only** branch recognizes this *one exact, ordered shape* in addition to the existing three-timeout signature: two trusted same-SHA \`INITIAL_TURN\` timeout markers, two independently logged \`DIRECT_CODEX_TIMEOUT_PHASE phase=turn_run elapsed_s=480\` and plain timeout lines, one SDK traceback with \`openai_codex/_run.py\` and \`raise RuntimeError(turn.error.message)\`, one exact model-capacity exception, then a third same-SHA \`FAILED_NOT_RETRYABLE\` marker. Only the verified terminal Owner run, exact failed job/step, protected main ancestry, current unchanged product SHA and no competing writer can publish a **two-file, unmerged product docs/state recovery PR**. Any extra/missing/reordered marker, unknown error, authentication/usage failure, wrong SHA, stale run, different job, or unsupported signature fails closed. The raw logs, model text and credentials never enter the PR.
+
+Classification is **not** evidence that Codex capacity has recovered or that the product task or application code failed. It does not grant another model attempt, change model/SDK/deadline/session/credentials, retry the source Runner, apply provider effects, or merge a product PR. The existing \`SOURCE_READY 022\` source scope and image/R2/Neon/PDF successors remain intact until a separate authorized docs-only recovery and any subsequent authenticated Owner source click. This common Runner PR is **PREPARATION ONLY**: merging it to Runner main and the Owner-dispatched retrospective recovery are separate authorized actions. Its synthetic tests assert original 3-timeout compatibility, exact mixed acceptance, tamper/unknown rejection, preserved product scope, and no automatic execution.
+
+---
+
 ## Meaning of the existing timeout marker
 
 The existing `INITIAL_CODEX_TIMEOUT_480_SECONDS` marker is **not** proof that the
