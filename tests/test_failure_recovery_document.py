@@ -217,12 +217,9 @@ def test_mixed_capacity_rejects_duplicates_other_failures_and_reordering():
         log.replace("FAILED_NOT_RETRYABLE", "INITIAL_CODEX_TIMEOUT_480_SECONDS"),
         SHA,
     )
-    assert not parse_initial_turn_mixed_capacity(
-        log.replace("12:45:09Z RuntimeError", "12:30:31Z RuntimeError").replace(
-            log.splitlines()[9] + "\n", "", 1,
-        ) + log.splitlines()[9] + "\n",
-        SHA,
-    )
+    reordered = log.splitlines()
+    reordered.insert(5, reordered.pop(9))  # capacity before second attempt completes
+    assert not parse_initial_turn_mixed_capacity("\n".join(reordered), SHA)
     assert not parse_initial_turn_mixed_capacity(
         log + "\nINITIAL_CODEX_TIMEOUT_EXHAUSTED attempts=3 commits=0", SHA,
     )
@@ -237,7 +234,7 @@ def test_mixed_docs_preserve_source_and_all_successor_gates():
     assert "model-capacity" in doc
     assert "third model-capacity" in doc
     assert "model-switch permission" in doc
-    assert "not proven recovered" in doc
+    assert "not been proven recovered" in doc
     assert "3회" not in yaml.safe_load(state_yaml)["next_action"]["owner_action"]
     restored = yaml.safe_load(state_yaml)
     assert restored["next_action"]["type"] == "SOURCE_READY"
