@@ -128,7 +128,7 @@ def test_wafl_preview_ota_provider_gate_is_bounded_and_read_back():
     assert '"runtime_version" => "2.0.0-alpha.80-p5"' in raw
     assert (
         '"compatibility_base_sha" => '
-        '"bc727f87876949214b9fa29444a5a516909a5ea2"' in raw
+        '"0ffc6a342c13c0fef24c3a0e52cba21e16957251"' in raw
     )
     assert '"PROVIDER_APP_VARIANT" => "development"' in raw
     assert '--project "$PROJECT"' in raw

@@ -810,7 +810,7 @@ jobs:
               "environment" => "development",
               "channel" => "alpha83-p5",
               "runtime_version" => "2.0.0-alpha.80-p5",
-              "compatibility_base_sha" => "bc727f87876949214b9fa29444a5a516909a5ea2",
+              "compatibility_base_sha" => "0ffc6a342c13c0fef24c3a0e52cba21e16957251",
             }
             expected.each do |key, value|
               abort("WAFL EAS update executor #{key} mismatch") unless config[key] == value
