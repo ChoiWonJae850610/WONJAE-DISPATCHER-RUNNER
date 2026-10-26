@@ -38,7 +38,8 @@ def test_provider_gate_core_rechecks_identity_validation_and_registered_executor
         '"wafl_development_media_probe_v1", '
         '"wafl_development_media_bootstrap_v1", '
         '"wafl_development_media_readonly_preflight_v1", '
-        '"wafl_vercel_preview_env_bridge_v1", "wafl_pdf_dev_worker_only_v1"].include?(executor)' in raw
+        '"wafl_vercel_preview_env_bridge_v1", '
+        '"wafl_pdf_dev_worker_only_v1"].include?(executor)' in raw
     )
     assert 'action["type"] == "PROVIDER_GATE"' in raw
     assert 'action["gate"] == gate' in raw
