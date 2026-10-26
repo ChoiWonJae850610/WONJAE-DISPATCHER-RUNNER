@@ -21,6 +21,9 @@ import yaml
 from wonjae_dispatcher_runner.failure_recovery_document import (
     RecoveryPreparationError,
     TimeoutEvidence,
+    MIXED_CAPACITY_CODE,
+    TIMEOUT_CODE,
+    parse_initial_turn_mixed_capacity,
     parse_initial_turn_timeout,
     recovery_paths,
     render_recovery,
@@ -148,6 +151,25 @@ def read_job_log(run_id: int, job_id: int, token: str) -> str:
     # Raw job log contains timestamps plus exact application markers.
     # Keep untrusted logs in memory only; never print or upload them.
     return response.stdout
+
+
+def classify_initial_failure_log(log: str) -> tuple[str, str]:
+    """Accept only a trusted exact source SHA and one supported terminal signature."""
+    cleaned = re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", log)
+    sources = re.findall(
+        r"(?m)^.{0,512}\bINITIAL_TURN attempt=1 "
+        r"outcome=INITIAL_CODEX_TIMEOUT_480_SECONDS "
+        r"source=([0-9a-f]{40})\r?$",
+        cleaned,
+    )
+    if len(sources) != 1:
+        raise RecoveryPreparationError("initial timeout evidence is not exactly proven")
+    source = sources[0]
+    if parse_initial_turn_timeout(log, source):
+        return source, TIMEOUT_CODE
+    if parse_initial_turn_mixed_capacity(log, source):
+        return source, MIXED_CAPACITY_CODE
+    raise RecoveryPreparationError("initial timeout evidence is not exactly proven")
 
 
 def checked_registry(value: object, project: str) -> dict:
@@ -322,14 +344,8 @@ def plan(event: dict, project: str, runner_token: str, product_token: str,
         github_api(f"repos/{RUNNER}/actions/runs/{run_id}/jobs?per_page=100",
                    runner_token), project)
     logs = read_job_log(run_id, failed_job, runner_token)
-    # Extract the original source SHA *only* from the three trusted known markers.
-    sources = re.findall(
-        r"INITIAL_TURN attempt=1 outcome=INITIAL_CODEX_TIMEOUT_480_SECONDS "
-        r"source=([0-9a-f]{40})", logs,
-    )
-    if len(sources) != 1 or not parse_initial_turn_timeout(logs, sources[0]):
-        raise RecoveryPreparationError("initial timeout evidence is not exactly proven")
-    original_sha = sources[0]
+    # Original SHA and classification come only from bounded exact trusted markers.
+    original_sha, failure_code = classify_initial_failure_log(logs)
     registry = yaml.safe_load(registry_path.read_text(encoding="utf-8"))
     route = checked_registry(registry, project)
     control_live = github_api(f"repos/{CONTROL}/branches/main", control_token)
@@ -372,6 +388,7 @@ def plan(event: dict, project: str, runner_token: str, product_token: str,
         raise RecoveryPreparationError("current source task identity missing")
     identity = TimeoutEvidence(
         project, repo, branch, original_sha, run_id, action["source_task_id"],
+        error_code=failure_code,
     )
     rec_branch, doc_path, allowed_state_path = recovery_paths(identity)
     matching = [p for p in open_prs if p["head"]["ref"] == rec_branch]
@@ -417,8 +434,9 @@ def plan(event: dict, project: str, runner_token: str, product_token: str,
         "body": (
             f"Automated docs-only preparation bound to original Owner Direct Worker #{run_id}, "
             f"source {original_sha} and task {identity.task_id}. The exact trusted "
-            "initial-turn timeout signature was verified. The already-approved "
-            "SOURCE_READY scope stays unchanged after Owner document integration "
+            f"initial-turn failure signature {failure_code} was verified. "
+            "The already-approved SOURCE_READY scope stays unchanged after Owner "
+            "document integration "
             "and exact integrated CI; Codex transport is NOT proven repaired. "
             "No source, provider, EAS, credential, Production or QA action executed. "
             "Only SANJINWORKS Owner document-merge can integrate these two files. "
