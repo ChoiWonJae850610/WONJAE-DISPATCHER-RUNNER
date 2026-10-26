@@ -9,9 +9,11 @@ import yaml
 
 from wonjae_dispatcher_runner.execution_state import load_product_execution_state
 from wonjae_dispatcher_runner.failure_recovery_document import (
+    MIXED_CAPACITY_CODE,
     RecoveryPreparationError,
     TimeoutEvidence,
     check_evidence,
+    parse_initial_turn_mixed_capacity,
     parse_initial_turn_timeout,
     recovery_paths,
     render_recovery,
@@ -151,3 +153,97 @@ def test_long_github_job_prefix_and_ansi_accept_only_three_exact_timeout_markers
     assert parse_initial_turn_timeout(text, SHA)
     assert not parse_initial_turn_timeout(text.replace("attempt=2", "attempt=1"), SHA)
     assert not parse_initial_turn_timeout(text + "\n" + text, SHA)
+
+
+
+def mixed_capacity_log(sha=SHA):
+    """Synthetic equivalent of the verified #40321915512 safe diagnostic lines."""
+    return "\n".join([
+        "2026-10-26T12:30:32Z DIRECT_CODEX_TIMEOUT_PHASE phase=turn_run elapsed_s=480",
+        "2026-10-26T12:30:33Z INITIAL_CODEX_TIMEOUT_480_SECONDS",
+        f"2026-10-26T12:30:34Z INITIAL_TURN attempt=1 "
+        f"outcome=INITIAL_CODEX_TIMEOUT_480_SECONDS source={sha}",
+        "2026-10-26T12:39:05Z DIRECT_CODEX_TIMEOUT_PHASE phase=turn_run elapsed_s=480",
+        "2026-10-26T12:39:06Z INITIAL_CODEX_TIMEOUT_480_SECONDS",
+        f"2026-10-26T12:39:07Z INITIAL_TURN attempt=2 "
+        f"outcome=INITIAL_CODEX_TIMEOUT_480_SECONDS source={sha}",
+        "2026-10-26T12:45:09Z Traceback (most recent call last):",
+        '2026-10-26T12:45:09Z File "/venv/openai_codex/_run.py", '
+        "line 64, in _raise_for_failed_turn",
+        "2026-10-26T12:45:09Z     raise RuntimeError(turn.error.message)",
+        "2026-10-26T12:45:09Z "
+        "RuntimeError: Selected model is at capacity. Please try a different model.",
+        f"2026-10-26T12:45:11Z INITIAL_TURN attempt=3 "
+        f"outcome=FAILED_NOT_RETRYABLE source={sha}",
+        "2026-10-26T12:45:11Z ##[error]Process completed with exit code 1.",
+    ]) + "\n"
+
+
+def test_mixed_capacity_accepts_only_exact_two_timeouts_then_sdk_failure():
+    log = mixed_capacity_log()
+    assert parse_initial_turn_mixed_capacity(log, SHA)
+    assert not parse_initial_turn_timeout(log, SHA)
+    assert not parse_initial_turn_mixed_capacity(log, "b" * 40)
+    assert not parse_initial_turn_mixed_capacity(timeout_log(), SHA)
+    assert not parse_initial_turn_mixed_capacity("x" * 2_000_001, SHA)
+
+
+@pytest.mark.parametrize(("old", "new"), [
+    ("attempt=1 ", "attempt=3 "),
+    ("attempt=2 ", "attempt=1 "),
+    ("outcome=FAILED_NOT_RETRYABLE", "outcome=SUCCESS"),
+    ("phase=turn_run elapsed_s=480", "phase=thread_start elapsed_s=480"),
+    ("RuntimeError: Selected model is at capacity.", "RuntimeError: Authentication failed."),
+    ("Please try a different model.", "Please try again."),
+    ("Traceback (most recent call last):", "Some model output"),
+    ("openai_codex/_run.py", "untrusted/run.py"),
+    ("raise RuntimeError(turn.error.message)", "raise SomeOtherError()"),
+    ("source=" + SHA, "source=" + "b" * 40),
+])
+def test_mixed_capacity_fails_closed_on_ambiguous_markers(old, new):
+    # Replace just the first occurrence: mismatched source on any attempt
+    # must not be accepted as three attempts on one original SHA.
+    assert not parse_initial_turn_mixed_capacity(mixed_capacity_log().replace(old, new, 1), SHA)
+
+
+def test_mixed_capacity_rejects_duplicates_other_failures_and_reordering():
+    log = mixed_capacity_log()
+    assert not parse_initial_turn_mixed_capacity(log + log.splitlines()[4] + "\n", SHA)
+    assert not parse_initial_turn_mixed_capacity(log + log.splitlines()[9] + "\n", SHA)
+    assert not parse_initial_turn_mixed_capacity(
+        log.replace("INITIAL_TURN attempt=3", "INITIAL_TURN attempt=4"), SHA,
+    )
+    assert not parse_initial_turn_mixed_capacity(
+        log.replace("FAILED_NOT_RETRYABLE", "INITIAL_CODEX_TIMEOUT_480_SECONDS"),
+        SHA,
+    )
+    assert not parse_initial_turn_mixed_capacity(
+        log.replace("12:45:09Z RuntimeError", "12:30:31Z RuntimeError").replace(
+            log.splitlines()[9] + "\n", "", 1,
+        ) + log.splitlines()[9] + "\n",
+        SHA,
+    )
+    assert not parse_initial_turn_mixed_capacity(
+        log + "\nINITIAL_CODEX_TIMEOUT_EXHAUSTED attempts=3 commits=0", SHA,
+    )
+
+
+def test_mixed_docs_preserve_source_and_all_successor_gates():
+    original = approved_state()
+    identity = replace(evidence(), error_code=MIXED_CAPACITY_CODE)
+    doc, state_yaml = render_recovery(identity, original)
+    assert MIXED_CAPACITY_CODE in doc
+    assert "two 480-second" in doc
+    assert "model-capacity" in doc
+    assert "third model-capacity" in doc
+    assert "model-switch permission" in doc
+    assert "not proven recovered" in doc
+    assert "3회" not in yaml.safe_load(state_yaml)["next_action"]["owner_action"]
+    restored = yaml.safe_load(state_yaml)
+    assert restored["next_action"]["type"] == "SOURCE_READY"
+    assert restored["next_action"]["source_task_id"] == original["next_action"]["source_task_id"]
+    assert restored["next_action"]["source_scope"] == original["next_action"]["source_scope"]
+    assert restored["after_source_success"] == original["after_source_success"]
+    assert restored["source_success_queue"] == original["source_success_queue"]
+    assert yaml.safe_load(state_yaml)["project"] == "WAFL"
+    assert original["next_action"]["owner_action"] == "Use the authenticated Owner button"
