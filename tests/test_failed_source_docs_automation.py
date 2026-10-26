@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 import yaml
 from test_failure_recovery_document import mixed_capacity_log
+
 from wonjae_dispatcher_runner.failure_recovery_document import (
     RecoveryPreparationError,
     parse_initial_turn_timeout,
