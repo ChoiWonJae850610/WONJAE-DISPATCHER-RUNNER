@@ -18,7 +18,11 @@ from urllib.request import Request, build_opener
 
 from wafl_development_media_probe import NoRedirect, pdf_bytes_ok, pdf_content_type_category
 from wafl_r2_preview_gate import (
-    GateError, command_json, deployment_version, require_dev_name, require_worker_origin,
+    GateError,
+    command_json,
+    deployment_version,
+    require_dev_name,
+    require_worker_origin,
 )
 
 RUNNER = "ChoiWonJae850610/WONJAE-DISPATCHER-RUNNER"

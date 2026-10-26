@@ -62,7 +62,11 @@ def test_exact_environment_only():
     [("BROWSER", "plain_text"), ("WAFLOW_PDF_GENERATOR_TOKEN", "secret_text")],
     [("BROWSER", "browser")],
     [("BROWSER", "browser"), ("WAFLOW_PDF_GENERATOR_TOKEN", "plain_text")],
-    [("BROWSER", "browser"), ("WAFLOW_PDF_GENERATOR_TOKEN", "secret_text"), ("R2_BUCKET", "r2_bucket")],
+    [
+        ("BROWSER", "browser"),
+        ("WAFLOW_PDF_GENERATOR_TOKEN", "secret_text"),
+        ("R2_BUCKET", "r2_bucket"),
+    ],
     [("BROWSER", "browser"), ("BROWSER", "browser"), ("WAFLOW_PDF_GENERATOR_TOKEN", "secret_text")],
 ])
 def test_binding_fence(bindings):
@@ -92,7 +96,9 @@ def test_dry_run_and_one_worker_deploy_before_one_canary():
         with patch.dict(os.environ, config()), \
                 patch.object(pdf, "source_identity", return_value=root), \
                 patch.object(pdf, "deployed_version", side_effect=lambda *_: next(versions)), \
-                patch.object(pdf, "run_quiet", side_effect=lambda args, **kwargs: steps.append(args)), \
+                patch.object(
+                    pdf, "run_quiet", side_effect=lambda args, **kwargs: steps.append(args),
+                ), \
                 patch.object(pdf, "canary") as canary:
             pdf.execute(root, "a" * 40, "b" * 40, "c" * 40, "d" * 40, root / "summary")
             assert [args[0] for args in steps] == ["npm", "wrangler", "wrangler"]
@@ -108,8 +114,8 @@ def test_safe_stage_parse_and_rejection_of_private_stage():
         ("SECRET=synthetic-private", "PDF_RENDER_FAILED_STAGE_UNVERIFIED"),
     ]:
         class Stub:
-            def open(self, *_args, **_kwargs):
-                data = json.dumps({"error": "PDF_RENDER_FAILED", "stage": stage,
+            def open(self, *_args, _stage=stage, **_kwargs):
+                data = json.dumps({"error": "PDF_RENDER_FAILED", "stage": _stage,
                                    "token": "synthetic-private"}).encode()
                 raise HTTPError("https://untrusted.invalid/", 500, "private",
                                 {"Content-Type": "application/json"}, io.BytesIO(data))
