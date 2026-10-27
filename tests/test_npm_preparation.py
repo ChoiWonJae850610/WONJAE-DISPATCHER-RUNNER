@@ -11,6 +11,7 @@ from wonjae_dispatcher_runner.execution_state import NpmPreparation
 from wonjae_dispatcher_runner.npm_preparation import (
     ARTIFACT_ROOT,
     NpmPreparationError,
+    _npm_failure_reason,
     _trusted_network_environment,
     _verify_lock,
     prepare_npm,
@@ -132,3 +133,99 @@ def test_real_install_and_offline_source_install_preserve_original_manifests(tmp
     assert manifest["dependencies"]["picocolors"] == "1.1.1"
     assert lock["packages"]["node_modules/picocolors"]["version"] == "1.1.1"
     assert lock["packages"]["node_modules/picocolors"]["integrity"].startswith("sha512-")
+
+
+@pytest.mark.parametrize(("stderr", "expected"), [
+    ("npm error No workspaces found:\nnpm error --workspace=apps/mobile", "NO_WORKSPACES"),
+    ("npm ERR! code ERESOLVE\nnpm ERR! untrusted material", "ERESOLVE"),
+    ("npm error code ENOTCACHED\nnpm error token=private", "ENOTCACHED"),
+    ("npm error code UNEXPECTED_PRIVATE_DATA", "UNCLASSIFIED"),
+])
+def test_npm_failure_reason_redacts_arbitrary_output(stderr, expected):
+    assert _npm_failure_reason(stderr) == expected
+
+
+def test_independent_npm_project_requires_own_tracked_lock(tmp_path):
+    repo = tmp_path / "project"
+    (repo / "apps/mobile").mkdir(parents=True)
+    (repo / "package.json").write_text('{"name":"synthetic-root","version":"1.0.0"}')
+    (repo / "package-lock.json").write_text(json.dumps({
+        "lockfileVersion": 3, "packages": {"": {"name": "synthetic-root", "version": "1.0.0"}},
+    }))
+    (repo / "apps/mobile/package.json").write_text(
+        '{"name":"synthetic-mobile","version":"1.0.0"}'
+    )
+    subprocess.run(["git", "-C", str(repo), "init"], check=True, capture_output=True)
+    subprocess.run(["git", "-C", str(repo), "add", "."], check=True, capture_output=True)
+    with pytest.raises(NpmPreparationError, match="independent npm package requires tracked lock"):
+        prepare_npm(repo, NpmPreparation("apps/mobile", ("picocolors@1.1.1",)))
+
+
+@pytest.mark.skipif(os.environ.get("RUN_NPM_PREPARATION_TESTS") != "1",
+                    reason="opt-in public-registry Node 24 integration test")
+def test_independent_mobile_lock_prefix_install_and_offline_replay(tmp_path, monkeypatch):
+    repo = tmp_path / "product"
+    repo.mkdir()
+    manifests = {
+        "package.json": {"name": "synthetic-root", "version": "1.0.0", "private": True},
+        "package-lock.json": {"name": "synthetic-root", "version": "1.0.0",
+                              "lockfileVersion": 3, "requires": True, "packages": {
+                                  "": {"name": "synthetic-root", "version": "1.0.0"}}},
+        "apps/mobile/package.json": {
+            "name": "synthetic-mobile", "version": "1.0.0", "private": True,
+            "scripts": {"postinstall": "node -e 'process.exit(99)'"},
+        },
+        "apps/mobile/package-lock.json": {
+            "name": "synthetic-mobile", "version": "1.0.0",
+            "lockfileVersion": 3, "requires": True, "packages": {
+                "": {"name": "synthetic-mobile", "version": "1.0.0",
+                     "hasInstallScript": True},
+            },
+        },
+    }
+    for relative, content in manifests.items():
+        path = repo / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(content))
+    (repo / ".gitignore").write_text("node_modules/\n")
+    for command in [("init",), ("add", ".")]:
+        subprocess.run(["git", "-C", str(repo), *command], check=True, capture_output=True)
+    original = {path: (repo / path).read_bytes() for path in manifests}
+    calls = []
+    real_run = subprocess.run
+
+    def record_run(args, **kwargs):
+        if any("npm-cli.js" in str(arg) for arg in args):
+            calls.append((args, kwargs["env"]))
+        return real_run(args, **kwargs)
+
+    monkeypatch.setattr(subprocess, "run", record_run)
+    monkeypatch.setenv("NPM_TOKEN", "synthetic-secret")
+    assert prepare_npm(repo, NpmPreparation("apps/mobile", ("picocolors@1.1.1",)))
+    assert len(calls) == 6
+    assert calls[1][0][2:5] == ["ci", "--prefix", "apps/mobile"]
+    assert calls[2][0][2:7] == [
+        "install", "picocolors@1.1.1", "--prefix", "apps/mobile", "--save-exact",
+    ]
+    assert calls[3][0][2:4] == ["cache", "verify"]
+    assert calls[4][0][2:4] == ["ci", "--offline"]
+    assert calls[5][0][2:6] == ["ci", "--prefix", "apps/mobile", "--offline"]
+    assert all("--ignore-scripts" in args for args, _ in calls)
+    assert all("synthetic-secret" not in json.dumps(env) for _, env in calls)
+    assert (repo / "apps/mobile/node_modules/picocolors/package.json").is_file()
+    assert all((repo / path).read_bytes() == content for path, content in original.items())
+
+    safe = source_npm_environment(repo)
+    env = {"PATH": str(repo / ARTIFACT_ROOT / "tools/bin") + ":/usr/bin:/bin",
+           "HOME": "/nonexistent", "LANG": "C.UTF-8", "TZ": "UTC", **safe}
+    binary = shutil.which("npm", path=env["PATH"])
+    real_run(
+        [binary, "install", "picocolors@1.1.1", "--prefix", "apps/mobile",
+         "--save-exact", "--offline", "--ignore-scripts"],
+        cwd=repo, env=env, check=True, capture_output=True, timeout=60,
+    )
+    mobile = json.loads((repo / "apps/mobile/package.json").read_text())
+    mobile_lock = json.loads((repo / "apps/mobile/package-lock.json").read_text())
+    assert mobile["dependencies"]["picocolors"] == "1.1.1"
+    assert mobile_lock["packages"]["node_modules/picocolors"]["version"] == "1.1.1"
+    assert mobile_lock["packages"]["node_modules/picocolors"]["integrity"].startswith("sha512-")

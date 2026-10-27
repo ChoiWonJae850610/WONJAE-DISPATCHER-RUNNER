@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import ssl
 import subprocess
@@ -88,6 +89,22 @@ def _verify_lock(path: Path) -> None:
                 raise NpmPreparationError("npm tarball is missing integrity metadata")
 
 
+_NPM_ERROR_CODES = frozenset({
+    "EUSAGE", "ERESOLVE", "ETARGET", "EINTEGRITY", "ENOTCACHED",
+    "E401", "E403", "E404", "ETIMEDOUT", "ECONNRESET", "EAI_AGAIN",
+})
+
+
+def _npm_failure_reason(stderr: str) -> str:
+    """Classify npm failures without exposing paths, package output or secrets."""
+    if re.search(r"(?m)^npm (?:error|ERR!) No workspaces found(?::|$)", stderr):
+        return "NO_WORKSPACES"
+    codes = re.findall(
+        r"(?m)^npm (?:error|ERR!) code ([A-Z][A-Z0-9_]{1,31})\s*$", stderr
+    )
+    return next((code for code in codes if code in _NPM_ERROR_CODES), "UNCLASSIFIED")
+
+
 def source_npm_environment(repo: Path) -> dict[str, str]:
     root = repo / ARTIFACT_ROOT
     if not (root / "ready.json").is_file():
@@ -144,6 +161,19 @@ def prepare_npm(repo: Path, preparation: NpmPreparation | None) -> bool:
     if preparation and f"{preparation.workspace}/package.json" not in files:
         raise NpmPreparationError("declared npm workspace is not tracked")
     _verify_lock(repo / "package-lock.json")
+    standalone_lock = None
+    if preparation:
+        root_manifest = json.loads(files["package.json"])
+        if not isinstance(root_manifest, dict):
+            raise NpmPreparationError("npm preparation requires an object root manifest")
+        if "workspaces" not in root_manifest:
+            # --workspace works only for registered root workspaces. Independent
+            # nested projects must use their own tracked manifest and lock.
+            standalone_lock = f"{preparation.workspace}/package-lock.json"
+            if standalone_lock not in tracked:
+                raise NpmPreparationError("independent npm package requires tracked lock")
+            files[standalone_lock] = _regular(repo, standalone_lock).read_bytes()
+            _verify_lock(repo / standalone_lock)
     ignored = subprocess.run(
         ["git", "-C", str(repo), "check-ignore", "--quiet", str(ARTIFACT_ROOT / "ready.json")],
         check=False,
@@ -206,19 +236,26 @@ def prepare_npm(repo: Path, preparation: NpmPreparation | None) -> bool:
             if result.returncode:
                 # Do not echo arbitrary product metadata or host configuration into public logs.
                 raise NpmPreparationError(
-                    f"trusted npm {args[0]} failed (exit {result.returncode})"
+                    f"trusted npm {args[0]} failed (exit {result.returncode}; "
+                    f"reason={_npm_failure_reason(result.stderr)})"
                 )
 
         npm("ci")
         if preparation:
-            npm(
-                "install",
-                *preparation.packages,
-                "--workspace",
-                preparation.workspace,
-                "--save-exact",
-            )
+            if standalone_lock:
+                npm("ci", "--prefix", preparation.workspace)
+                npm(
+                    "install", *preparation.packages,
+                    "--prefix", preparation.workspace, "--save-exact",
+                )
+            else:
+                npm(
+                    "install", *preparation.packages,
+                    "--workspace", preparation.workspace, "--save-exact",
+                )
         _verify_lock(stage / "package-lock.json")
+        if standalone_lock:
+            _verify_lock(stage / standalone_lock)
         # An exact offline npm ci is the real acceptance gate. The former
         # unconditional "npm cache add" over *every* locked tarball fetched
         # platform-inapplicable optional packages and could fail even when
@@ -226,6 +263,8 @@ def prepare_npm(repo: Path, preparation: NpmPreparation | None) -> bool:
         # Do not loosen integrity checks or accept an incomplete offline install.
         npm("cache", "verify")
         npm("ci", "--offline")
+        if standalone_lock:
+            npm("ci", "--prefix", preparation.workspace, "--offline")
         for installed in sorted(stage.rglob("node_modules"), key=lambda path: len(path.parts)):
             if any(parent.name == "node_modules" for parent in installed.parents):
                 continue
@@ -234,6 +273,11 @@ def prepare_npm(repo: Path, preparation: NpmPreparation | None) -> bool:
                 raise NpmPreparationError("npm preparation requires a fresh dependency directory")
             shutil.copytree(installed, target, symlinks=True)
         artifact = repo / ARTIFACT_ROOT
+        # npm ci may leave no root node_modules when only an independent
+        # nested package has dependencies. Never follow an existing symlink.
+        if artifact.parent.is_symlink():
+            raise NpmPreparationError("npm preparation dependency root is a symlink")
+        artifact.parent.mkdir(exist_ok=True)
         artifact.mkdir()
         (artifact / "user.npmrc").touch()
         (artifact / "global.npmrc").touch()
