@@ -273,6 +273,11 @@ def prepare_npm(repo: Path, preparation: NpmPreparation | None) -> bool:
                 raise NpmPreparationError("npm preparation requires a fresh dependency directory")
             shutil.copytree(installed, target, symlinks=True)
         artifact = repo / ARTIFACT_ROOT
+        # npm ci may leave no root node_modules when only an independent
+        # nested package has dependencies. Never follow an existing symlink.
+        if artifact.parent.is_symlink():
+            raise NpmPreparationError("npm preparation dependency root is a symlink")
+        artifact.parent.mkdir(exist_ok=True)
         artifact.mkdir()
         (artifact / "user.npmrc").touch()
         (artifact / "global.npmrc").touch()
