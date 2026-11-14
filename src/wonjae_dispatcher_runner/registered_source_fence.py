@@ -45,6 +45,11 @@ class GitHubEvidenceReader:
         policy_sha = self.read(
             f"repos/{c['common_repository']}/branches/main",
         ).get("commit", {}).get("sha")
+        deployed_runner = self.read(
+            f"repos/{c['runner_repository']}/branches/main",
+        ).get("commit", {}).get("sha")
+        if deployed_runner != b["participant_revisions"]["direct_worker"]:
+            raise FenceError("TRUSTED_RUNNER_REVISION_NOT_DEPLOYED")
         prs = self.collection(f"repos/{b['repository']}/pulls?state=open&base={b['branch']}")
         runs, jobs = [], []
         for repository in (b["repository"], c["runner_repository"]):

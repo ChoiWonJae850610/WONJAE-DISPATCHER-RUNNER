@@ -236,6 +236,22 @@ def test_reader_rejects_truncated_pages_and_does_not_trust_display_titles(exampl
     ).read_text().replace("display-title", "")
 
 
+def test_policy_flags_cannot_replace_actual_deployed_counterpart_revision(example):
+    _, binding, _, _, _, _, _ = example
+    config = {"runner_repository": "fixture/runner", "common_repository": "fixture/control"}
+    calls = []
+
+    def read(endpoint):
+        calls.append(endpoint)
+        return {"commit": {"sha": "f" * 40}}
+
+    reader = GitHubEvidenceReader(binding, config, read)
+    with pytest.raises(FenceError, match="TRUSTED_RUNNER_REVISION_NOT_DEPLOYED"):
+        reader()
+    assert calls[-1] == "repos/fixture/runner/branches/main"
+    assert all("/issues" not in endpoint for endpoint in calls)
+
+
 def test_workflow_hooks_surround_source_and_each_trusted_publication():
     import yaml
     root = Path(__file__).parents[1]
