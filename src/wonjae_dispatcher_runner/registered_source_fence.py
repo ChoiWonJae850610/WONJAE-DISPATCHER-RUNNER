@@ -183,7 +183,10 @@ def watch_adapter(registry: Path, project: str, checkout: Path, configuration: s
         "watch_status"
     ) == "connected"
     if not connected and not (trial.get("authorized") is True and trial.get("source_only") is True
-                             and trial.get("direct_worker_preserved") is True):
+                             and trial.get("direct_worker_preserved") is True
+                             and trial.get("writer_contract") == "shared_project_controller_v1"
+                             and isinstance(trial.get("handoff_ref"), str)
+                             and bool(trial["handoff_ref"])):
         raise FenceError("WATCH_SOURCE_TRIAL_NOT_REGISTERED")
     if checkout != Path(config["source_root"]):
         raise FenceError("WATCH_SOURCE_ROOT_BINDING_CHANGED")

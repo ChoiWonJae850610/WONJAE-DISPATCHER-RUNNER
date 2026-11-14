@@ -9,6 +9,7 @@ import pytest
 
 from wonjae_dispatcher_runner.registered_source_fence import (
     DirectWorkerFence,
+    ExistingGitCredentialReader,
     GitHubEvidenceReader,
     registered_configuration,
 )
@@ -175,6 +176,29 @@ def test_no_registration_means_no_new_authority_or_private_config_reads(tmp_path
     file = tmp_path / "registry.yaml"
     file.write_text("projects:\n  ONE:\n    execution:\n      mode: direct_worker\n")
     assert registered_configuration(file, "ONE", {"SOURCE_WRITER_FENCE_CONFIG": "absent"}) is None
+
+
+def test_registered_missing_namespace_is_not_replaced_by_empty_state(example, monkeypatch):
+    root, binding, _, _, _, _, _ = example
+    import wonjae_dispatcher_runner.source_writer_fence as module
+    marker = {"backend_id": "fixture", "evidence_scope": "registered"}
+    atomic_json(root / "backend.json", marker)
+    monkeypatch.setattr(module, "inspect_registered_backend", lambda *_: None)
+    (root / "one").rmdir()
+    with pytest.raises(FenceError, match="NAMESPACE_MISSING_NO_EMPTY_REPLACEMENT"):
+        SharedFence(root, binding, lambda: {})
+    assert not (root / "one").exists()
+
+
+def test_existing_credential_reader_is_lazy_and_issue_endpoint_never_uses_auth(monkeypatch):
+    import subprocess
+    called = []
+    monkeypatch.setattr(subprocess, "run", lambda *_a, **_kw: called.append(True))
+    reader = ExistingGitCredentialReader()
+    assert called == []
+    with pytest.raises(FenceError, match="MUST_NOT_READ_ISSUE_AGAIN"):
+        reader("repos/fixture/one/issues/1")
+    assert called == []
 
 
 def test_fixture_or_unpinned_config_cannot_register_live_route(tmp_path):

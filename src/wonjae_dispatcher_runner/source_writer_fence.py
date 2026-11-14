@@ -237,7 +237,11 @@ class SharedFence:
         if self.scope == "registered":
             inspect_registered_backend(root, marker)
         self.directory = root / binding["project"].lower()
-        self.directory.mkdir(mode=0o700, exist_ok=True)
+        if self.scope == "registered":
+            if not self.directory.is_dir() or not (self.directory / "state.json").is_file():
+                raise FenceError("REGISTERED_NAMESPACE_MISSING_NO_EMPTY_REPLACEMENT")
+        else:
+            self.directory.mkdir(mode=0o700, exist_ok=True)
         if self.directory.is_symlink():
             raise FenceError("LINKED_PROJECT_STORE")
         self.file = self.directory / "state.json"
@@ -252,12 +256,16 @@ class SharedFence:
         clean = False
         try:
             atomic_json(self.mutex / "owner.json", native_identity())
+            if self.scope == "registered" and not self.file.is_file():
+                raise FenceError("REGISTERED_STATE_MISSING_PRESERVE_TRANSACTION")
             state = json.loads(self.file.read_text()) if self.file.exists() else {
                 "contract": CONTRACT, "backend_id": self.binding["backend_id"],
                 "project": self.binding["project"], "repository": self.binding["repository"],
                 "branch": self.binding["branch"], "epoch": 0, "holder": None,
                 "consumed": {}, "quarantine": None, "history": [],
             }
+            if state.get("contract") != CONTRACT:
+                raise FenceError("STATE_CONTRACT_CHANGED")
             for key in ("project", "repository", "branch", "backend_id"):
                 if state.get(key) != self.binding[key]:
                     raise FenceError("COPIED_OR_FOREIGN_STATE")
