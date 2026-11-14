@@ -40,6 +40,7 @@ jobs:
     runs-on: ${{ fromJSON(inputs.execution_host == 'home-linux' && '["self-hosted","Linux","X64","direct-worker"]' || '["ubuntu-latest"]') }}
     timeout-minutes: 75
     env:
+      SOURCE_WRITER_FENCE_CONFIG: ${{ vars.SOURCE_WRITER_FENCE_CONFIG }}
       DW_JOB_ROOT: ${{ github.workspace }}/direct-${{ github.run_id }}-${{ github.run_attempt }}
       DW_RUNNER: ${{ github.workspace }}/direct-${{ github.run_id }}-${{ github.run_attempt }}/runner
       DW_PRODUCT: ${{ github.workspace }}/direct-${{ github.run_id }}-${{ github.run_attempt }}/product
@@ -281,6 +282,17 @@ jobs:
           PYTHONPATH="$DW_RUNNER/src" python -m wonjae_dispatcher_runner.credential_slot \
             --github-output "$GITHUB_OUTPUT"
 
+      - name: Acquire registered cross-route source fence
+        env:
+          PRODUCT_TOKEN: ${{ secrets.product_write_token }}
+          RUNNER_TOKEN: ${{ github.token }}
+        working-directory: ${{ env.DW_RUNNER }}
+        run: |
+          set -euo pipefail
+          PYTHONPATH="$DW_RUNNER/src" python scripts/source_writer_guard.py \
+            --registry "$DW_RUNNER/_control/PROJECTS.yaml" --project "${{ inputs.project }}" \
+            --checkout "$DW_PRODUCT" --phase acquire
+
       - name: Run isolated Codex Direct Worker
         id: codex
         env:
@@ -422,9 +434,15 @@ jobs:
 
       - name: Advance product execution state on source success
         if: ${{ steps.codex.outputs.status == 'CHANGED' }}
+        env:
+          PRODUCT_TOKEN: ${{ secrets.product_write_token }}
+          RUNNER_TOKEN: ${{ github.token }}
         working-directory: ${{ env.DW_RUNNER }}
         run: |
           set -euo pipefail
+          PYTHONPATH="$DW_RUNNER/src" python scripts/source_writer_guard.py \
+            --registry "$DW_RUNNER/_control/PROJECTS.yaml" --project "${{ inputs.project }}" \
+            --checkout "$DW_PRODUCT" --phase before_source
           PYTHONPATH="$DW_RUNNER/src" python scripts/advance_execution_state.py \
             --registry "$DW_RUNNER/_control/PROJECTS.yaml" \
             --project "${{ inputs.project }}" \
@@ -433,9 +451,15 @@ jobs:
 
       - name: Commit Direct Worker changes
         if: ${{ steps.codex.outputs.changed_count != '0' }}
+        env:
+          PRODUCT_TOKEN: ${{ secrets.product_write_token }}
+          RUNNER_TOKEN: ${{ github.token }}
         working-directory: ${{ env.DW_RUNNER }}
         run: |
           set -euo pipefail
+          PYTHONPATH="$DW_RUNNER/src" python scripts/source_writer_guard.py \
+            --registry "$DW_RUNNER/_control/PROJECTS.yaml" --project "${{ inputs.project }}" \
+            --checkout "$DW_PRODUCT" --phase before_commit
           cd "$DW_PRODUCT"
           test "$(git rev-parse "$START_HEAD")" = "$START_HEAD"
           git diff --check
@@ -451,12 +475,16 @@ jobs:
       - name: Push Direct Worker branch
         if: ${{ steps.codex.outputs.changed_count != '0' }}
         env:
+          RUNNER_TOKEN: ${{ github.token }}
           GH_TOKEN: ${{ secrets.product_write_token }}
           PRODUCT_REPOSITORY: ${{ steps.route.outputs.repository }}
           TARGET_BRANCH: ${{ steps.route.outputs.branch }}
         working-directory: ${{ env.DW_RUNNER }}
         run: |
           set -euo pipefail
+          PYTHONPATH="$DW_RUNNER/src" python scripts/source_writer_guard.py \
+            --registry "$DW_RUNNER/_control/PROJECTS.yaml" --project "${{ inputs.project }}" \
+            --checkout "$DW_PRODUCT" --phase before_push
           cd "$DW_PRODUCT"
           live_base="$(gh api "repos/$PRODUCT_REPOSITORY/branches/$TARGET_BRANCH" --jq '.commit.sha')"
           test "$live_base" = "$START_ACTIVE_HEAD"
@@ -476,6 +504,7 @@ jobs:
       - name: Create or read Direct Worker PR
         if: ${{ steps.codex.outputs.changed_count != '0' }}
         env:
+          RUNNER_TOKEN: ${{ github.token }}
           GH_TOKEN: ${{ secrets.product_write_token }}
           PRODUCT_REPOSITORY: ${{ steps.route.outputs.repository }}
           TARGET_BRANCH: ${{ steps.route.outputs.branch }}
@@ -484,6 +513,9 @@ jobs:
         working-directory: ${{ env.DW_RUNNER }}
         run: |
           set -euo pipefail
+          PYTHONPATH="$DW_RUNNER/src" python scripts/source_writer_guard.py \
+            --registry "$DW_RUNNER/_control/PROJECTS.yaml" --project "${{ inputs.project }}" \
+            --checkout "$DW_PRODUCT" --phase before_pr
           if [ -z "${PR_NUMBER:-}" ]; then
             body_file="$DW_JOB_ROOT/direct-worker-pr.md"
             {
@@ -528,6 +560,18 @@ jobs:
             echo "::error::Direct Worker PR head readback timed out: expected $DIRECT_HEAD, observed ${observed_head:-missing}."
             exit 1
           }
+
+      - name: Bind exact published PR to source fence
+        if: ${{ steps.codex.outputs.changed_count != '0' }}
+        env:
+          PRODUCT_TOKEN: ${{ secrets.product_write_token }}
+          RUNNER_TOKEN: ${{ github.token }}
+        working-directory: ${{ env.DW_RUNNER }}
+        run: |
+          set -euo pipefail
+          PYTHONPATH="$DW_RUNNER/src" python scripts/source_writer_guard.py \
+            --registry "$DW_RUNNER/_control/PROJECTS.yaml" --project "${{ inputs.project }}" \
+            --checkout "$DW_PRODUCT" --phase bind_pr
 
       - name: Preserve manual gate on existing Direct Worker PR
         if: ${{ steps.codex.outputs.status == 'MANUAL_REQUIRED' && steps.codex.outputs.changed_count != '0' }}
@@ -582,12 +626,16 @@ jobs:
       - name: Merge exact validated Direct Worker PR
         if: ${{ steps.codex.outputs.status == 'CHANGED' }}
         env:
+          RUNNER_TOKEN: ${{ github.token }}
           GH_TOKEN: ${{ secrets.product_write_token }}
           PRODUCT_REPOSITORY: ${{ steps.route.outputs.repository }}
           TARGET_BRANCH: ${{ steps.route.outputs.branch }}
         working-directory: ${{ env.DW_RUNNER }}
         run: |
           set -euo pipefail
+          PYTHONPATH="$DW_RUNNER/src" python scripts/source_writer_guard.py \
+            --registry "$DW_RUNNER/_control/PROJECTS.yaml" --project "${{ inputs.project }}" \
+            --checkout "$DW_PRODUCT" --phase before_merge
           live_base="$(gh api "repos/$PRODUCT_REPOSITORY/branches/$TARGET_BRANCH" --jq '.commit.sha')"
           test "$live_base" = "$START_ACTIVE_HEAD"
           merge_json="$(gh api --method PUT "repos/$PRODUCT_REPOSITORY/pulls/$PR_NUMBER/merge" \
@@ -596,6 +644,18 @@ jobs:
           INTEGRATED_SHA="$(echo "$merge_json" | jq -r '.sha')"
           test -n "$INTEGRATED_SHA" && test "$INTEGRATED_SHA" != "null"
           echo "INTEGRATED_SHA=$INTEGRATED_SHA" >> "$GITHUB_ENV"
+
+      - name: Bind exact own integration to source fence
+        if: ${{ steps.codex.outputs.status == 'CHANGED' }}
+        env:
+          PRODUCT_TOKEN: ${{ secrets.product_write_token }}
+          RUNNER_TOKEN: ${{ github.token }}
+        working-directory: ${{ env.DW_RUNNER }}
+        run: |
+          set -euo pipefail
+          PYTHONPATH="$DW_RUNNER/src" python scripts/source_writer_guard.py \
+            --registry "$DW_RUNNER/_control/PROJECTS.yaml" --project "${{ inputs.project }}" \
+            --checkout "$DW_PRODUCT" --phase ack_integration
 
       - name: Wait for exact integrated-SHA validation
         if: ${{ steps.codex.outputs.status == 'CHANGED' }}
@@ -695,6 +755,19 @@ jobs:
             printf -- '- provider/runtime/device/physical: `%s`\n' "NOT_INFERRED"
           } > "$result_file"
           gh pr comment "$PR_NUMBER" --repo "$PRODUCT_REPOSITORY" --body-file "$result_file"
+
+      - name: Finish registered source fence without stealing uncertain ownership
+        if: ${{ always() && steps.storage.outputs.path != '' && steps.route.outcome == 'success' }}
+        env:
+          PRODUCT_TOKEN: ${{ secrets.product_write_token }}
+          RUNNER_TOKEN: ${{ github.token }}
+          SOURCE_FENCE_JOB_STATUS: ${{ job.status }}
+        working-directory: ${{ env.DW_RUNNER }}
+        run: |
+          set -euo pipefail
+          PYTHONPATH="$DW_RUNNER/src" python scripts/source_writer_guard.py \
+            --registry "$DW_RUNNER/_control/PROJECTS.yaml" --project "${{ inputs.project }}" \
+            --checkout "$DW_PRODUCT" --phase finish
 
       - name: Cleanup exact ephemeral Direct Worker storage
         if: ${{ always() && steps.storage.outputs.path != '' }}
