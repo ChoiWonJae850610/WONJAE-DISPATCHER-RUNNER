@@ -185,10 +185,12 @@ jobs:
           RUNNER_READ_TOKEN: ${{ secrets.control_read_token }}
           PRODUCT_TOKEN: ${{ secrets.product_write_token }}
         run: |
-          python "$GITHUB_WORKSPACE/scripts/product_writer_guard.py" finish \
-            --registry "$GITHUB_WORKSPACE/_control/PROJECTS.yaml" --project "$PROJECT" --actor reconciliation --role reconciliation \
-            --base "$RECON_BASE_SHA"
           set -euo pipefail
+          if [ "$ALREADY_MERGED" != "true" ]; then
+            python "$GITHUB_WORKSPACE/scripts/product_writer_guard.py" finish \
+              --registry "$GITHUB_WORKSPACE/_control/PROJECTS.yaml" --project "$PROJECT" --actor reconciliation --role reconciliation \
+              --base "$RECON_BASE_SHA"
+          fi
           marker="PASS: $PROJECT reconciliation PR #$PR_NUMBER merged at `$INTEGRATED_SHA`; exact PR-head validation `$PR_HEAD_RUN_ID` and integrated validation `$INTEGRATED_RUN_ID` passed."
           if ! gh api "repos/$GITHUB_REPOSITORY/issues/${{ inputs.issue_number }}/comments?per_page=100"             --jq '.[].body' | grep -Fx -- "$marker" >/dev/null; then
             gh issue comment "${{ inputs.issue_number }}" --repo "$GITHUB_REPOSITORY" --body "$marker"

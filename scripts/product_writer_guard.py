@@ -29,7 +29,7 @@ def main():
     scope = MutationFence(args.registry, args.project, args.actor, args.role,
                           args.base, approved, persist=True)
     try:
-        scope._initialize()
+        scope._initialize(require_session=args.action != "before")
         if args.action == "before":
             scope.point(args.phase)
         elif args.action == "pr":

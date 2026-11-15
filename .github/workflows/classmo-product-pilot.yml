@@ -336,7 +336,7 @@ jobs:
       - name: "[06] STARTED · read back Draft product PR"
         env:
           GH_TOKEN: ${{ secrets.OWNER_GITHUB_TOKEN }}
-        run: |-
+        run: |
           json="$(gh pr view "$PILOT_PR_URL" --repo "$PRODUCT_REPOSITORY"             --json number,url,isDraft,state,baseRefName,headRefName,headRefOid)"
           echo "$json" | jq -e --arg branch "$PRODUCT_BRANCH" --arg base "$TARGET_BRANCH" --arg sha "$PILOT_HEAD_SHA" '
             .isDraft == true and
@@ -469,7 +469,7 @@ jobs:
           GH_TOKEN: ${{ secrets.OWNER_GITHUB_TOKEN }}
           PRODUCT_TOKEN: ${{ secrets.OWNER_GITHUB_TOKEN }}
           RUNNER_READ_TOKEN: ${{ secrets.OWNER_GITHUB_TOKEN }}
-        run: |-
+        run: |
           python "$GITHUB_WORKSPACE/scripts/product_writer_guard.py" before \
             --registry "$SOURCE_WRITER_FENCE_REGISTRY" --project "CLASSMO" --actor legacy_source --role direct_worker \
             --base "$SOURCE_SHA" --phase before_merge
@@ -697,7 +697,7 @@ jobs:
         env:
           PRODUCT_TOKEN: ${{ secrets.OWNER_GITHUB_TOKEN }}
           RUNNER_READ_TOKEN: ${{ secrets.OWNER_GITHUB_TOKEN }}
-        run: |-
+        run: |
           python "$GITHUB_WORKSPACE/scripts/product_writer_guard.py" finish \
             --registry "$SOURCE_WRITER_FENCE_REGISTRY" --project "CLASSMO" --actor legacy_source --role direct_worker \
             --base "$SOURCE_SHA"

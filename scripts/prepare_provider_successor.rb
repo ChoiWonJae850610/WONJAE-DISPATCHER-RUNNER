@@ -125,7 +125,11 @@ end
 def api(path, method: "GET", fields: {})
   cmd = ["gh", "api", "-X", method, path, "-H", "Accept: application/vnd.github+json"]
   fields.each { |key, value| cmd += ["-f", "#{key}=#{value}"] }
-  fence_boundary("before") unless method == "GET"
+  unless method == "GET"
+    phase = path.include?("/contents/") ? "before_state" :
+      (path.include?("/git/refs") ? "before_push" : "before_pr")
+    fence_boundary("before", phase: phase)
+  end
   body = command(*cmd)
   result = body.empty? ? {} : JSON.parse(body)
   if method == "POST" && path.end_with?("/pulls")

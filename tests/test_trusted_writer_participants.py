@@ -278,3 +278,16 @@ def test_readonly_recovery_reconcile_is_not_a_branch_writer():
     assert '"--method", "POST"' not in source
     assert '.write_text(' not in source and '.write_bytes(' not in source
     assert '"--method", "PATCH"' not in source
+
+
+def test_precise_publication_phases_and_finalizer_do_not_create_new_grants():
+    root = "repos/fixture/one/"
+    for suffix, phase in [("contents/state.yaml", "before_state"),
+                          ("git/commits", "before_commit"),
+                          ("git/refs/heads/dev", "before_push"),
+                          ("pulls", "before_pr"), ("pulls/1/merge", "before_merge")]:
+        assert adapter.publication_phase(root + suffix) == phase
+    cli = (ROOT / "scripts/product_writer_guard.py").read_text()
+    assert 'require_session=args.action != "before"' in cli
+    workflow = (ROOT / ".github/workflows/reconciliation-finalizer-core.yml").read_text()
+    assert 'if [ "$ALREADY_MERGED" != "true" ]; then' in workflow

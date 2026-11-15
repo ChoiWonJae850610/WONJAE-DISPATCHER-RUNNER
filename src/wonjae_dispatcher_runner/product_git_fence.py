@@ -31,7 +31,7 @@ class MutationFence:
         self.initialized = False
         self.session_file = None
 
-    def _initialize(self):
+    def _initialize(self, *, require_session=False):
         if self.initialized:
             return
         config = registered_configuration(self.registry, self.project)
@@ -87,6 +87,8 @@ class MutationFence:
         self.session_file = parent / (
             f"product-fence-{own['run_id']}-{own['attempt']}-{self.project}-{self.actor}.json"
         )
+        if require_session and not self.session_file.is_file():
+            raise FenceError("EXACT_EXISTING_MUTATION_SESSION_REQUIRED")
         self.configuration = dict(config, product_gate="BRANCH_STATE_ONLY")
         if self.role == "direct_worker":
             import yaml
@@ -250,7 +252,7 @@ def guarded_api(method, endpoint, payload, callback):
         raise FenceError("WRITER_CONTEXT_NOT_BOUND")
     if method.upper() == "GET" or scope is None:
         return callback()
-    phase = "before_merge" if endpoint.endswith("/merge") else "before_pr"
+    phase = publication_phase(endpoint)
     result = scope.run(phase, callback)
     if isinstance(result, dict):
         if endpoint.endswith("/pulls") and "number" in result:
@@ -258,6 +260,18 @@ def guarded_api(method, endpoint, payload, callback):
         elif endpoint.endswith("/merge") and result.get("merged"):
             scope.observed_merge(int(endpoint.split("/")[-2]), result["sha"])
     return result
+
+
+def publication_phase(endpoint):
+    if endpoint.endswith("/merge"):
+        return "before_merge"
+    if "/git/refs" in endpoint:
+        return "before_push"
+    if endpoint.endswith("/git/commits"):
+        return "before_commit"
+    if "/contents/" in endpoint or endpoint.endswith(("/git/blobs", "/git/trees")):
+        return "before_state"
+    return "before_pr"
 
 
 def api_arguments(arguments, callback):
