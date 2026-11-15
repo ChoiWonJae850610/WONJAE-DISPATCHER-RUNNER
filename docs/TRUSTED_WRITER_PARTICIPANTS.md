@@ -60,7 +60,10 @@ canonical registration plus a matching protected configuration is mandatory.
 Registered policy with missing configuration refuses writes. Provider execution
 stays in its existing job/host with every original command; only its former last
 Git helper becomes a dependent Git-only job. Git-helper failure does not pretend
-to undo or re-run a successful Provider stage. Official product Windows CI and
+to undo or re-run a successful Provider stage. Its former continue-on-error
+boundary is retained at the Git-only job: a failed Git job/held grant remains
+visible without turning an already successful Provider action into a retry.
+This is not Git publication or Source completion PASS. Official product Windows CI and
 the Provider/EAS/OTA implementation are unchanged.
 
 ## Reviewed exclusions

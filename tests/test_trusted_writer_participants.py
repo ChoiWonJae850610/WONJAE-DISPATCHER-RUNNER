@@ -249,6 +249,7 @@ def test_provider_commands_and_host_are_unchanged_and_git_is_a_separate_job():
         "d4d485265aabac48a57b3bb83768f083e4f0d4542cbee152828dc3ae46e5f268")
     publisher = workflow["jobs"]["publish-next-state"]
     assert publisher["needs"] == "approve"
+    assert publisher["continue-on-error"] is True
     assert "SOURCE_WRITER_FENCE_CONFIG" in publisher["runs-on"]
     assert publisher["env"]["SOURCE_WRITER_FENCE_REGISTRY"].endswith("_fence_control/PROJECTS.yaml")
 

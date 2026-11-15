@@ -1817,6 +1817,9 @@ jobs:
   publish-next-state:
     needs: approve
     if: ${{ needs.approve.outputs.successor_eligible == 'true' }}
+    # Preserve the former Git helper's continue-on-error Provider boundary.
+    # A failed Git job retains its failure/held grant; it never re-runs Provider.
+    continue-on-error: true
     runs-on: ${{ vars.SOURCE_WRITER_FENCE_CONFIG != '' && fromJSON('["self-hosted","Linux","X64","direct-worker"]') || 'ubuntu-latest' }}
     timeout-minutes: 15
     env:
