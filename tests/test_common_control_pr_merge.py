@@ -180,7 +180,7 @@ def test_workflow_secret_boundary_and_runner_prewrite_checks():
     assert "workflow_dispatch:" in workflow
     assert "github.actor == github.repository_owner" in workflow
     assert "vars.COMMON_PR_MERGE_ACTIVATED == 'true'" in workflow
-    assert "runs-on: [self-hosted, Linux, X64, direct-worker]" in workflow
+    assert "runs-on: ubuntu-latest" in workflow
     assert "permissions:\n  contents: read" in workflow
     assert "pull_request_target" not in workflow
     assert "inputs.diff_digest" in workflow

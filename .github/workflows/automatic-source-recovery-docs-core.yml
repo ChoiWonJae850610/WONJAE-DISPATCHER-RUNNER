@@ -24,7 +24,7 @@ permissions:
 
 jobs:
   prepare:
-    runs-on: [self-hosted, Linux, X64, direct-worker]
+    runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
       - name: Checkout trusted main recovery code

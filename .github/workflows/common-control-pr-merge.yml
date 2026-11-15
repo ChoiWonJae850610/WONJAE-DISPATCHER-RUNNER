@@ -48,7 +48,7 @@ jobs:
     # Not activated by this source PR. Missing Owner-approved activation
     # variable, target and independently scoped credential fail closed.
     if: ${{ github.event_name == 'workflow_dispatch' && github.actor == github.repository_owner && vars.COMMON_PR_MERGE_ACTIVATED == 'true' }}
-    runs-on: [self-hosted, Linux, X64, direct-worker]
+    runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
       - name: Checkout trusted Runner default branch only

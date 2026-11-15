@@ -58,7 +58,7 @@ concurrency:
 jobs:
   attach:
     if: ${{ github.ref == 'refs/heads/main' && github.actor == github.repository_owner }}
-    runs-on: [self-hosted, Linux, X64, direct-worker]
+    runs-on: ubuntu-latest
     timeout-minutes: 35
     steps:
       - name: Checkout trusted exact Runner main
