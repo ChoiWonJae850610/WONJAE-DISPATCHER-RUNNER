@@ -156,7 +156,7 @@ def test_owner_workflows_are_project_scoped_and_non_deploying():
         assert f"secrets.{old}" not in caller
     assert "secrets: inherit" not in caller
     assert "group: direct-worker-" in core
-    assert "runs-on: [self-hosted, Linux, X64, direct-worker]" in core
+    assert "runs-on: ubuntu-latest" in core
     assert "github.ref == 'refs/heads/main'" in core
     assert "scripts/attach_recovery_docs.py" in core
     for forbidden in ("eas build", "eas update", "wrangler deploy",

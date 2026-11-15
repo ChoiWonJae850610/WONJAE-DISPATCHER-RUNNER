@@ -131,7 +131,7 @@ def test_recovery_reads_unformatted_logs_from_exact_github_job_api(monkeypatch):
     assert "run" not in args and "view" not in args
 
 
-@pytest.mark.parametrize("raw", ["", "x" * 2_000_001])
+@pytest.mark.parametrize("raw", ["", "x" * 2_000_001], ids=["empty", "over-limit"])
 def test_original_job_log_rejects_empty_or_unbounded_transport(
     monkeypatch, raw,
 ):
@@ -471,10 +471,9 @@ def test_recovery_workflow_is_not_a_new_source_or_merge_executor():
     top = yaml.safe_load((ROOT / ".github/workflows/automatic-source-recovery-docs.yml")
                          .read_text(encoding="utf-8"))
     trigger = top.get("on", top.get(True))
-    assert set(trigger) == {"workflow_run", "workflow_dispatch"}
+    assert set(trigger) == {"workflow_dispatch"}
     assert trigger["workflow_dispatch"]["inputs"]["failed_run_id"]["required"]
-    assert trigger["workflow_run"]["workflows"] == ["Direct Worker"]
-    assert trigger["workflow_run"]["types"] == ["completed"]
+    assert "workflow_run" not in str(top)
     assert top["permissions"] == {"contents": "read", "actions": "read"}
     assert set(top["jobs"]) == {"wafl", "classmo", "esc", "muvel"}
     for project in ("WAFL", "CLASSMO", "ESC", "MUVEL"):
@@ -483,8 +482,7 @@ def test_recovery_workflow_is_not_a_new_source_or_merge_executor():
         assert job["with"]["failed_run_id"] == "${{ inputs.failed_run_id || '' }}"
         assert "github.actor == github.repository_owner" in job["if"]
         assert "inputs.project == '" + project + "'" in job["if"]
-        assert "workflow_run.conclusion == 'failure'" in job["if"]
-        assert "workflow_run.event == 'workflow_dispatch'" in job["if"]
+        assert "github.event_name == 'workflow_dispatch'" in job["if"]
         assert job["secrets"]["product_write_token"] == "${{ secrets.OWNER_GITHUB_TOKEN }}"
         assert job["uses"] == "./.github/workflows/automatic-source-recovery-docs-core.yml"
     core = yaml.safe_load(
@@ -492,9 +490,7 @@ def test_recovery_workflow_is_not_a_new_source_or_merge_executor():
         .read_text(encoding="utf-8")
     )
     assert core["permissions"] == {"contents": "read", "actions": "read"}
-    assert core["jobs"]["prepare"]["runs-on"] == [
-        "self-hosted", "Linux", "X64", "direct-worker",
-    ]
+    assert core["jobs"]["prepare"]["runs-on"] == "ubuntu-latest"
     scripts = str(core)
     assert "prepare_failed_source_recovery.py" in scripts
     assert "--failed-run-id" in scripts
