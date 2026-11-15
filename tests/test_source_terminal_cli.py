@@ -19,6 +19,9 @@ SPEC.loader.exec_module(cli)
 def setup_environment(tmp_path, monkeypatch, github):
     work, event, output = (tmp_path / name for name in ("work.json", "event.json", "output"))
     work.write_text(json.dumps(github.record))
+    # Explicit unregistered canonical fixture; missing live registry must not bypass fencing.
+    registry = tmp_path / "PROJECTS.yaml"
+    registry.write_text('projects:\n  CLASSMO:\n    execution:\n      mode: direct_worker\n')
     for key, value in {
         "WORK_ORDER_FILE": str(work),
         "GITHUB_EVENT_PATH": str(event),
@@ -31,6 +34,7 @@ def setup_environment(tmp_path, monkeypatch, github):
         "PILOT_HEAD_SHA": HEAD,
         "CONTROL_SHA": CONTROL,
         "PRODUCT_GH_TOKEN": "synthetic-product-token",
+        "SOURCE_WRITER_FENCE_REGISTRY": str(registry),
     }.items():
         monkeypatch.setenv(key, value)
     monkeypatch.setattr(cli, "Client", lambda *args: github)

@@ -1808,10 +1808,75 @@ jobs:
             --adapter-blob "$PROVIDER_LIVE_ADAPTER_BLOB" \
             --evidence "$RUNNER_TEMP/wafl-g1-live-evidence.json" \
             --host-blob "$PROVIDER_LIVE_HOST_BLOB" --execute
-
-      - name: Prepare predeclared next-stage Owner document PR
+      - name: Record existing successor publication eligibility without Git mutation
+        id: successor_eligibility
         if: success() && env.PROVIDER_EXECUTOR != 'approval_only'
-        continue-on-error: true
+        run: echo "eligible=true" >> "$GITHUB_OUTPUT"
+    outputs:
+      successor_eligible: ${{ steps.successor_eligibility.outputs.eligible }}
+  publish-next-state:
+    needs: approve
+    if: ${{ needs.approve.outputs.successor_eligible == 'true' }}
+    # Preserve the former Git helper's continue-on-error Provider boundary.
+    # A failed Git job retains its failure/held grant; it never re-runs Provider.
+    continue-on-error: true
+    runs-on: ${{ vars.SOURCE_WRITER_FENCE_CONFIG != '' && fromJSON('["self-hosted","Linux","X64","direct-worker"]') || 'ubuntu-latest' }}
+    timeout-minutes: 15
+    env:
+      PROJECT: ${{ inputs.project }}
+      PRODUCT_REPOSITORY: ${{ inputs.product_repository }}
+      TARGET_BRANCH: ${{ inputs.target_branch }}
+      STATE_PATH: ${{ inputs.state_path }}
+      CONTROL_SHA: ${{ inputs.control_sha }}
+      SOURCE_SHA: ${{ inputs.source_sha }}
+      GATE: ${{ inputs.gate }}
+      SOURCE_WRITER_FENCE_CONFIG: ${{ vars.SOURCE_WRITER_FENCE_CONFIG }}
+      PYTHONPATH: ${{ github.workspace }}/src
+      RUNNER_READ_TOKEN: ${{ secrets.control_read_token }}
+      SOURCE_WRITER_FENCE_REGISTRY: ${{ github.workspace }}/_fence_control/PROJECTS.yaml
+    steps:
+      - name: Checkout exact trusted Git publisher
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Read current shared writer registration only
+        uses: actions/checkout@v6
+        with:
+          repository: ChoiWonJae850610/DEV-CONTROL
+          ref: main
+          path: _fence_control
+          token: ${{ secrets.control_read_token }}
+          persist-credentials: false
+      - name: Prepare existing YAML parser
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Install YAML parser only
+        run: python -m pip install "PyYAML>=6.0,<7"
+      - name: Prepare the existing Ruby metadata helper
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.3"
+      - name: Checkout exact DEV-CONTROL registration
+        uses: actions/checkout@v6
+        with:
+          repository: ChoiWonJae850610/DEV-CONTROL
+          ref: ${{ inputs.control_sha }}
+          path: .approval/control
+          token: ${{ secrets.control_read_token }}
+          persist-credentials: false
+      - name: Checkout exact product source
+        uses: actions/checkout@v6
+        with:
+          repository: ${{ inputs.product_repository }}
+          ref: ${{ inputs.source_sha }}
+          path: .approval/product
+          token: ${{ secrets.product_read_token }}
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Prepare predeclared next-stage Owner document PR
+        continue-on-error: false
         env:
           GH_TOKEN: ${{ secrets.product_read_token }}
         shell: bash

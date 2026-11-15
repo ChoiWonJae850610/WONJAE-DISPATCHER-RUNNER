@@ -34,7 +34,7 @@ concurrency:
 jobs:
   integrate:
     if: ${{ github.event_name == 'workflow_dispatch' && github.actor == github.repository_owner }}
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.SOURCE_WRITER_FENCE_CONFIG != '' && fromJSON('["self-hosted","Linux","X64","direct-worker"]') || 'ubuntu-latest' }}
     timeout-minutes: 30
     steps:
       - name: Checkout trusted Runner main
@@ -64,6 +64,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.control_read_token }}
           EXPECTED_CONTROL_SHA: ${{ inputs.control_sha }}
+          RUNNER_READ_TOKEN: ${{ secrets.control_read_token }}
         run: |
           set -euo pipefail
           test "$(git -C _control rev-parse HEAD)" = "$EXPECTED_CONTROL_SHA"
@@ -81,6 +82,7 @@ jobs:
           PR_HEAD: ${{ inputs.head_sha }}
           BASE_SHA: ${{ inputs.base_sha }}
           CONTROL_SHA: ${{ inputs.control_sha }}
+          RUNNER_READ_TOKEN: ${{ secrets.control_read_token }}
         run: |
           set -euo pipefail
           python scripts/document_pr_merge.py \
@@ -90,3 +92,7 @@ jobs:
             --head "$PR_HEAD" \
             --base "$BASE_SHA" \
             --control-sha "$CONTROL_SHA"
+    env:
+      SOURCE_WRITER_FENCE_CONFIG: ${{ vars.SOURCE_WRITER_FENCE_CONFIG }}
+      PYTHONPATH: ${{ github.workspace }}/src
+      RUNNER_READ_TOKEN: ${{ secrets.control_read_token }}

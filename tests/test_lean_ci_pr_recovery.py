@@ -67,7 +67,7 @@ def _checkout(root, files, remote):
     for path, data in files.items():
         file = root / path
         file.parent.mkdir(parents=True, exist_ok=True)
-        file.write_text(data, encoding="utf-8")
+        file.write_text(data, encoding="utf-8", newline="\n")
     _git(root, "add", ".")
     _git(root, "commit", "-qm", "fixture")
     _git(root, "remote", "add", "origin", remote)

@@ -107,7 +107,7 @@ jobs:
         if: ${{ inputs.mode == 'attach' }}
         env:
           GH_TOKEN: ${{ secrets.product_write_token }}
-          RUNNER_READ_TOKEN: ${{ github.token }}
+          RUNNER_READ_TOKEN: ${{ secrets.control_read_token }}
           PROJECT: ${{ inputs.project }}
           SOURCE_PR: ${{ inputs.source_pr }}
           SOURCE_HEAD: ${{ inputs.source_head }}
@@ -138,7 +138,7 @@ jobs:
         if: ${{ inputs.mode == 'reconcile' }}
         env:
           GH_TOKEN: ${{ secrets.product_write_token }}
-          RUNNER_READ_TOKEN: ${{ github.token }}
+          RUNNER_READ_TOKEN: ${{ secrets.control_read_token }}
           PROJECT: ${{ inputs.project }}
           SOURCE_PR: ${{ inputs.source_pr }}
           SOURCE_HEAD: ${{ inputs.source_head }}
@@ -161,3 +161,5 @@ jobs:
             --failed-run-id "$FAILED_RUN_ID" \
             --failed-attach-run-id "$FAILED_ATTACH_RUN_ID" \
             --base "$BASE_SHA" --control-sha "$CONTROL_SHA"
+    env:
+      SOURCE_WRITER_FENCE_CONFIG: ${{ vars.SOURCE_WRITER_FENCE_CONFIG }}

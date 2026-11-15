@@ -101,6 +101,12 @@ class Client(GhClient):
         queue.close_issue(self.runner_repository, number)
 
 
+from wonjae_dispatcher_runner.product_git_fence import (  # noqa: E402
+    bind_writer,
+    writer_entry,
+)
+
+
 def positive(value: str) -> int:
     if not re.fullmatch(r"[1-9][0-9]*", value):
         raise SourceTerminalError("identity number must be a positive integer")
@@ -267,6 +273,7 @@ def checkpoint(prepare: bool = False) -> int:
     return 0
 
 
+@writer_entry
 def finalize(args: argparse.Namespace) -> int:
     repository, owner = os.environ["GITHUB_REPOSITORY"], os.environ["GITHUB_REPOSITORY_OWNER"]
     client = Client(repository, os.environ["PRODUCT_GH_TOKEN"])
@@ -300,6 +307,9 @@ def finalize(args: argparse.Namespace) -> int:
             )
         )
         record = json.loads(resolved.read_text())
+    bind_writer(os.environ["SOURCE_WRITER_FENCE_REGISTRY"], project,
+                "terminal_finalization", "source_recovery", record["source_base_sha"],
+                [(args.product_pr, args.last_head)] if args.product_pr and args.last_head else [])
     notifications = None
     if (
         os.environ.get("GMAIL_ENABLED") == "true"

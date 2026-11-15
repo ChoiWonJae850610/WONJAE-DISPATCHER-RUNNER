@@ -9,6 +9,10 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
+from wonjae_dispatcher_runner.product_git_fence import (  # noqa: E402
+    bind_writer,
+    writer_entry,
+)
 from wonjae_dispatcher_runner.source_pr_lifecycle import (  # noqa: E402
     GhClient,
     SourceIdentity,
@@ -39,8 +43,11 @@ def _write_env(path: str, values: dict[str, object]) -> None:
             handle.write(f"{key}={safe}\n")
 
 
+@writer_entry
 def terminalize(args: argparse.Namespace) -> int:
     client = GhClient(os.environ.get("PRODUCT_GH_TOKEN", ""))
+    bind_writer(os.environ["SOURCE_WRITER_FENCE_REGISTRY"], args.project,
+                "legacy_source", "direct_worker", args.source_sha, persist=True)
     evidence = Path(args.evidence_file).read_text(encoding="utf-8")
     result = terminalize_exact_pr(
         client,

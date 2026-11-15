@@ -62,7 +62,7 @@ jobs:
       - name: Prepare exact failed-source recovery docs PR
         shell: bash
         env:
-          RUNNER_READ_TOKEN: ${{ github.token }}
+          RUNNER_READ_TOKEN: ${{ secrets.control_read_token }}
           PRODUCT_WRITE_TOKEN: ${{ secrets.product_write_token }}
           CONTROL_READ_TOKEN: ${{ secrets.control_read_token }}
         run: |
@@ -86,3 +86,5 @@ jobs:
           test ! -L "$RECOVERY_ROOT"
           test "$(realpath -m "$RECOVERY_ROOT")" = "$expected"
           rm -rf --one-file-system -- "$RECOVERY_ROOT"
+    env:
+      SOURCE_WRITER_FENCE_CONFIG: ${{ vars.SOURCE_WRITER_FENCE_CONFIG }}

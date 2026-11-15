@@ -75,6 +75,15 @@ class Client:
 
 def python(args):
     name = Path(args[0]).name
+    if name == "product_writer_guard.py":
+        # Execute the real default-off guard against the explicit local registry.
+        # No fabricated fence PASS and no network or enrolled backend.
+        spec = importlib.util.spec_from_file_location("synthetic_fence_cli", args[0])
+        cli = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(cli)
+        sys.argv = args
+        cli.main()
+        return
     if name == "actions_progress.py":
         return
     if name == "run_product_repair.py":

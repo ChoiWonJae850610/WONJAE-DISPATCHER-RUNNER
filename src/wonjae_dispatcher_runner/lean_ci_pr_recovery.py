@@ -11,6 +11,7 @@ import base64
 import binascii
 import hashlib
 import hmac
+import os
 import re
 import time
 from dataclasses import dataclass
@@ -32,6 +33,7 @@ from .lean_ci_pr_publisher import (
     _remote_head,
     verify_publish_claim,
 )
+from .product_git_fence import FencedApi, bind_writer, current_scope, writer_entry
 
 _SHA = re.compile(r"[0-9a-f]{40}\Z")
 _DIGEST = re.compile(r"[0-9a-f]{64}\Z")
@@ -193,6 +195,7 @@ def _verified_existing(
     return branch
 
 
+@writer_entry
 def recover_one_registered_ci_pr(
     *,
     control_checkout: Path,
@@ -208,6 +211,12 @@ def recover_one_registered_ci_pr(
 ) -> LeanCiPublishReceipt:
     """Fast-forward the exact known CI-only PR after independent evidence."""
     verify_publish_claim(selection, publish_mac, approval_secret, now_ms=now_ms)
+
+    bind_writer(control_checkout / "PROJECTS.yaml", selection.project, "lean_ci_publish",
+                "document_merge", selection.product_sha,
+                [(recovery.pr_number, recovery.pr_head_sha)],
+                persist=os.environ.get("PRODUCT_FENCE_KEEP_OPEN") == "1")
+    api = FencedApi(api)
     verify_recovery_claim(
         selection, recovery, recovery_mac, approval_secret, now_ms=now_ms,
     )
@@ -275,6 +284,7 @@ def recover_one_registered_ci_pr(
             and _obj(observed.get("base"), "PR base readback").get("sha")
             == selection.product_sha
         ):
+            current_scope().observed_pr(recovery.pr_number, commit)
             return LeanCiPublishReceipt(
                 project=selection.project, repository=selection.repository,
                 branch=branch, source_sha=selection.product_sha,

@@ -24,6 +24,7 @@ from .lean_ci_maintenance import (
     registered_ci,
     review_candidate,
 )
+from .product_git_fence import bind_writer, guard_point, writer_entry
 
 _HEX40 = re.compile(r"[0-9a-f]{40}\Z")
 _HEX64 = re.compile(r"[0-9a-f]{64}\Z")
@@ -151,6 +152,7 @@ def _changed(repo: Path) -> tuple[str, ...]:
     return tuple(changed)
 
 
+@writer_entry
 def stage_workflow(
     *,
     control_checkout: Path,
@@ -163,6 +165,9 @@ def stage_workflow(
 ) -> StagingReceipt:
     """Locally stage only the registry-owned validation YAML, never publish it."""
     verify_workflow_selection(selection, approval_mac, approval_secret, now_ms=now_ms)
+
+    bind_writer(control_checkout / "PROJECTS.yaml", selection.project, "lean_ci_stage",
+                "document_merge", selection.product_sha)
     _require_clean(control_checkout)
     routes = registered_ci(control_checkout / "PROJECTS.yaml")
     route = routes.get(selection.project)
@@ -190,7 +195,8 @@ def stage_workflow(
     # Preserve the exact reviewed old digest against an ordinary write race.
     if hashlib.sha256(path.read_bytes()).hexdigest() != selection.previous_sha256:
         raise LeanCiOwnerStageError("workflow content changed after review")
-    path.write_text(candidate, encoding="utf-8")
+    guard_point("before_state")
+    path.write_bytes(candidate.encode("utf-8"))
     changed = _changed(product_checkout)
     if changed != (reviewed.workflow_path,):
         raise LeanCiOwnerStageError("staging modified unexpected product paths")

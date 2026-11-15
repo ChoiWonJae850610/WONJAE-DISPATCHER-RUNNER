@@ -141,6 +141,11 @@ def run_lifecycle(tmp_path, workflow, conclusions, gate=""):
     )
     work = tmp_path / "work.json"
     work.write_text(json.dumps(github.record))
+    registry = tmp_path / "PROJECTS.yaml"
+    registry.write_text("projects:\n" + "".join(
+        f"  {name}:\n    execution:\n      mode: direct_worker\n"
+        for name in ("WAFL", "ESC", "CLASSMO", "MUVEL")
+    ))
     stub = (ROOT / "tests/source_recovery_stub.py").read_text()
     for name in ("gh", "python"):
         path = binary / name
@@ -157,6 +162,8 @@ def run_lifecycle(tmp_path, workflow, conclusions, gate=""):
         "SYNTHETIC_STATE": str(state),
         "PRODUCT_CHECKOUT": str(product),
         "WORK_ORDER_FILE": str(work),
+        "SOURCE_WRITER_FENCE_REGISTRY": str(registry),
+        "SOURCE_SHA": source,
         "GITHUB_WORKSPACE": str(ROOT),
         "GITHUB_ENV": str(env_file),
         "RUNNER_TEMP": str(tmp_path),

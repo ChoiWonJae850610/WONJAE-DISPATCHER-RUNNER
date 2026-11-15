@@ -259,7 +259,12 @@ def terminalize_exact_pr(
         )
 
     try:
-        client.close_pr(identity.repository, pr_number)
+        from .product_git_fence import current_scope, guarded_api
+        scope = current_scope()
+        if scope and not scope.initialized:
+            scope.approved.append((pr_number, pr["headRefOid"]))
+        guarded_api("PATCH", f"repos/{identity.repository}/pulls/{pr_number}",
+                    {"state": "closed"}, lambda: client.close_pr(identity.repository, pr_number))
         readback = client.get_pr(identity.repository, pr_number)
     except Exception as exc:  # noqa: BLE001 - cleanup residue must not change terminal result
         return CleanupResult(

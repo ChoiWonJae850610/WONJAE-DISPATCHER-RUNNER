@@ -23,6 +23,7 @@ from wonjae_dispatcher_runner.direct_worker import (
 from wonjae_dispatcher_runner.execution_state import load_product_execution_state
 from wonjae_dispatcher_runner.initial_turn_recovery import run_initial_turns
 from wonjae_dispatcher_runner.npm_preparation import prepare_npm
+from wonjae_dispatcher_runner.registered_source_fence import job_adapter
 
 
 def main() -> int:
@@ -126,10 +127,16 @@ def main() -> int:
         if source_pass:
             # Evidence only, never authority or a new product execution trigger.
             child_env["CLASSMO_TRUSTED_SOURCE_RUNTIME_HEAD"] = original_sha
-        return subprocess.run(
-            [sys.executable, str(Path(__file__).with_name("run_direct_worker.py")),
-             *sys.argv[1:]], env=child_env, check=False,
-        ).returncode
+        def execute_source():
+            return subprocess.run(
+                [sys.executable, str(Path(__file__).with_name("run_direct_worker.py")),
+                 *sys.argv[1:]], env=child_env, check=False,
+            ).returncode
+
+        fence = job_adapter(registry, args.project, repo)
+        # The actual child remains inside the shared transaction for its entire
+        # bounded source turn. A killed parent leaves an unreclaimed transaction.
+        return fence.run_source(execute_source) if fence else execute_source()
 
     def record(attempt: int, outcome: str):
         print(f"INITIAL_TURN attempt={attempt} outcome={outcome} source={original_sha}",

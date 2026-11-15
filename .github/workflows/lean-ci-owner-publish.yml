@@ -42,7 +42,7 @@ concurrency:
 jobs:
   publish-one-registered-workflow:
     if: ${{ github.ref == 'refs/heads/main' && github.actor == github.repository_owner }}
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.SOURCE_WRITER_FENCE_CONFIG != '' && fromJSON('["self-hosted","Linux","X64","direct-worker"]') || 'ubuntu-latest' }}
     timeout-minutes: 50
     env:
       LEAN_SELECTION_JSON: ${{ inputs.selection_json }}
@@ -57,7 +57,11 @@ jobs:
       LEAN_CI_APPROVAL_SECRET: ${{ secrets.OWNER_GITHUB_TOKEN }}
       OWNER_GITHUB_TOKEN: ${{ secrets.OWNER_GITHUB_TOKEN }}
       GH_TOKEN: ${{ secrets.OWNER_GITHUB_TOKEN }}
-      PYTHONPATH: src
+      PYTHONPATH: ${{ github.workspace }}/src
+      SOURCE_WRITER_FENCE_CONFIG: ${{ vars.SOURCE_WRITER_FENCE_CONFIG }}
+      PRODUCT_FENCE_KEEP_OPEN: "1"
+      RUNNER_READ_TOKEN: ${{ secrets.OWNER_GITHUB_TOKEN }}
+      SOURCE_WRITER_FENCE_REGISTRY: ${{ github.workspace }}/_ci/control/PROJECTS.yaml
 
     steps:
       - name: Checkout only trusted Runner main
@@ -147,6 +151,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          python "$GITHUB_WORKSPACE/scripts/product_writer_guard.py" before \
+            --registry "_ci/control/PROJECTS.yaml" --project "$LEAN_PROJECT" --actor lean_ci_publish --role document_merge \
+            --base "$LEAN_PRODUCT_SHA" --phase before_merge --pr "$LEAN_PR_NUMBER" --head "$LEAN_PR_HEAD"
           live_base="$(gh api "repos/$LEAN_REPOSITORY/branches/$LEAN_BRANCH" --jq '.commit.sha')"
           test "$live_base" = "$LEAN_PRODUCT_SHA"
           gh api "repos/$LEAN_REPOSITORY/pulls/$LEAN_PR_NUMBER" | jq -e \
@@ -169,6 +176,10 @@ jobs:
             --arg sha "$integrated" '.state == "closed" and .merged == true and .merge_commit_sha == $sha' >/dev/null
           echo "LEAN_INTEGRATED_SHA=$integrated" >> "$GITHUB_ENV"
           echo "EXACT_CI_PR_MERGED: $LEAN_REPOSITORY #$LEAN_PR_NUMBER integrated $integrated"
+
+          python "$GITHUB_WORKSPACE/scripts/product_writer_guard.py" merge \
+            --registry "_ci/control/PROJECTS.yaml" --project "$LEAN_PROJECT" --actor lean_ci_publish --role document_merge \
+            --base "$LEAN_PRODUCT_SHA" --pr "$LEAN_PR_NUMBER" --integrated "$integrated"
 
       - name: Wait for exact integrated-SHA canonical CI
         shell: bash
@@ -195,6 +206,10 @@ jobs:
             echo "- Integrated SHA: $LEAN_INTEGRATED_SHA / CI run $run_id SUCCESS"
             echo "- App runtime, Provider, DB, Production, devices: NOT_RUN"
           } >> "$GITHUB_STEP_SUMMARY"
+
+          python "$GITHUB_WORKSPACE/scripts/product_writer_guard.py" finish \
+            --registry "_ci/control/PROJECTS.yaml" --project "$LEAN_PROJECT" --actor lean_ci_publish --role document_merge \
+            --base "$LEAN_PRODUCT_SHA"
 
       - name: Record any incomplete or failed CI rollout without false PASS
         if: always()

@@ -28,6 +28,13 @@ from wonjae_dispatcher_runner.failure_recovery_document import (
     recovery_paths,
     render_recovery,
 )
+from wonjae_dispatcher_runner.product_git_fence import (
+    bind_writer,
+    guard_point,
+    guarded_api,
+    guarded_command,
+    writer_entry,
+)
 
 RUNNER = "ChoiWonJae850610/WONJAE-DISPATCHER-RUNNER"
 CONTROL = "ChoiWonJae850610/DEV-CONTROL"
@@ -35,7 +42,7 @@ SHA = re.compile(r"^[0-9a-f]{40}$")
 PROJECT = re.compile(r"^[A-Z][A-Z0-9-]{1,30}$")
 
 
-def github_api(endpoint: str, token: str, *, method: str = "GET",
+def _plain_github_api(endpoint: str, token: str, *, method: str = "GET",
                fields: dict[str, str] | None = None) -> object:
     if not token or len(endpoint) > 550 or not endpoint.startswith("repos/"):
         raise RecoveryPreparationError("invalid credential or GitHub endpoint")
@@ -290,17 +297,28 @@ def checked_recovery_write_paths(
             raise RecoveryPreparationError("recovery documentation path already exists")
 
 
-def run_command(args: list[str], *, cwd: Path, token: str) -> str:
+def _plain_run_command(args: list[str], *, cwd: Path, token: str) -> str:
     env = dict(os.environ, GH_TOKEN=token)
     result = subprocess.run(args, cwd=cwd, check=True, capture_output=True,
                             text=True, env=env, timeout=75)
     return result.stdout.rstrip("\n")
 
 
+def github_api(endpoint, token, *, method="GET", fields=None):
+    return guarded_api(method, endpoint, fields, lambda: _plain_github_api(
+        endpoint, token, method=method, fields=fields,
+    ))
+
+
+def run_command(args, *, cwd, token):
+    return guarded_command(args, lambda: _plain_run_command(args, cwd=cwd, token=token))
+
+
 def timestamp(value: str) -> float:
     return datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp()
 
 
+@writer_entry
 def plan(event: dict, project: str, runner_token: str, product_token: str,
          control_token: str, workdir: Path, registry_path: Path,
          selected_failed_run_id: int | None = None) -> None:
@@ -355,6 +373,7 @@ def plan(event: dict, project: str, runner_token: str, product_token: str,
         raise RecoveryPreparationError("control registry changed since checkout")
     repo = route["repository"]
     branch = route["branch"]
+    bind_writer(registry_path, project, "recovery_prepare", "source_recovery", original_sha)
     remote = github_api(f"repos/{repo}/branches/{branch}", product_token)
     source_date = remote["commit"]["commit"]["committer"]["date"]
     if (remote["commit"]["sha"] != original_sha
@@ -402,6 +421,7 @@ def plan(event: dict, project: str, runner_token: str, product_token: str,
     checked_recovery_write_paths(product_checkout, state_path, target)
     target.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     checked_recovery_write_paths(product_checkout, state_path, target)
+    guard_point("before_state")
     target.write_text(doc, encoding="utf-8")
     state_path.write_text(state_text, encoding="utf-8")
     tracked = run_command(
