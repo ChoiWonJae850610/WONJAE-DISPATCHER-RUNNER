@@ -25,6 +25,7 @@ PARTICIPANTS = (
 )
 ACTIVE = {"queued", "in_progress", "waiting", "requested", "pending"}
 SOURCE_PHASES = {"before_source", "before_commit", "before_push", "before_pr", "before_merge"}
+BRANCH_ROUTES = {"document_merge", "reconciliation", "source_recovery", "provider_state_update"}
 
 
 class FenceError(RuntimeError):
@@ -160,7 +161,7 @@ def inspect_registered_backend(root: Path, marker: dict) -> dict:
     return info
 
 
-def validate_evidence(binding: dict, facts: dict, now: float, *, owned_pr=None,
+def validate_evidence(binding: dict, facts: dict, now: float, *, owned_pr=None, approved_prs=(),
                       source_required=True) -> None:
     for key in ("project", "repository", "branch", "common_policy_sha", "product_policy_sha"):
         if facts.get(key) != binding.get(key):
@@ -207,7 +208,7 @@ def validate_evidence(binding: dict, facts: dict, now: float, *, owned_pr=None,
     for pr in facts["open_prs"]:
         if pr.get("base") != binding["branch"]:
             continue
-        if owned_pr and pr == owned_pr:
+        if (owned_pr and pr == owned_pr) or pr in approved_prs:
             continue
         raise FenceError("CONFLICTING_PR")
 
@@ -291,7 +292,8 @@ class SharedFence:
             task = request.get("task_id", "")
             if not re.fullmatch(re.escape(self.binding["project"]) + r"-[A-Za-z0-9_-]{1,80}", task):
                 raise FenceError("TASK_PROJECT_INVALID")
-            if request.get("route") not in {"watch", "direct_worker", "direct_local"}:
+            routes = {"watch", "direct_worker", "direct_local"} | BRANCH_ROUTES
+            if request.get("route") not in routes:
                 raise FenceError("SOURCE_ROUTE_INVALID")
             request_id = request.get("request_id", "")
             if not re.fullmatch(r"[a-f0-9]{32}", request_id):
@@ -304,7 +306,17 @@ class SharedFence:
             if not isinstance(ttl, int) or not 1 <= ttl <= 4500:
                 raise FenceError("LEASE_DEADLINE_INVALID")
             facts = self.reader()
-            validate_evidence(self.binding, facts, self.clock())
+            branch_only = request["route"] in BRANCH_ROUTES
+            approved = self.binding.get("approved_prs", []) if branch_only else []
+            if not isinstance(approved, list) or any(
+                set(p) != {"number", "base", "head", "task_id"}
+                or type(p["number"]) is not int or p["number"] < 1
+                or p["base"] != self.binding["branch"] or not sha40(p["head"])
+                or p["task_id"] != task for p in approved
+            ):
+                raise FenceError("EXACT_APPROVED_PR_TASK_BINDING_REQUIRED")
+            validate_evidence(self.binding, facts, self.clock(), approved_prs=approved,
+                              source_required=not branch_only)
             state["epoch"] += 1
             holder = {**self.binding, "contract": CONTRACT, "task_id": task,
                       "route": request["route"], "request_id": request_id,
@@ -313,6 +325,8 @@ class SharedFence:
                       "issued_at": self.clock(), "expires_at": self.clock() + ttl,
                       "owner": native_identity(request.get("supervisor_pid")),
                       "owned_pr": None, "operation": None,
+                      "operation_class": "branch_state_only" if branch_only else "source_write",
+                      "approved_prs": approved,
                       "evidence_scope": self.scope}
             state["holder"] = holder
             state["consumed"].update({task: holder["epoch"], request_id: holder["epoch"]})
@@ -336,10 +350,12 @@ class SharedFence:
 
     @contextlib.contextmanager
     def guarded(self, ticket: dict, phase: str):
-        if phase not in SOURCE_PHASES | {"local_record", "release"}:
+        if phase not in SOURCE_PHASES | {"before_state", "local_record", "release"}:
             raise FenceError("SOURCE_ONLY_PHASE_REQUIRED")
         with self.transaction() as state:
             holder = self._same(state, ticket)
+            if holder.get("operation_class") == "branch_state_only" and phase == "before_source":
+                raise FenceError("BRANCH_GRANT_IS_NOT_SOURCE_AUTHORITY")
             if holder["operation"] is not None:
                 raise FenceError("PRIOR_OPERATION_UNRECONCILED")
             try:
@@ -350,7 +366,10 @@ class SharedFence:
                     expected["remote_sha"] = holder["integrated_sha"]
                 validate_evidence(expected, self.reader(), self.clock(),
                                   owned_pr=holder["owned_pr"],
-                                  source_required=not holder.get("integrated_sha"))
+                                  approved_prs=holder.get("approved_prs", []),
+                                  source_required=(
+                                      holder.get("operation_class") != "branch_state_only"
+                                      and not holder.get("integrated_sha")))
             except FenceError as exc:
                 state["quarantine"] = str(exc)
                 raise
@@ -454,6 +473,26 @@ class SharedFence:
             holder["integrated_sha"] = receipt["integrated_sha"]
             state["history"].append({"event": "OWN_INTEGRATION_ACK", "epoch": holder["epoch"]})
 
+    def approve_observed_pr(self, ticket: dict, pr: dict) -> None:
+        """Trusted caller's exact post-publication receipt, never an Issue waiver."""
+        with self.transaction() as state:
+            holder = self._same(state, ticket)
+            if set(pr) != {"number", "base", "head", "task_id"} or (
+                pr["base"] != holder["branch"] or not sha40(pr["head"])
+                or pr["task_id"] != holder["task_id"] or type(pr["number"]) is not int
+            ):
+                raise FenceError("PR_RECEIPT_INVALID")
+            holder["approved_prs"] = [p for p in holder.get("approved_prs", [])
+                                       if p["number"] != pr["number"]] + [dict(pr)]
+            holder["owned_pr"] = dict(pr)
+
+    def uncertain(self, ticket: dict) -> None:
+        with self.transaction() as state:
+            holder = state["holder"]
+            if not holder or holder["lease_id"] != ticket["lease_id"]:
+                raise FenceError("STALE_OR_FOREIGN_OWNER")
+            state["quarantine"] = "CHILD_OR_PUBLICATION_UNCERTAIN"
+
     def recover(self, ticket: dict, receipt: dict, probe: Callable) -> None:
         # Explicit trusted exact-run reconciliation only. Never called by acquire.
         with self.transaction() as state:
@@ -478,7 +517,14 @@ class SharedFence:
                 None, self.binding["project"],
             } for item in [*facts.get("runs", []), *facts.get("jobs", [])]):
                 raise FenceError("RECOVERY_HAS_ACTIVE_OR_UNKNOWN_JOB")
-            validate_evidence(self.binding, facts, self.clock())
+            expected = dict(self.binding)
+            if holder.get("integrated_sha"):
+                expected["remote_sha"] = holder["integrated_sha"]
+            validate_evidence(expected, facts, self.clock(),
+                              owned_pr=holder.get("owned_pr"),
+                              approved_prs=holder.get("approved_prs", []),
+                              source_required=(holder.get("operation_class") != "branch_state_only"
+                                               and not holder.get("integrated_sha")))
             state["epoch"] += 1
             state["holder"] = None
             state["quarantine"] = None

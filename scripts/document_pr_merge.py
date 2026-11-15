@@ -18,6 +18,12 @@ from pathlib import Path
 
 import yaml
 
+from wonjae_dispatcher_runner.product_git_fence import (
+    api_arguments,
+    bind_writer,
+    writer_entry,
+)
+
 SHA = re.compile(r"^[0-9a-f]{40}$")
 PROJECT = re.compile(r"^[A-Z][A-Z0-9_-]*$")
 REPO = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
@@ -231,7 +237,7 @@ def check_integrated_commit(payload: object, base: str, head: str, integrated: s
         raise DocumentMergeError("integrated merge ancestry differs from validated head/base")
 
 
-def request_json(arguments: list[str]) -> object:
+def _plain_request_json(arguments: list[str]) -> object:
     result = subprocess.run(
         ["gh", "api", *arguments],
         capture_output=True, text=True, check=False, timeout=30,
@@ -243,6 +249,10 @@ def request_json(arguments: list[str]) -> object:
         return json.loads(result.stdout)
     except json.JSONDecodeError as exc:
         raise DocumentMergeError("GitHub returned malformed JSON") from exc
+
+
+def request_json(arguments):
+    return api_arguments(arguments, lambda: _plain_request_json(arguments))
 
 
 def branch_sha(repo: str, branch: str) -> str:
@@ -258,6 +268,7 @@ def canonical_runs(repo: str, workflow: str, sha: str, event: str) -> object:
     ])
 
 
+@writer_entry
 def integrate(args: argparse.Namespace) -> int:
     for label in ("head", "base", "control_sha"):
         check_sha(getattr(args, label), label)
@@ -269,6 +280,8 @@ def integrate(args: argparse.Namespace) -> int:
     registry = yaml.safe_load(Path(args.registry).read_text(encoding="utf-8"))
     route = route_from_registry(registry, args.project)
     repo = route["repo"]
+    bind_writer(args.registry, args.project, "document_merge", "document_merge",
+                args.base, [(args.pr_number, args.head)])
     if branch_sha(repo, route["branch"]) != args.base:
         raise DocumentMergeError("product active branch moved after Owner review")
     pr = request_json([f"repos/{repo}/pulls/{args.pr_number}"])

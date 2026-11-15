@@ -26,6 +26,14 @@ from document_pr_merge import (
     route_from_registry,
 )
 
+from wonjae_dispatcher_runner.product_git_fence import (
+    bind_writer,
+    current_scope,
+    guard_point,
+    guarded_command,
+    writer_entry,
+)
+
 
 def checked_source_pr(pr: object, route: dict, number: int, sha: str,
                       base: str, failed_run_id: int) -> str:
@@ -189,7 +197,7 @@ def check_prior_attachment_commits(workspace: Path, base: str, source: str,
             raise DocumentMergeError("prior protected files lack trusted attachment provenance")
 
 
-def git(root: Path, *args: str) -> str:
+def _plain_git(root: Path, *args: str) -> str:
     result = subprocess.run(
         ["git", "-C", str(root), *args], capture_output=True, text=True,
         timeout=50, check=False,
@@ -197,6 +205,10 @@ def git(root: Path, *args: str) -> str:
     if result.returncode:
         raise DocumentMergeError("trusted Git checkout, scope or push operation failed")
     return result.stdout.strip()
+
+
+def git(root, *args):
+    return guarded_command(args, lambda: _plain_git(root, *args))
 
 
 def regular_tree_file(root: Path, sha: str, path: str) -> None:
@@ -244,6 +256,7 @@ def attached_failed_source_ci_requires_owner_resume(run: object) -> bool:
     )
 
 
+@writer_entry
 def attach(args: argparse.Namespace) -> None:
     for name in ("source_head", "docs_head", "base", "control_sha"):
         check_sha(getattr(args, name), name)
@@ -255,6 +268,8 @@ def attach(args: argparse.Namespace) -> None:
     registry = yaml.safe_load(Path(args.registry).read_text(encoding="utf-8"))
     route = route_from_registry(registry, args.project)
     repo = route["repo"]
+    bind_writer(args.registry, args.project, "recovery_attach", "source_recovery", args.base,
+                [(args.source_pr, args.source_head), (args.docs_pr, args.docs_head)])
     if branch_sha(repo, route["branch"]) != args.base:
         raise DocumentMergeError("product active branch moved")
     source = request_json([f"repos/{repo}/pulls/{args.source_pr}"])
@@ -341,6 +356,7 @@ def attach(args: argparse.Namespace) -> None:
         )
         if value.returncode or len(value.stdout) > 400_000:
             raise DocumentMergeError("document blob unavailable or unbounded")
+        guard_point("before_state")
         target.write_bytes(value.stdout)
     if set(git(workspace, "diff", "--name-only").splitlines()) != set(paths):
         raise DocumentMergeError("only the two approved document paths may change")
@@ -368,6 +384,7 @@ def attach(args: argparse.Namespace) -> None:
     )
     git(workspace, "push", "origin", f"HEAD:refs/heads/{source_branch}")
     wait_attached_pr_head(repo, route, args, attached, source_branch)
+    current_scope().observed_pr(args.source_pr, attached)
     # This is validation of a documentation-only PR-head amendment, not a new
     # Direct Worker source test, product integration, or backend deployment.
     for _ in range(72):

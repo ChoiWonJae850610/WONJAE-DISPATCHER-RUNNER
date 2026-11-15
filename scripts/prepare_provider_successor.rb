@@ -110,11 +110,28 @@ def command(*parts)
   stdout.strip
 end
 
+def fence_boundary(action, phase: "before_pr", pr: nil, head: nil)
+  args = $provider_fence_args
+  demand(args.is_a?(Hash), "FENCE_SCOPE_MISSING")
+  cmd = ["python", File.join(__dir__, "product_writer_guard.py"), action,
+         "--registry", ENV.fetch("SOURCE_WRITER_FENCE_REGISTRY"),
+         "--project", args.fetch(:project), "--actor", "provider_successor",
+         "--role", "provider_state_update", "--base", args.fetch(:source_sha),
+         "--phase", phase]
+  cmd += ["--pr", pr.to_s, "--head", head] if pr && head
+  command(*cmd)
+end
+
 def api(path, method: "GET", fields: {})
   cmd = ["gh", "api", "-X", method, path, "-H", "Accept: application/vnd.github+json"]
   fields.each { |key, value| cmd += ["-f", "#{key}=#{value}"] }
+  fence_boundary("before") unless method == "GET"
   body = command(*cmd)
-  body.empty? ? {} : JSON.parse(body)
+  result = body.empty? ? {} : JSON.parse(body)
+  if method == "POST" && path.end_with?("/pulls")
+    fence_boundary("pr", pr: result.fetch("number"), head: result.fetch("head").fetch("sha"))
+  end
+  result
 end
 
 def prepare_pr(args, transformed)
@@ -151,6 +168,7 @@ def prepare_pr(args, transformed)
               "document-merge click and exact PR-head/integrated CI required. " \
               "No product source, provider re-run, Production or next-stage execution."
   })
+  fence_boundary("finish")
   puts "PROVIDER_SUCCESSOR_PR=#{pr.fetch('html_url')}"
   if ENV["GITHUB_STEP_SUMMARY"]
     File.open(ENV["GITHUB_STEP_SUMMARY"], "a") do |f|
@@ -195,6 +213,7 @@ begin
   elsif args[:dry_run]
     puts result
   else
+    $provider_fence_args = args
     prepare_pr(args, result)
   end
 rescue HandoffError => error

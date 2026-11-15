@@ -12,6 +12,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import os
 import re
 import time
 from dataclasses import dataclass
@@ -29,6 +30,7 @@ from .lean_ci_owner_stage import (
     sign_workflow_selection,
     stage_workflow,
 )
+from .product_git_fence import FencedApi, bind_writer, writer_entry
 
 _PREFIX = b"registered-lean-ci-one-click-integrate-v1\n"
 _SHA = re.compile(r"[0-9a-f]{40}\Z")
@@ -174,6 +176,7 @@ def _open_prs(api: GithubApi, repository: str, branch: str) -> list:
     return value
 
 
+@writer_entry
 def publish_lean_ci_pr(
     *,
     control_checkout: Path,
@@ -187,6 +190,11 @@ def publish_lean_ci_pr(
 ) -> LeanCiPublishReceipt:
     """Publish one registered CI-only PR; never merge or claim CI result here."""
     verify_publish_claim(selection, publish_mac, approval_secret, now_ms=now_ms)
+
+    bind_writer(control_checkout / "PROJECTS.yaml", selection.project, "lean_ci_publish",
+                "document_merge", selection.product_sha,
+                persist=os.environ.get("PRODUCT_FENCE_KEEP_OPEN") == "1")
+    api = FencedApi(api)
     repository = selection.repository
     root = "repos/" + repository + "/"
 

@@ -28,7 +28,7 @@ concurrency:
 jobs:
   owner-review-only:
     if: ${{ github.ref == 'refs/heads/main' && vars.LEAN_CI_OWNER_STAGE_ENABLED == 'true' }}
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.SOURCE_WRITER_FENCE_CONFIG != '' && fromJSON('["self-hosted","Linux","X64","direct-worker"]') || 'ubuntu-latest' }}
     timeout-minutes: 10
     env:
       LEAN_SELECTION_JSON: ${{ inputs.selection_json }}
@@ -36,7 +36,9 @@ jobs:
       LEAN_CI_APPROVAL_SECRET: ${{ secrets.LEAN_CI_APPROVAL_SECRET }}
       LEAN_CI_CANDIDATE_BASE64: ${{ inputs.candidate_base64 }}
       GH_TOKEN: ${{ secrets.OWNER_GITHUB_TOKEN }}
-      PYTHONPATH: src
+      PYTHONPATH: ${{ github.workspace }}/src
+      SOURCE_WRITER_FENCE_CONFIG: ${{ vars.SOURCE_WRITER_FENCE_CONFIG }}
+      RUNNER_READ_TOKEN: ${{ secrets.OWNER_GITHUB_TOKEN }}
     steps:
       - name: Checkout trusted Runner main
         uses: actions/checkout@v6

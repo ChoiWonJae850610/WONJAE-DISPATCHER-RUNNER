@@ -2,7 +2,7 @@
 
 This Draft adds an opt-in bridge between a trusted Linux Direct Worker parent and
 an existing Windows Watch. It does not register an execution route, create a
-service/queue/server, change a provider/CI workflow, retire a runner, enroll a
+service/queue/server, execute a provider/CI workflow, retire a runner, enroll a
 credential, or enable a project. Existing Direct Worker behavior is retained
 when the canonical registry has no `execution.source_writer_fence` registration.
 An environment variable or prepared local profile alone cannot enable it.
@@ -59,8 +59,10 @@ persisted grant and reconciliation; it cannot invent a fresh task to avoid it.
 
 Every source/branch mutator must actually participate: Direct Worker, Watch,
 document merge, reconciliation, source recovery and provider-state publication.
-This Draft implements the Direct Worker/Watch bridge only. The other entrypoints
-are intentionally unchanged. Therefore current live cross-route exclusion is
+This Draft also connects the trusted branch/state entrypoints listed in
+[the reviewed participant inventory](TRUSTED_WRITER_PARTICIPANTS.md). Provider
+commands/host and product official CI remain unchanged; only post-success Git
+publication is isolated as a dependent job. Current live cross-route exclusion is
 **NOT_INSTALLED / BLOCKED**, even after offline checks pass. Do not assert that
 all participants are installed, merge the Draft or register it as live merely
 because this document exists.
@@ -99,8 +101,8 @@ backend, actual fixture Git HEAD changes, child crash and native identity.
 Neither synthetic GitHub metadata nor a passing Python interface is operational
 mutual-exclusion acceptance.
 
-Before installation: review exact shared/product policy; prove every remaining
-mutating entrypoint; reconcile pre-existing product PRs without replay; preserve
+Before installation: review exact shared/product policy; deploy and prove every
+reviewed mutating entrypoint; reconcile pre-existing product PRs without replay; preserve
 Source/Provider/Manual-QA gates; validate existing protected runtime access and
 the exact backend; then apply only through a separately scoped existing-Watch
 normal drain/restart and one-project real Watch/direct-input acceptance. Keep

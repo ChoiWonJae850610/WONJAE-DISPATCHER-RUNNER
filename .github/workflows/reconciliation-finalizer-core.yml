@@ -28,7 +28,7 @@ concurrency:
 
 jobs:
   finalize:
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.SOURCE_WRITER_FENCE_CONFIG != '' && fromJSON('["self-hosted","Linux","X64","direct-worker"]') || 'ubuntu-latest' }}
     timeout-minutes: 45
     steps:
       - name: Checkout trusted runner
@@ -71,6 +71,7 @@ jobs:
           PROJECT: ${{ inputs.project }}
           PR_NUMBER: ${{ steps.claim.outputs.product_pr }}
           EXPECTED_HEAD: ${{ steps.claim.outputs.expected_head }}
+          RUNNER_READ_TOKEN: ${{ secrets.control_read_token }}
         run: |
           set -euo pipefail
           gh issue comment "${{ inputs.issue_number }}" --repo "$GITHUB_REPOSITORY" --body             "STARTED: reconciliation finalizer run `$GITHUB_RUN_ID` is processing $PROJECT PR #$PR_NUMBER at exact head `$EXPECTED_HEAD`. GitHub validation wait is not an Owner action."
@@ -82,6 +83,7 @@ jobs:
           TARGET_BRANCH: ${{ steps.claim.outputs.branch }}
           PR_NUMBER: ${{ steps.claim.outputs.product_pr }}
           EXPECTED_HEAD: ${{ steps.claim.outputs.expected_head }}
+          RUNNER_READ_TOKEN: ${{ secrets.control_read_token }}
         run: |
           set -euo pipefail
           pr="$(gh api "repos/$PRODUCT_REPOSITORY/pulls/$PR_NUMBER")"
@@ -104,12 +106,15 @@ jobs:
               python -c 'import os, sys; from wonjae_dispatcher_runner.reconciliation import path_allowed; path=sys.argv[1]; raise SystemExit(0 if path_allowed(os.environ["PROJECT"], path) else f"reconciliation path is not allowed: {path}")' "$path"
           done <<< "$files"
 
+          echo "RECON_BASE_SHA=$(printf '%s' "$pr" | jq -r .base.sha)" >> "$GITHUB_ENV"
+
       - name: Wait for exact PR-head validation
         env:
           GH_TOKEN: ${{ secrets.product_write_token }}
           PRODUCT_REPOSITORY: ${{ steps.claim.outputs.repository }}
           VALIDATION_WORKFLOW_FILE: ${{ steps.claim.outputs.validation_workflow_file }}
           EXPECTED_HEAD: ${{ steps.claim.outputs.expected_head }}
+          RUNNER_READ_TOKEN: ${{ secrets.control_read_token }}
         run: |
           set -euo pipefail
           run_id=""
@@ -133,19 +138,29 @@ jobs:
           PRODUCT_REPOSITORY: ${{ steps.claim.outputs.repository }}
           PR_NUMBER: ${{ steps.claim.outputs.product_pr }}
           EXPECTED_HEAD: ${{ steps.claim.outputs.expected_head }}
+          RUNNER_READ_TOKEN: ${{ secrets.control_read_token }}
+          PROJECT: ${{ inputs.project }}
         run: |
           set -euo pipefail
+          python "$GITHUB_WORKSPACE/scripts/product_writer_guard.py" before \
+            --registry "$GITHUB_WORKSPACE/_control/PROJECTS.yaml" --project "$PROJECT" --actor reconciliation --role reconciliation \
+            --base "$RECON_BASE_SHA" --phase before_merge --pr "$PR_NUMBER" --head "$EXPECTED_HEAD"
           merge_json="$(gh api --method PUT "repos/$PRODUCT_REPOSITORY/pulls/$PR_NUMBER/merge"             -f merge_method=merge -f sha="$EXPECTED_HEAD")"
           echo "$merge_json" | jq -e '.merged == true' >/dev/null
           integrated="$(echo "$merge_json" | jq -r '.sha')"
           test -n "$integrated" && test "$integrated" != "null"
           echo "INTEGRATED_SHA=$integrated" >> "$GITHUB_ENV"
 
+          python "$GITHUB_WORKSPACE/scripts/product_writer_guard.py" merge \
+            --registry "$GITHUB_WORKSPACE/_control/PROJECTS.yaml" --project "$PROJECT" --actor reconciliation --role reconciliation \
+            --base "$RECON_BASE_SHA" --pr "$PR_NUMBER" --integrated "$integrated"
+
       - name: Wait for exact integrated-SHA validation
         env:
           GH_TOKEN: ${{ secrets.product_write_token }}
           PRODUCT_REPOSITORY: ${{ steps.claim.outputs.repository }}
           VALIDATION_WORKFLOW_FILE: ${{ steps.claim.outputs.validation_workflow_file }}
+          RUNNER_READ_TOKEN: ${{ secrets.control_read_token }}
         run: |
           set -euo pipefail
           run_id=""
@@ -167,7 +182,12 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           PROJECT: ${{ inputs.project }}
           PR_NUMBER: ${{ steps.claim.outputs.product_pr }}
+          RUNNER_READ_TOKEN: ${{ secrets.control_read_token }}
+          PRODUCT_TOKEN: ${{ secrets.product_write_token }}
         run: |
+          python "$GITHUB_WORKSPACE/scripts/product_writer_guard.py" finish \
+            --registry "$GITHUB_WORKSPACE/_control/PROJECTS.yaml" --project "$PROJECT" --actor reconciliation --role reconciliation \
+            --base "$RECON_BASE_SHA"
           set -euo pipefail
           marker="PASS: $PROJECT reconciliation PR #$PR_NUMBER merged at `$INTEGRATED_SHA`; exact PR-head validation `$PR_HEAD_RUN_ID` and integrated validation `$INTEGRATED_RUN_ID` passed."
           if ! gh api "repos/$GITHUB_REPOSITORY/issues/${{ inputs.issue_number }}/comments?per_page=100"             --jq '.[].body' | grep -Fx -- "$marker" >/dev/null; then
@@ -180,5 +200,10 @@ jobs:
         continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
+          RUNNER_READ_TOKEN: ${{ secrets.control_read_token }}
         run: |
           gh issue comment "${{ inputs.issue_number }}" --repo "$GITHUB_REPOSITORY" --body             "FAILED: reconciliation finalizer run `$GITHUB_RUN_ID` did not reach exact validated integration. Inspect this Actions run. No broader source/provider/device authority was granted."
+    env:
+      SOURCE_WRITER_FENCE_CONFIG: ${{ vars.SOURCE_WRITER_FENCE_CONFIG }}
+      PYTHONPATH: ${{ github.workspace }}/src
+      RUNNER_READ_TOKEN: ${{ secrets.control_read_token }}

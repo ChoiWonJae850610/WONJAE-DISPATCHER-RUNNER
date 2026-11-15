@@ -50,6 +50,9 @@ class GitHubEvidenceReader:
         ).get("commit", {}).get("sha")
         if deployed_runner != b["participant_revisions"]["direct_worker"]:
             raise FenceError("TRUSTED_RUNNER_REVISION_NOT_DEPLOYED")
+        if any(revision != deployed_runner for role, revision in
+               b["participant_revisions"].items() if role != "watch"):
+            raise FenceError("TRUSTED_BRANCH_WRITER_REVISION_NOT_DEPLOYED")
         prs = self.collection(f"repos/{b['repository']}/pulls?state=open&base={b['branch']}")
         runs, jobs = [], []
         for repository in (b["repository"], c["runner_repository"]):
@@ -72,7 +75,8 @@ class GitHubEvidenceReader:
                     identity = {"repository": repository, "run_id": run["id"],
                                 "attempt": run.get("run_attempt")}
                     own = b.get("run")
-                    is_own = bool(own and all(identity[k] == own.get(k) for k in identity)
+                    is_own = bool(own and len(active_jobs) == 1
+                                  and all(identity[k] == own.get(k) for k in identity)
                                   and any(j["id"] == own.get("job_id") for j in active_jobs))
                     item = {"status": run["status"], "project": scope,
                             "scope_attested": bool(rule and scope and active_jobs),
@@ -82,14 +86,17 @@ class GitHubEvidenceReader:
                             "workflow_blob": rule.get("blob") if rule else None}
                     runs.append(item)
                     for job in active_jobs:
-                        jobs.append({**item, "status": job["status"]})
-        own_pr = c.get("owned_pr")
+                        jobs.append({**item, "status": job["status"],
+                                     "fenced_entry": bool(item["fenced_entry"]
+                                                           and job["id"] == own["job_id"])})
+        approved = c.get("approved_prs", []) + ([c["owned_pr"]] if c.get("owned_pr") else [])
         normalized = []
         for pr in prs:
             item = {"number": pr["number"], "base": pr["base"]["ref"],
                     "head": pr["head"]["sha"], "task_id": None}
-            if own_pr and all(item[k] == own_pr.get(k) for k in ("number", "base", "head")):
-                item["task_id"] = own_pr["task_id"]
+            for own_pr in approved:
+                if all(item[k] == own_pr.get(k) for k in ("number", "base", "head")):
+                    item["task_id"] = own_pr["task_id"]
             normalized.append(item)
         return {**b, "observed_at": observed, "remote_sha": remote_sha,
                 "common_policy_sha": policy_sha,
@@ -104,7 +111,7 @@ def registered_configuration(registry: Path, project: str, environment=None):
     import yaml
     environment = os.environ if environment is None else environment
     product = yaml.safe_load(registry.read_text())["projects"][project]
-    execution = product["execution"]
+    execution = product.get("execution", {})
     registration = execution.get("source_writer_fence")
     if registration is None:
         return None
@@ -121,13 +128,19 @@ def registered_configuration(registry: Path, project: str, environment=None):
     if hashlib.sha256(data).hexdigest() != registration.get("configuration_sha256"):
         raise FenceError("PRIVATE_CONFIGURATION_HASH_CHANGED")
     config = json.loads(data)
+    if isinstance(config.get("projects"), dict):
+        config = {**config, **config["projects"].get(project, {})}
     if config.get("contract") != CONTRACT or config.get("all_participants_installed") is not True:
         raise FenceError("ALL_MUTATING_PARTICIPANTS_NOT_INSTALLED")
     if config.get("evidence_scope") != "registered":
         raise FenceError("FIXTURE_CONFIGURATION_CANNOT_ENABLE_ROUTE")
+    from .writer_participation import validate_installed_code
+    validate_installed_code(config)
     if (config.get("repository") != product["repository"]
             or config.get("branch") != product["branch"]):
         raise FenceError("REGISTERED_PRODUCT_BINDING_CHANGED")
+    if "roots" in config:
+        config["root"] = config["roots"]["windows" if os.name == "nt" else "linux"]
     return config
 
 
